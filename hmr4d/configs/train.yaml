@@ -23,7 +23,7 @@ defaults:
   - refiner: null
 
   # global-override
-  - exp: ??? # set "data, model and callbacks" in yaml
+  - exp: mixed # set "data, model and callbacks" in yaml
   - global/task: null # dump/test
   - global/hsearch: null # hyper-param search
   - global/debug: null # debug mode

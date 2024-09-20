@@ -31,6 +31,8 @@ def get_callbacks(cfg: DictConfig) -> list:
 def train(cfg: DictConfig) -> None:
     """Train/Test"""
     Log.info(f"[Exp Name]: {cfg.exp_name}")
+    # use total batch size
+    cfg.data.loader_opts.train.batch_size = cfg.data.loader_opts.train.batch_size // cfg.pl_trainer.devices
     if cfg.task == "fit":
         Log.info(f"[GPU x Batch] = {cfg.pl_trainer.devices} x {cfg.data.loader_opts.train.batch_size}")
     pl.seed_everything(cfg.seed)
@@ -63,6 +65,7 @@ def train(cfg: DictConfig) -> None:
     if cfg.task == "fit":
         resume_path = None
         if cfg.resume_mode is not None:
+            print(cfg.callbacks.model_checkpoint.dirpath)
             resume_path = get_resume_ckpt_path(cfg.resume_mode, ckpt_dir=cfg.callbacks.model_checkpoint.dirpath)
             Log.info(f"Resume training from {resume_path}")
         Log.info("Start Fitiing...")

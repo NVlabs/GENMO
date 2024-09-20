@@ -26,7 +26,7 @@ defaults:
           - metric_3dpw
     - override /network: gvhmr/relative_transformer
 
-exp_name_base: mixed
+exp_name_base: mixed_noimg
 exp_name_var: ""
 exp_name: ${exp_name_base}${exp_name_var}
 data_name: mocap_mixed_v1
@@ -53,16 +53,16 @@ pipeline:
 data:
     loader_opts:
         train:
-            batch_size: 128
+            batch_size: 256
             num_workers: 12
 
 pl_trainer:
     precision: 16-mixed
-    log_every_n_steps: 50
+    log_every_n_steps: 10
     gradient_clip_val: 0.5
     max_epochs: 500
     check_val_every_n_epoch: 10
-    devices: 2
+    devices: 1
 
 logger:
     _target_: pytorch_lightning.loggers.TensorBoardLogger

@@ -100,13 +100,13 @@ class NetworkEncoderRoPE(nn.Module):
                 nn.Dropout(dropout),
                 zero_module(nn.Linear(latent_dim, latent_dim)),
             )
-        if self.imgseq_dim > 0:
+        if self.imgseq_dim > 0 and False:
             self.imgseq_embedder = nn.Sequential(
                 nn.LayerNorm(self.imgseq_dim),
                 zero_module(nn.Linear(self.imgseq_dim, latent_dim)),
             )
 
-    def forward(self, length, obs=None, f_cliffcam=None, f_cam_angvel=None, f_imgseq=None):
+    def forward(self, length, obs=None, f_cliffcam=None, f_cam_angvel=None, f_imgseq=None, **kwargs):
         """
         Args:
             x: None we do not use it
