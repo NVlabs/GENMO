@@ -21,7 +21,7 @@ class SimpleCkptSaver(Checkpoint):
         save_top_k=1,
         every_n_epochs=1,
         save_last=None,
-        save_weights_only=True,
+        save_weights_only=False,
     ):
         super().__init__()
         self.output_dir = Path(output_dir)
@@ -51,6 +51,7 @@ class SimpleCkptSaver(Checkpoint):
 
             # Save cureent checkpoint
             filepath = self.output_dir / self.filename.format(epoch=trainer.current_epoch, step=trainer.global_step)
+            lastpath = self.output_dir / 'last.ckpt'
             checkpoint = {
                 "epoch": trainer.current_epoch,
                 "global_step": trainer.global_step,
@@ -76,6 +77,7 @@ class SimpleCkptSaver(Checkpoint):
 
             # trainer.strategy.checkpoint_io.save_checkpoint(checkpoint, filepath)
             torch.save(checkpoint, filepath)
+            torch.save(checkpoint, lastpath)
 
             # Remove the earliest checkpoint
             if model_to_remove:

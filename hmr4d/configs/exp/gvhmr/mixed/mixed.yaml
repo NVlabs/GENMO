@@ -26,9 +26,9 @@ defaults:
           - metric_3dpw
     - override /network: gvhmr/relative_transformer
 
-exp_name_base: mixed_noimg
+exp_name_base: mixed
 exp_name_var: ""
-exp_name: ${exp_name_base}${exp_name_var}
+exp_name: ${exp_name_base}_${exp_name_var}
 data_name: mocap_mixed_v1
 
 pipeline:

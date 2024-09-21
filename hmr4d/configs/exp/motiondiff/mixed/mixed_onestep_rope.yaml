@@ -25,7 +25,7 @@ defaults:
           - metric_rich
           - metric_3dpw
 
-exp_name_base: mixed
+exp_name_base: mixed_onestep_rope
 exp_name_var: ""
 exp_name: ${exp_name_base}_${exp_name_var}
 data_name: mocap_mixed_v1
@@ -33,7 +33,7 @@ data_name: mocap_mixed_v1
 pipeline:
     _target_: hmr4d.model.gvhmr.pipeline.mfm_pipeline.Pipeline
     args_denoiser3d:
-        _target_: hmr4d.network.mdm.mdm.MDM
+        _target_: hmr4d.network.mdm.mdm_onestep.MDMOnestep
         model_cfg:
             pretrained_checkpoint:
                 path:  /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jiefengl/jiefengl/mdm_egosmpl_v12_contact_b64_gpu8_node1/version_3/checkpoints/model-step=0100000.ckpt
@@ -49,10 +49,11 @@ pipeline:
                 guidance_param: 2.5
                 ddim_eta: 0.0
             denoiser:
-                type: motiondiff.models.mdm_v3.mdm_denoiser_t5.MDMDenoiser
+                type: hmr4d.network.mdm.mdm_denoiser_rope.MDMDenoiserROPE
                 modeltype: ''
                 nfeats: 1
                 num_actions: 1
+                num_frames: 120
                 translation: true
                 pose_rep: rot6d
                 # hint_rep: kpt2d_cam_vel

@@ -11,7 +11,6 @@ from motiondiff.utils.torch_utils import move_module_dict_to_device
 from motiondiff.utils.tools import are_arrays_equal
 
 
-
 class MDMDenoiser(nn.Module):
     def __init__(self, pl_module, modeltype, njoints, nfeats, num_actions, translation, pose_rep, glob, glob_rot,
                  latent_dim=256, ff_size=1024, num_layers=8, num_heads=4, dropout=0.1,
@@ -200,6 +199,9 @@ class MDMDenoiser(nn.Module):
 
         self.output_process = OutputProcess(self.data_rep, self.input_feats, self.latent_dim, self.njoints,
                                             self.nfeats)
+
+        self.register_buffer("pred_cam_mean", torch.tensor([1.0606, -0.0027, 0.2702]), False)
+        self.register_buffer("pred_cam_std", torch.tensor([0.1784, 0.0956, 0.0764]), False)
 
         if pretrained_checkpoint is not None:
             state_dict = torch.load(pretrained_checkpoint, map_location='cpu')
@@ -575,6 +577,15 @@ class MDMDenoiser(nn.Module):
             out_aux["cond_mask_2d"] = cond_mask_2d
 
         output = self.output_process(output)  # [bs, njoints, nfeats, nframes]
+        # predict camera
+        pred_cam = output[:, 17 * 2 + 3 + 6 : 17 * 2 + 3 + 6 + 3, :, :]     # [bs, 3, nfeats, nframes]
+        pred_cam = pred_cam * self.pred_cam_std.reshape(1, 3, 1, 1) + self.pred_cam_mean.reshape(1, 3, 1, 1)
+        torch.clamp_min_(pred_cam[..., 0], 0.25)  # min_clamp s to 0.25 (prevent negative prediction)
+        output[:, 17 * 2 + 3 + 6 : 17 * 2 + 3 + 6 + 3, :, :] = pred_cam
+
+        # # predict static
+        # pred_static = output[:, 17 * 2 + 3 + 6 + 3 : 17 * 2 + 3 + 6 + 3 + 6, :, :]  # [bs, 6, nfeats, nframes]
+
         if self.use_motion_mask and motion_mask is not None:
             if self.obs_motion_constraints == 'hard':
                 output = output * (1 - motion_mask) + observed_motion * motion_mask

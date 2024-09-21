@@ -117,12 +117,15 @@ class Pipeline(nn.Module):
         mask = inputs["mask"]["valid"]  # (B, L)
 
         # 1. Simple loss: MSE
-        pred_x = model_output["pred_x"]  # (B, L, C)
-        target_x = self.endecoder.encode(inputs)  # (B, L, C)
-        simple_loss = F.mse_loss(pred_x, target_x, reduction="none")
-        mask_simple = mask[:, :, None].expand(-1, -1, pred_x.size(2)).clone()  # (B, L, C)
+        # pred_x = model_output["pred_x"]  # (B, L, C)
+        # target_x = self.endecoder.encode(inputs)  # (B, L, C)
+        pred_x_start = model_output["pred_x_start"]
+        target_x_start = model_output["target_x_start"]
+        t_weights = model_output["t_weights"]   # (B)
+        simple_loss = F.mse_loss(pred_x_start, target_x_start, reduction="none")
+        mask_simple = mask[:, :, None].expand(-1, -1, pred_x_start.size(2)).clone()  # (B, L, C)
         mask_simple[inputs["mask"]["spv_incam_only"], :, 142:] = False  # 3dpw training
-        simple_loss = (simple_loss * mask_simple).mean()
+        simple_loss = (simple_loss * mask_simple * t_weights[:, None, None]).mean()
         total_loss += simple_loss
         outputs["simple_loss"] = simple_loss
 
@@ -154,6 +157,8 @@ def randomly_set_null_condition(f_condition, uncond_prob=0.1):
 
 def compute_extra_incam_loss(inputs, outputs, ppl):
     model_output = outputs["model_output"]
+    t_weights = model_output["t_weights"]   # (B)
+
     decode_dict = outputs["decode_dict"]
     endecoder = ppl.endecoder
     weights = ppl.weights
@@ -176,7 +181,7 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
     # Root aligned C-MPJPE Loss
     if weights.cr_j3d > 0.0:
         cr_j3d_loss = F.mse_loss(pred_cr_j3d, gt_cr_j3d, reduction="none")
-        cr_j3d_loss = (cr_j3d_loss * mask[..., None, None]).mean()
+        cr_j3d_loss = (cr_j3d_loss * mask[..., None, None] * t_weights[..., None, None, None]).mean()
         extra_loss += cr_j3d_loss * weights.cr_j3d
         extra_loss_dict["cr_j3d_loss"] = cr_j3d_loss
 
@@ -207,7 +212,7 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
             * (inputs["bbx_xys"][..., 2] > 0)
         )[..., None]
         transl_c_loss = F.mse_loss(pred_cam, gt_pred_cam, reduction="none")
-        transl_c_loss = (transl_c_loss * mask[..., None] * valid_mask).mean()
+        transl_c_loss = (transl_c_loss * mask[..., None] * valid_mask * t_weights[:, None, None]).mean()
 
         extra_loss_dict["transl_c_loss"] = transl_c_loss
         extra_loss += transl_c_loss * weights.transl_c
@@ -233,7 +238,7 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
         )[..., None]
         valid_mask[~mask_reproj] = False  # Do not supervise on 3dpw
         j2d_loss = F.mse_loss(pred_j2d_01, gt_j2d_01, reduction="none")
-        j2d_loss = (j2d_loss * mask[..., None, None] * valid_mask).mean()
+        j2d_loss = (j2d_loss * mask[..., None, None] * valid_mask * t_weights[..., None, None, None]).mean()
 
         extra_loss += j2d_loss * weights.j2d
         extra_loss_dict["j2d_loss"] = j2d_loss
@@ -246,7 +251,7 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
 
         gt_cr_verts437 = inputs["gt_cr_verts437"]  # (B, L, 437, 3)
         cr_vert_loss = F.mse_loss(pred_cr_verts437, gt_cr_verts437, reduction="none")
-        cr_vert_loss = (cr_vert_loss * mask[:, :, None, None]).mean()
+        cr_vert_loss = (cr_vert_loss * mask[:, :, None, None] * t_weights[:, None, None, None]).mean()
         extra_loss += cr_vert_loss * weights.cr_verts
         extra_loss_dict["cr_vert_loss"] = cr_vert_loss
 
@@ -273,7 +278,7 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
         )[..., None]
         valid_mask[~mask_reproj] = False  # Do not supervise on 3dpw
         verts2d_loss = F.mse_loss(pred_verts2d_01, gt_verts2d_01, reduction="none")
-        verts2d_loss = (verts2d_loss * mask[..., None, None] * valid_mask).mean()
+        verts2d_loss = (verts2d_loss * mask[..., None, None] * valid_mask * t_weights[..., None, None, None]).mean()
 
         extra_loss += verts2d_loss * weights.verts2d
         extra_loss_dict["verts2d_loss"] = verts2d_loss
@@ -283,6 +288,8 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
 
 def compute_extra_global_loss(inputs, outputs, ppl):
     decode_dict = outputs["decode_dict"]
+    model_output = outputs["model_output"]
+    t_weights = model_output["t_weights"]  # (B)
     endecoder = ppl.endecoder
     weights = ppl.weights
     args = ppl.args
@@ -300,7 +307,7 @@ def compute_extra_global_loss(inputs, outputs, ppl):
         pred_transl_w = rollout_local_transl_vel(local_transl_vel, gt_global_orient_w, gt_transl_w[:, [0]])
 
         trans_w_loss = F.l1_loss(pred_transl_w, gt_transl_w, reduction="none")
-        trans_w_loss = (trans_w_loss * mask[..., None]).mean()
+        trans_w_loss = (trans_w_loss * mask[..., None] * t_weights[..., None, None]).mean()
         extra_loss += trans_w_loss * weights.transl_w
         extra_loss_dict["transl_w_loss"] = trans_w_loss
 
@@ -316,7 +323,7 @@ def compute_extra_global_loss(inputs, outputs, ppl):
         pred_static_conf_logits = outputs["model_output"]["static_conf_logits"]
 
         static_conf_loss = F.binary_cross_entropy_with_logits(pred_static_conf_logits, static_gt, reduction="none")
-        static_conf_loss = (static_conf_loss * mask[..., None]).mean()
+        static_conf_loss = (static_conf_loss * mask[..., None] * t_weights[..., None, None]).mean()
         extra_loss += static_conf_loss * weights.static_conf_bce
         extra_loss_dict["static_conf_loss"] = static_conf_loss
 

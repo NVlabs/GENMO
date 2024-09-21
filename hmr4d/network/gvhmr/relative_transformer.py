@@ -100,7 +100,7 @@ class NetworkEncoderRoPE(nn.Module):
                 nn.Dropout(dropout),
                 zero_module(nn.Linear(latent_dim, latent_dim)),
             )
-        if self.imgseq_dim > 0 and False:
+        if self.imgseq_dim > 0:
             self.imgseq_embedder = nn.Sequential(
                 nn.LayerNorm(self.imgseq_dim),
                 zero_module(nn.Linear(self.imgseq_dim, latent_dim)),
@@ -133,7 +133,7 @@ class NetworkEncoderRoPE(nn.Module):
         f_to_add.append(self.cliffcam_embedder(f_cliffcam))
         if hasattr(self, "cam_angvel_embedder"):
             f_to_add.append(self.cam_angvel_embedder(f_cam_angvel))
-        if f_imgseq is not None and hasattr(self, "imgseq_embedder"):
+        if f_imgseq is not None and hasattr(self, "imgseq_embedder") and False:
             f_to_add.append(self.imgseq_embedder(f_imgseq))
 
         for f_delta in f_to_add:

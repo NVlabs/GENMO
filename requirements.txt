@@ -44,3 +44,9 @@ wis3d
 ultralytics==8.2.42  # YOLO
 cython_bbox
 lapx
+
+# motiondiff
+lmdb==1.4.1
+transformers==4.30.2
+wandb==0.17.0
+sentencepiece==0.2.0

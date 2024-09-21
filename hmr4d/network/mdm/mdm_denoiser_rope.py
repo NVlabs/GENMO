@@ -9,11 +9,11 @@ from motiondiff.models.mdm.modules import *
 from motiondiff.models.common.transformer import generate_ar_mask
 from motiondiff.utils.torch_utils import move_module_dict_to_device
 from motiondiff.utils.tools import are_arrays_equal
+from hmr4d.network.base_arch.transformer.encoder_rope_s import EncoderRoPEBlock
 
 
-
-class MDMDenoiser(nn.Module):
-    def __init__(self, pl_module, modeltype, njoints, nfeats, num_actions, translation, pose_rep, glob, glob_rot,
+class MDMDenoiserROPE(nn.Module):
+    def __init__(self, pl_module, modeltype, njoints, nfeats, num_frames, num_actions, translation, pose_rep, glob, glob_rot,
                  latent_dim=256, ff_size=1024, num_layers=8, num_heads=4, dropout=0.1,
                  ablation=None, activation="gelu", padding_mask=False, legacy=False, data_rep='rot', dataset='amass', llm_dim=512, max_text_len=20,
                  arch='trans_enc', emb_trans_dec=False, add_x_to_memory=False, autoregressive=False, llm_type="t5", llm_version="t5-small", text_enc_mode='mean', pretrained_checkpoint=None, 
@@ -31,6 +31,7 @@ class MDMDenoiser(nn.Module):
         self.num_actions = num_actions
         self.data_rep = data_rep
         self.dataset = dataset
+        self.num_frames = num_frames
 
         self.pose_rep = pose_rep
         self.glob = glob
@@ -75,6 +76,7 @@ class MDMDenoiser(nn.Module):
         self.input_process = InputProcess(self.data_rep, input_dim, self.latent_dim)
 
         self.sequence_pos_encoder = PositionalEncoding(self.latent_dim, self.dropout)
+        self.sequence_time_encoder = PositionalEncoding(self.latent_dim, self.dropout)
         self.emb_trans_dec = emb_trans_dec
         self.add_x_to_memory = add_x_to_memory
         self.autoregressive = autoregressive
@@ -91,32 +93,23 @@ class MDMDenoiser(nn.Module):
         
 
         if self.arch == 'trans_enc':
-            print("TRANS_ENC init")
-            seqTransEncoderLayer = nn.TransformerEncoderLayer(d_model=self.latent_dim,
-                                                              nhead=self.num_heads,
-                                                              dim_feedforward=self.ff_size,
-                                                              dropout=self.dropout,
-                                                              activation=self.activation)
+            print("TRANS_ROPE init")
+            mlp_ratio=4.0
 
-            self.seqTransEncoder = nn.TransformerEncoder(seqTransEncoderLayer,
-                                                         num_layers=self.num_layers)
-        elif self.arch == 'trans_dec':
-            print("TRANS_DEC init")
-            seqTransDecoderLayer = nn.TransformerDecoderLayer(d_model=self.latent_dim,
-                                                              nhead=self.num_heads,
-                                                              dim_feedforward=self.ff_size,
-                                                              dropout=self.dropout,
-                                                              activation=activation)
-            self.seqTransDecoder = nn.TransformerDecoder(seqTransDecoderLayer,
-                                                         num_layers=self.num_layers)
-        elif self.arch == 'gru':
-            print("GRU init")
-            self.gru = nn.GRU(self.latent_dim, self.latent_dim, num_layers=self.num_layers, batch_first=True)
-        else:
-            raise ValueError('Please choose correct architecture [trans_enc, trans_dec, gru]')
+            self.seqTransEncoder = nn.ModuleList(
+                [
+                    EncoderRoPEBlock(
+                        self.latent_dim,
+                        self.num_heads,
+                        mlp_ratio=mlp_ratio,
+                        dropout=self.dropout,
+                    )
+                    for _ in range(self.num_layers)
+                ]
+            )
 
         self.embed_timestep = TimestepEmbedder(
-            self.latent_dim, self.sequence_pos_encoder
+            self.latent_dim, self.sequence_time_encoder
         )
 
         if self.cond_mode != 'no_cond':
@@ -200,6 +193,9 @@ class MDMDenoiser(nn.Module):
 
         self.output_process = OutputProcess(self.data_rep, self.input_feats, self.latent_dim, self.njoints,
                                             self.nfeats)
+
+        self.register_buffer("pred_cam_mean", torch.tensor([1.0606, -0.0027, 0.2702]), False)
+        self.register_buffer("pred_cam_std", torch.tensor([0.1784, 0.0956, 0.0764]), False)
 
         if pretrained_checkpoint is not None:
             state_dict = torch.load(pretrained_checkpoint, map_location='cpu')
@@ -318,141 +314,6 @@ class MDMDenoiser(nn.Module):
             if not (y['action'] == -1).any():  # FIXME - a hack so we can use already trained models
                 action_emb = self.embed_action(y['action'])
                 emb += self.mask_cond(action_emb)
-        if "kpt2d+cam_angvel" in self.cond_mode:
-            # emb: [1, B, d]
-            # mask: [B, 1, 1]
-            # kpt_mask: [B, T, 17]
-            # self.mask_kpt_embedding: [1, 1, 17, 2]
-            force_mask = y.get("uncond", False)
-            if rm_kpt_flag is not None or force_mask:
-                cond_mask_2d = torch.zeros(bs, 1, 1, device=x.device)
-                kpt_mask = torch.zeros(bs, nframes, 17, device=x.device)
-                normed_kpt2d = torch.zeros(bs, nframes, 17 * 2 + 3, device=x.device)
-                cam_angvel = torch.zeros(bs, nframes, 6, device=x.device)
-            else:
-                kpt_mask = y['kpt_mask']
-                normed_kpt2d = y['normed_kpt2d']
-                cam_angvel = y['cam_angvel']
-
-                if self.training:
-                    cond_mask_2d = 1 - torch.bernoulli(torch.ones(bs, device=x.device) * self.cond_kptcammask_prob).view(bs, 1, 1)
-                else:
-                    cond_mask_2d = torch.ones(bs, 1, 1, device=x.device)
-
-            # Treat masked keypoints
-            # mask_kpt_embedding = (1 - kpt_mask.unsqueeze(-1)) * self.mask_kpt_embedding
-            # # _kpt_mask = kpt_mask.unsqueeze(-1).repeat(1, 1, 1, 2).reshape(bs, nframes, -1)
-            # # _kpt_mask = torch.cat((_kpt_mask, torch.ones_like(_kpt_mask[..., :3])), dim=-1)
-
-            # _mask_kpt_embedding = mask_kpt_embedding.reshape(bs, nframes, -1)
-            # _mask_kpt_embedding = torch.cat(
-            #     (_mask_kpt_embedding, torch.zeros_like(_mask_kpt_embedding[..., :3])),
-            #     dim=-1,
-            # )
-            # _mask_kpt_embedding = _mask_kpt_embedding * cond_mask_2d
-
-            _kpt_mask = (
-                kpt_mask.unsqueeze(-1).repeat(1, 1, 1, 2).contiguous().reshape(bs, nframes, -1)
-            )
-            _kpt_mask = torch.cat((_kpt_mask, torch.ones_like(_kpt_mask[..., :3])), dim=-1)
-            normed_kpt2d = normed_kpt2d * _kpt_mask
-            normed_kpt2d = torch.cat((normed_kpt2d, _kpt_mask), dim=-1)
-
-            kpt2d_emb = self.embed_kpt2d(cond_mask_2d * normed_kpt2d) # [B, T, N]
-            cam_angvel_emb = self.embed_cam_angvel(cond_mask_2d * cam_angvel)  # [B, T, N]
-            # emb += self.mask_cond(kpt2d_emb) + self.mask_cond(cam_angvel_emb)
-
-        if 'local_smplfeat' in self.cond_mode:
-            force_mask = y.get("uncond", False)
-            if rm_kpt_flag is not None or force_mask:
-                local_smplfeat = torch.zeros(bs, nframes, 147, device=x.device)
-                cond_mask_local_smplfeat = torch.zeros(bs, 1, 1, device=x.device)
-            else:
-                local_smplfeat = y['local_smplfeat']
-                if self.training:
-                    cond_mask_local_smplfeat = 1 - torch.bernoulli(torch.ones(bs, device=x.device) * self.cond_kptcammask_prob).view(bs, 1, 1)
-                else:
-                    cond_mask_local_smplfeat = torch.ones(bs, 1, 1, device=x.device)
-            local_smplfeat_emb = self.embed_local_smplfeat(cond_mask_local_smplfeat * local_smplfeat)
-
-        if 'global_smplfeat' in self.cond_mode:
-            force_mask = y.get("uncond", False)
-            if rm_kpt_flag is not None or force_mask:
-                global_smplfeat = torch.zeros(bs, nframes, 147, device=x.device)
-                cond_mask_global_smplfeat = torch.zeros(bs, 1, 1, device=x.device)
-            else:
-                global_smplfeat = y['global_smplfeat']
-                if self.training:
-                    cond_mask_global_smplfeat = 1 - torch.bernoulli(torch.ones(bs, device=x.device) * self.cond_kptcammask_prob).view(bs, 1, 1)
-                else:
-                    cond_mask_global_smplfeat = torch.ones(bs, 1, 1, device=x.device)
-            global_smplfeat_emb = self.embed_global_smplfeat(cond_mask_local_smplfeat * local_smplfeat)
-
-        if 'cam2world' in self.cond_mode:
-            force_mask = y.get("uncond", False)
-            if rm_kpt_flag is not None or force_mask:
-                cam2world = torch.zeros(bs, nframes, 9, device=x.device)
-                cond_mask_cam2world = torch.zeros(bs, 1, 1, device=x.device)
-            else:
-                cam2world = y['cam2world']
-                if self.training:
-                    cond_mask_cam2world = 1 - torch.bernoulli(torch.ones(bs, device=x.device) * self.cond_kptcammask_prob).view(bs, 1, 1)
-                    if 'local_smplfeat' in self.cond_mode:
-                        cond_mask_cam2world = cond_mask_cam2world * cond_mask_local_smplfeat
-                    if 'global_smplfeat' in self.cond_mode:
-                        cond_mask_cam2world = cond_mask_cam2world * cond_mask_global_smplfeat
-                    if 'kpt2d' in self.cond_mode:
-                        cond_mask_cam2world = cond_mask_cam2world * cond_mask_2d
-                else:
-                    cond_mask_cam2world = torch.ones(bs, 1, 1, device=x.device)
-            cam2world_emb = self.embed_cam2world(cond_mask_cam2world * cam2world)
-
-        if 'cam_vel' in self.cond_mode:
-            force_mask = y.get("uncond", False)
-            if rm_kpt_flag is not None or force_mask:
-                cam_vel = torch.zeros(bs, nframes, 9, device=x.device)
-                cond_mask_camvel = torch.zeros(bs, 1, 1, device=x.device)
-            else:
-                cam_vel = y["cam_vel"]
-                if self.training:
-                    cond_mask_camvel = 1 - torch.bernoulli(torch.ones(bs, device=x.device) * self.cond_camvelmask_prob).view(bs, 1, 1)
-
-                    if 'local_smplfeat' in self.cond_mode:
-                        cond_mask_camvel = cond_mask_camvel * cond_mask_local_smplfeat
-                    if 'global_smplfeat' in self.cond_mode:
-                        cond_mask_camvel = cond_mask_camvel * cond_mask_global_smplfeat
-                    if 'kpt2d' in self.cond_mode:
-                        cond_mask_camvel = cond_mask_camvel * cond_mask_2d
-                else:
-                    cond_mask_camvel = torch.ones(bs, 1, 1, device=x.device)
-
-            cam_vel_emb = self.embed_cam_vel(cond_mask_camvel * cam_vel)
-
-        if 'plucker_kpt' in self.cond_mode:
-            force_mask = y.get("uncond", False)
-            if rm_kpt_flag is not None or force_mask:
-                cond_mask_2d = torch.zeros(bs, 1, 1, device=x.device)
-                kpt_mask = torch.zeros(bs, nframes, 17, 1, device=x.device)
-                plucker_kpt = torch.zeros(bs, nframes, 17, 6, device=x.device)
-            else:
-                kpt_mask = y['kpt_mask'].reshape(bs, nframes, 17, 1)    # [B, T, 17]
-                plucker_kpt = y['plucker_kpt']  # [B, T, 17, 6]
-
-                if self.training:
-                    cond_mask_2d = 1 - torch.bernoulli(torch.ones(bs, device=x.device) * self.cond_kptcammask_prob).view(bs, 1, 1)
-                else:
-                    cond_mask_2d = torch.ones(bs, 1, 1, device=x.device)
-
-            plucker_kpt = plucker_kpt * kpt_mask
-            plucker_kpt = torch.cat((plucker_kpt, kpt_mask), dim=-1).reshape(bs, nframes, 17 * 7)
-            plucker_kpt_emb = self.embed_plucker(cond_mask_2d * plucker_kpt)
-
-        if self.arch == 'gru':
-            x_reshaped = x.reshape(bs, njoints*nfeats, 1, nframes)
-            emb_gru = emb.repeat(nframes, 1, 1)     #[#frames, bs, d]
-            emb_gru = emb_gru.permute(1, 2, 0)      #[bs, d, #frames]
-            emb_gru = emb_gru.reshape(bs, self.latent_dim, 1, nframes)  #[bs, d, 1, #frames]
-            x = torch.cat((x_reshaped, emb_gru), axis=1)  #[bs, d+joints*feat, 1, #frames]
 
         if self.use_motion_mask:
             force_motion_mask = y.get("force_motion_mask", None)
@@ -508,73 +369,51 @@ class MDMDenoiser(nn.Module):
             # adding the timestep embed
             pose_start_ind = 1
             xseq = x
-            if "kpt2d+cam_angvel" in self.cond_mode:
-                xseq = torch.cat((x, kpt2d_emb.transpose(0, 1), cam_angvel_emb.transpose(0, 1)), axis=2)  # [seqlen, bs, 2d]
-                xseq = self.embed_kptproj(xseq)  # [seqlen+1, bs, d]
-                if "cam_vel" in self.cond_mode:
-                    xseq = torch.cat((xseq, cam_vel_emb.transpose(0, 1)), axis=2)
-                    xseq = self.embed_camvelproj(xseq)
-            if "plucker_kpt" in self.cond_mode:
-                xseq = xseq + plucker_kpt_emb.transpose(0, 1)
-            if 'local_smplfeat' in self.cond_mode:
-                xseq = xseq + local_smplfeat_emb.transpose(0, 1)
-            if 'global_smplfeat' in self.cond_mode:
-                xseq = xseq + global_smplfeat_emb.transpose(0, 1)
-            if 'cam_vel' in self.cond_mode:
-                xseq = xseq + cam_vel_emb.transpose(0, 1)
-            if 'cam2world' in self.cond_mode:
-                xseq = xseq + cam2world_emb.transpose(0, 1)
 
+            # xseq = torch.cat((emb, xseq), axis=0)  # [seqlen+1, bs, d]
             xseq = torch.cat((emb, xseq), axis=0)  # [seqlen+1, bs, d]
-            if self.text_enc_mode == 'seq_concat':
+            if self.text_enc_mode == "seq_concat":
                 xseq = torch.cat((emb_text.transpose(0, 1), xseq), axis=0)
                 pose_start_ind += emb_text.shape[1]
 
-            xseq = self.sequence_pos_encoder(xseq)  # [seqlen+1, bs, 2d]
-            src_mask = None
-            src_key_padding_mask = None
-            if self.padding_mask:
-                src_key_padding_mask = torch.zeros((xseq.shape[1], xseq.shape[0]), dtype=torch.bool, device=xseq.device)
-                src_key_padding_mask[:, pose_start_ind:] = ~y['mask'][:, 0, 0]
-            if self.autoregressive:
-                src_mask = generate_ar_mask(xseq.shape[0], xseq.shape[0], tgt_start_dim=pose_start_ind, src_start_dim=pose_start_ind).to(x.device)
-            output = self.seqTransEncoder(xseq, mask=src_mask, src_key_padding_mask=src_key_padding_mask)[pose_start_ind:]  # , src_key_padding_mask=~maskseq)  # [seqlen, bs, d]
+            xseq_start = xseq[:pose_start_ind]
+            xseq_start = self.sequence_pos_encoder(xseq_start)  # [seqlen+1, bs, 2d]
+            xseq[:pose_start_ind] = xseq_start
+            xseq[pose_start_ind:] = xseq[pose_start_ind:] + self.sequence_pos_encoder.pe[-1:, :]
+            # xseq = self.sequence_pos_encoder(xseq)  # [seqlen+1, bs, 2d]
 
-        elif self.arch == 'trans_dec':
-            xseq = x
-            pose_start_ind = 0
-            memory = emb
-            if self.text_enc_mode == 'seq_concat':
-                memory = [emb_text.transpose(0, 1), emb]
-                if self.add_x_to_memory:
-                    memory.append(x)
-                memory = torch.cat(memory, axis=0)
-            if self.emb_trans_dec:
-                xseq = torch.cat((emb, x), axis=0)
-                pose_start_ind += 1
-            xseq = self.sequence_pos_encoder(xseq)  # [seqlen+1, bs, d]
-            memory = self.sequence_pos_encoder(memory)  # [seqlen+1, bs, d]
-            tgt_mask = memory_mask = None
-            if self.autoregressive:
-                tgt_mask = generate_ar_mask(xseq.shape[0], xseq.shape[0], tgt_start_dim=pose_start_ind, src_start_dim=pose_start_ind).to(x.device)
-                if self.add_x_to_memory:
-                    memory_mask = generate_ar_mask(xseq.shape[0], memory.shape[0], tgt_start_dim=pose_start_ind, src_start_dim=emb_text.shape[1] + 1).to(x.device)
+            if nframes > self.num_frames:
+                attnmask = torch.ones((nframes, nframes), device=x.device, dtype=torch.bool)
+                for i in range(nframes):
+                    min_ind = max(0, i - self.num_frames // 2)
+                    max_ind = min(nframes, i + self.num_frames // 2)
+                    max_ind = max(self.num_frames, max_ind)
+                    min_ind = min(nframes - self.num_frames, min_ind)
+                    attnmask[i, min_ind:max_ind] = False
+            else:
+                attnmask = None
 
-            output = self.seqTransDecoder(tgt=xseq, memory=memory, tgt_mask=tgt_mask, memory_mask=memory_mask)[pose_start_ind:] # [seqlen, bs, d] # FIXME - maybe add a causal mask
-        elif self.arch == 'gru':
-            xseq = x
-            xseq = self.sequence_pos_encoder(xseq)  # [seqlen, bs, d]
-            output, _ = self.gru(xseq)
+            pmask = ~y['mask'][:, 0, 0, :]
+            pmask = torch.cat([torch.zeros_like(pmask[:, :1]).repeat(1, pose_start_ind), pmask], dim=1)
+            xseq = xseq.transpose(0, 1)
+            for block in self.seqTransEncoder:
+                xseq = block(
+                    xseq,
+                    attn_mask=attnmask,
+                    tgt_key_padding_mask=pmask,
+                    pose_start_ind=pose_start_ind,
+                )
+            output = xseq.transpose(0, 1)[pose_start_ind:]
 
         out_aux = {}
-        if return_aux and self.output_orient is not None:
-            # output: [seqlen, bs, d]
-            pred_local_orient = self.output_orient(output)
-            pred_local_orient = pred_local_orient.transpose(0, 1)  # [bs, seqlen, 6]
-            out_aux["pred_local_orient"] = pred_local_orient
-            out_aux["cond_mask_2d"] = cond_mask_2d
 
         output = self.output_process(output)  # [bs, njoints, nfeats, nframes]
+        # predict camera
+        pred_cam = output[:, 17 * 2 + 3 + 6 : 17 * 2 + 3 + 6 + 3, :, :]     # [bs, 3, nfeats, nframes]
+        pred_cam = pred_cam * self.pred_cam_std.reshape(1, 3, 1, 1) + self.pred_cam_mean.reshape(1, 3, 1, 1)
+        torch.clamp_min_(pred_cam[..., 0], 0.25)  # min_clamp s to 0.25 (prevent negative prediction)
+        output[:, 17 * 2 + 3 + 6 : 17 * 2 + 3 + 6 + 3, :, :] = pred_cam
+
         if self.use_motion_mask and motion_mask is not None:
             if self.obs_motion_constraints == 'hard':
                 output = output * (1 - motion_mask) + observed_motion * motion_mask

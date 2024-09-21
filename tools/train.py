@@ -1,5 +1,6 @@
 import hydra
 import pytorch_lightning as pl
+import os
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks.checkpoint import Checkpoint
 
@@ -7,6 +8,8 @@ from hmr4d.utils.pylogger import Log
 from hmr4d.configs import register_store_gvhmr
 from hmr4d.utils.vis.rich_logger import print_cfg
 from hmr4d.utils.net_utils import load_pretrained_model, get_resume_ckpt_path
+from motiondiff.utils.tools import find_last_version
+from pytorch_lightning.utilities import rank_zero_only
 
 
 def get_callbacks(cfg: DictConfig) -> list:
@@ -49,6 +52,15 @@ def train(cfg: DictConfig) -> None:
     if not has_ckpt_cb and cfg.pl_trainer.get("enable_checkpointing", True):
         Log.warning("No checkpoint-callback found. Disabling PL auto checkpointing.")
         cfg.pl_trainer = {**cfg.pl_trainer, "enable_checkpointing": False}
+
+    global_rank = rank_zero_only.rank if rank_zero_only.rank is not None else 0
+    if global_rank == 0:
+
+        slurm_job_id = int(os.environ.get("SLURM_JOB_ID", "-1"))
+        run_name = f'{cfg.exp_name}_{slurm_job_id}' if slurm_job_id > 0 else f'{cfg.exp_name}'
+        cfg.logger.name = run_name
+        cfg.logger.version = run_name
+
     logger = hydra.utils.instantiate(cfg.logger, _recursive_=False)
 
     # PL-Trainer
@@ -65,8 +77,8 @@ def train(cfg: DictConfig) -> None:
     if cfg.task == "fit":
         resume_path = None
         if cfg.resume_mode is not None:
-            print(cfg.callbacks.model_checkpoint.dirpath)
-            resume_path = get_resume_ckpt_path(cfg.resume_mode, ckpt_dir=cfg.callbacks.model_checkpoint.dirpath)
+            save_dir = cfg.logger.save_dir + '/checkpoints'
+            resume_path = get_resume_ckpt_path(cfg.resume_mode, ckpt_dir=save_dir)
             Log.info(f"Resume training from {resume_path}")
         Log.info("Start Fitiing...")
         trainer.fit(model, datamodule.train_dataloader(), datamodule.val_dataloader(), ckpt_path=resume_path)

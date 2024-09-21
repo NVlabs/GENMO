@@ -196,7 +196,6 @@ class MDMBase(nn.Module):
         motion_mask = motion_mask.permute(0, 2, 1).unsqueeze(2).contiguous()
         # Setup length and make padding mask
         vis_mask = length_to_mask(length, L)  # (B, L)
-        vis_mask = vis_mask.reshape(B, 1, 1, L)
         if L > self.max_len:
             attnmask = torch.ones((L, L), device=motion.device, dtype=torch.bool)
             for i in range(L):
@@ -209,8 +208,11 @@ class MDMBase(nn.Module):
             attnmask = None
 
         t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
-        x_start = motion
-        x_t = self.train_diffusion.q_sample(x_start.clone(), t)
+        t = t * 0
+        t_weights = torch.ones_like(t_weights)
+        x_t = motion.clone()
+        x_t = motion * motion_mask
+        vis_mask = vis_mask.reshape(B, 1, 1, L)
 
         denoiser_kwargs = {
             "y": {
@@ -224,7 +226,7 @@ class MDMBase(nn.Module):
             x_t, diffusion._scale_timesteps(t), return_aux=False, **denoiser_kwargs
         )
         pred_x_start = pred_x_start.squeeze(2).permute(0, 2, 1).contiguous()
-        target_x_start = x_start.squeeze(2).permute(0, 2, 1).contiguous()
+        target_x_start = motion.squeeze(2).permute(0, 2, 1).contiguous()
 
         pred_cam = pred_x_start[:, :, 17 * 2 + 3 + 6:17 * 2 + 3 + 6 + 3]
         static_conf_logits = pred_x_start[:, :, 17 * 2 + 3 + 6 + 3:17 * 2 + 3 + 6 + 3 + 6]
@@ -310,11 +312,11 @@ class MDMBase(nn.Module):
 
             motion = torch.cat(motion_list, dim=0)
             motion_mask = torch.cat(motion_mask_list, dim=0)
-            B, _, _, seqlen = motion.shape
-            vis_mask = torch.ones(B, seqlen).to(motion)
-            vis_mask = vis_mask.reshape(B, 1, 1, seqlen)
+            vis_mask = torch.ones(motion.shape[:2]).to(motion)
+            vis_mask = vis_mask.reshape(B, 1, 1, L)
+            B, _, _, _ = motion.shape
 
-            cond = {
+            denoiser_kwargs = {
                 "y": {
                     "text": [""] * B,
                     "mask": vis_mask,
@@ -323,33 +325,16 @@ class MDMBase(nn.Module):
                 "observed_motion": motion,
             }
 
-            # cond["y"]["scale"] = (
-            #     torch.ones(B, device=length.device)
-            #     * self.model_cfg.diffusion.guidance_param
-            # )
-            cond["y"]["scale"] = torch.ones(B, device=length.device)
-            diff_sampler = self.model_cfg.diffusion.get("sampler", "ddim")
-            if diff_sampler == "ddim":
-                sample_fn = diffusion.ddim_sample_loop
-                kwargs = {"eta": self.model_cfg.diffusion.ddim_eta}
-            else:
-                sample_fn = diffusion.p_sample_loop
-                kwargs = {}
+            t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
+            t = t * 0
+            t_weights = torch.ones_like(t_weights)
+            x_t = motion.clone()
+            x_t = motion * motion_mask
 
-            samples = sample_fn(
-                denoiser,
-                (B, self.denoiser.njoints, self.denoiser.nfeats, self.max_len),
-                clip_denoised=False,
-                model_kwargs=cond,
-                skip_timesteps=0,  # 0 is the default value - i.e. don't skip any step
-                init_image=None,
-                progress=progress,
-                dump_steps=None,
-                noise=None,
-                const_noise=False,
-                **kwargs,
+            pred_x_start = self.denoiser(
+                x_t, diffusion._scale_timesteps(t), return_aux=False, **denoiser_kwargs
             )
-            samples = samples.squeeze(2).permute(0, 2, 1).contiguous()
+            samples = pred_x_start.squeeze(2).permute(0, 2, 1).contiguous()
 
             # merge chunks
             output_sample = torch.zeros(1, L, samples.shape[-1]).to(samples)
@@ -379,48 +364,30 @@ class MDMBase(nn.Module):
             vis_mask = length_to_mask(length, L)  # (B, L)
             vis_mask = vis_mask.reshape(B, 1, 1, L)
 
-            cond = {
+            denoiser_kwargs = {
                 "y": {
                     "text": [""] * B,
                     "mask": vis_mask,
                 },
                 "motion_mask": motion_mask,
                 "observed_motion": motion,
-                "guidance_only": True
             }
 
-            length = inputs["length"]  # (B,) effective length of each sample
-            batch_size = length.shape[0]
+            t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
+            t = t * 0
+            t_weights = torch.ones_like(t_weights)
+            x_t = motion.clone()
+            x_t = motion * motion_mask
 
-            cond["y"]["scale"] = (
-                torch.ones(batch_size, device=length.device)
-                * self.model_cfg.diffusion.guidance_param
-            )
-            diff_sampler = self.model_cfg.diffusion.get("sampler", "ddim")
-            if diff_sampler == "ddim":
-                sample_fn = diffusion.ddim_sample_loop
-                kwargs = {"eta": self.model_cfg.diffusion.ddim_eta}
-            else:
-                sample_fn = diffusion.p_sample_loop
-                kwargs = {}
-
-            samples = sample_fn(
-                denoiser,
-                (batch_size, self.denoiser.njoints, self.denoiser.nfeats, self.max_len),
-                clip_denoised=False,
-                model_kwargs=cond,
-                skip_timesteps=0,  # 0 is the default value - i.e. don't skip any step
-                init_image=None,
-                progress=progress,
-                dump_steps=None,
-                noise=None,
-                const_noise=False,
-                **kwargs,
-            )
             samples = samples.squeeze(2).permute(0, 2, 1).contiguous()
             pred_cam = samples[:, :, 17 * 2 + 3 + 6:17 * 2 + 3 + 6 + 3]
             static_conf_logits = samples[:, :, 17 * 2 + 3 + 6 + 3:17 * 2 + 3 + 6 + 3 + 6]
             sample = samples[:, :, -151:]
+
+            pred_x_start = self.denoiser(
+                x_t, diffusion._scale_timesteps(t), return_aux=False, **denoiser_kwargs
+            )
+            samples = pred_x_start.squeeze(2).permute(0, 2, 1).contiguous()
 
             output = {
                 "pred_x": sample,
@@ -434,3 +401,15 @@ class MDMBase(nn.Module):
             return self.forward_train(inputs, train, postproc, static_cam)
         else:
             return self.forward_test(inputs, train, postproc, static_cam)
+
+
+class MDMOnestep(MDMBase):
+    def __init__(self, model_cfg, **kwargs):
+        super().__init__(model_cfg, **kwargs)
+        self.denoiser = import_type_from_str(self.model_cfg.denoiser.type)(
+            pl_module=self, **self.model_cfg.denoiser
+        )
+        self.init_diffusion()
+        if self.model_cfg.get("preload_checkpoint", True):
+            self.load_pretrain_checkpoint()
+        return
