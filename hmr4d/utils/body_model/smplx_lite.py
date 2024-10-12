@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from pathlib import Path
-from pytorch3d.transforms import axis_angle_to_matrix, rotation_6d_to_matrix
+from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix, rotation_6d_to_matrix
 from smplx.utils import Struct, to_np, to_tensor
 from einops import einsum, rearrange
 from time import time

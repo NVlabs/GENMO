@@ -49,7 +49,10 @@ class ClassifierFreeSampleModel:
             unknownt_motion_mask=unknownt_motion_mask, unknownt_observed_motion=unknownt_observed_motion, **kwargs)
         if guidance_only:
             return out
-        out_uncond = self.model(x, timesteps, y_uncond, global_motion=global_motion, global_joint_mask=global_joint_mask, global_joint_func=global_joint_func, **kwargs)
+        out_uncond = self.model(
+            x, timesteps, y_uncond, motion_mask=motion_mask, observed_motion=observed_motion, 
+            global_motion=global_motion, global_joint_mask=global_joint_mask, global_joint_func=global_joint_func, 
+            unknownt_motion_mask=unknownt_motion_mask, unknownt_observed_motion=unknownt_observed_motion, **kwargs)
         return out_uncond + (y['scale'][0].view(-1, 1, 1, 1) * (out - out_uncond))
 
     def parameters(self):

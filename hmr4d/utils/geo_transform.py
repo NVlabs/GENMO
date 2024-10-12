@@ -2,11 +2,10 @@ import numpy as np
 import cv2
 import torch
 import torch.nn.functional as F
-from pytorch3d.transforms import so3_exp_map, so3_log_map
-from pytorch3d.transforms import matrix_to_quaternion, quaternion_to_axis_angle, matrix_to_rotation_6d
-import pytorch3d.ops.knn as knn
+from motiondiff.models.mdm.so3 import so3_exp_map, so3_log_map
+from motiondiff.models.mdm.rotation_conversions import matrix_to_quaternion, quaternion_to_axis_angle, matrix_to_rotation_6d
 from hmr4d.utils.pylogger import Log
-from pytorch3d.transforms import euler_angles_to_matrix
+from motiondiff.models.mdm.rotation_conversions import euler_angles_to_matrix
 import hmr4d.utils.matrix as matrix
 from einops import einsum, rearrange, repeat
 from hmr4d.utils.geo.quaternion import qbetween
@@ -283,6 +282,7 @@ def triangulate_point_ortho(Ts_w2c, c_p2d, **kwargs):
 
 
 def get_nearby_points(points, query_verts, padding=0.0, p=1):
+    import pytorch3d.ops.knn as knn
     """
     points: (S, 3)
     query_verts: (V, 3)

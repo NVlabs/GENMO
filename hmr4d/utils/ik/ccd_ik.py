@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import einsum, rearrange, repeat
 
-from pytorch3d.transforms import (
+from motiondiff.models.mdm.rotation_conversions import (
     matrix_to_rotation_6d,
     rotation_6d_to_matrix,
     axis_angle_to_matrix,

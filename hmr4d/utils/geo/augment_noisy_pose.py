@@ -1,5 +1,5 @@
 import torch
-from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle, matrix_to_rotation_6d
+from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix, matrix_to_axis_angle, matrix_to_rotation_6d
 import hmr4d.utils.matrix as matrix
 from hmr4d import PROJ_ROOT
 

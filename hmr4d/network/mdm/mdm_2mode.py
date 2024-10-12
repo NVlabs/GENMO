@@ -45,7 +45,7 @@ def import_type_from_str(s):
 
 
 
-class MDMBase(nn.Module):
+class MDMBase2Mode(nn.Module):
     def __init__(
         self,
         model_cfg,
@@ -69,6 +69,7 @@ class MDMBase(nn.Module):
         avgbeta=True,
         zero_unknown_motion=0.0,
         pred_2dkpt=True,
+        zero_999_timestep=True,
         **kwargs,
     ):
         super().__init__()
@@ -90,7 +91,7 @@ class MDMBase(nn.Module):
         self.dropout = dropout
         self.zero_unknown_motion = zero_unknown_motion
         self.pred_2dkpt = pred_2dkpt
-
+        self.zero_999_timestep = zero_999_timestep
         self.learned_pos_params = nn.Parameter(torch.randn(17, 2), requires_grad=True)
         self.imgseq_embedder = nn.Sequential(
             nn.LayerNorm(self.imgseq_dim),
@@ -238,16 +239,32 @@ class MDMBase(nn.Module):
         else:
             attnmask = None
 
-        t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
+        t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device) # [999 ~ 0]
         x_start = motion
         clean_x_start = clean_motion
         noise = torch.randn_like(x_start)
-        x_t = self.train_diffusion.q_sample(x_start.clone(), t, noise=noise)
+        if self.zero_999_timestep:
+            x_t = self.train_diffusion.q_sample(x_start.clone(), t, noise=noise)
 
-        if self.training and (self.zero_unknown_motion > 0):
-            rand_mask = (torch.rand(B).to(motion) > self.zero_unknown_motion).float()
-            rand_mask = rand_mask.reshape(B, 1, 1, 1)
-            x_t = x_t * rand_mask + (motion * motion_mask) * (1 - rand_mask)
+            if self.training:
+                rand_gen_mask = (torch.rand(B).to(motion) > 0.5).float()
+                rand_gen_mask = rand_gen_mask.reshape(B, 1, 1, 1)
+                motion_mask = motion_mask * rand_gen_mask
+
+                rand_mask = (torch.rand(B).to(motion) > 0.5).float()
+                rand_mask = rand_mask.reshape(B, 1, 1, 1)
+                x_t = x_t * rand_mask + (motion * motion_mask) * (1 - rand_mask)
+                t = (t * rand_mask.reshape(B) + (torch.ones_like(t) * 999) * (1 - rand_mask.reshape(B))).long()
+        else:
+            if self.training:
+                rand_mask = (torch.rand(B).to(motion) > 0.5).float()
+                rand_mask = rand_mask.reshape(B, 1, 1, 1)
+                t = (t * rand_mask.reshape(B) + (torch.ones_like(t) * 999) * (1 - rand_mask.reshape(B))).long()
+            x_t = self.train_diffusion.q_sample(x_start.clone(), t, noise=noise)
+            if self.training:
+                rand_gen_mask = (torch.rand(B).to(motion) > 0.5).float()
+                rand_gen_mask = rand_gen_mask.reshape(B, 1, 1, 1)
+                motion_mask = motion_mask * rand_gen_mask
 
         denoiser_kwargs = {
             "y": {
@@ -359,43 +376,24 @@ class MDMBase(nn.Module):
             vis_mask = torch.ones(B, seqlen).to(motion)
             vis_mask = vis_mask.reshape(B, 1, 1, seqlen)
 
-            cond = {
+            denoiser_kwargs = {
                 "y": {
                     "text": [""] * B,
                     "mask": vis_mask,
                 },
                 "motion_mask": motion_mask,
                 "observed_motion": motion,
-                "guidance_only": True,
             }
+            t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
+            t = (torch.ones_like(t) * 999).long()
+            t_weights = torch.ones_like(t_weights)
+            x_t = motion.clone()
+            x_t = motion * motion_mask
 
-            # cond["y"]["scale"] = (
-            #     torch.ones(B, device=length.device)
-            #     * self.model_cfg.diffusion.guidance_param
-            # )
-            cond["y"]["scale"] = torch.ones(B, device=length.device)
-            diff_sampler = self.model_cfg.diffusion.get("sampler", "ddim")
-            if diff_sampler == "ddim":
-                sample_fn = diffusion.ddim_sample_loop
-                kwargs = {"eta": self.model_cfg.diffusion.ddim_eta}
-            else:
-                sample_fn = diffusion.p_sample_loop
-                kwargs = {}
-
-            samples = sample_fn(
-                denoiser,
-                (B, self.denoiser.njoints, self.denoiser.nfeats, self.max_len),
-                clip_denoised=False,
-                model_kwargs=cond,
-                skip_timesteps=0,  # 0 is the default value - i.e. don't skip any step
-                init_image=None,
-                progress=progress,
-                dump_steps=None,
-                noise=torch.zeros_like(motion),
-                const_noise=False,
-                **kwargs,
+            pred_x_start = self.denoiser(
+                x_t, diffusion._scale_timesteps(t), return_aux=False, **denoiser_kwargs
             )
-            samples = samples.squeeze(2).permute(0, 2, 1).contiguous()
+            samples = pred_x_start.squeeze(2).permute(0, 2, 1).contiguous()
 
             # merge chunks
             output_sample = torch.zeros(1, L, samples.shape[-1]).to(samples)
@@ -425,45 +423,25 @@ class MDMBase(nn.Module):
             vis_mask = length_to_mask(length, L)  # (B, L)
             vis_mask = vis_mask.reshape(B, 1, 1, L)
 
-            cond = {
+            denoiser_kwargs = {
                 "y": {
                     "text": [""] * B,
                     "mask": vis_mask,
                 },
                 "motion_mask": motion_mask,
                 "observed_motion": motion,
-                "guidance_only": True
             }
 
-            length = inputs["length"]  # (B,) effective length of each sample
-            batch_size = length.shape[0]
+            t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
+            t = (torch.ones_like(t) * 999).long()
+            t_weights = torch.ones_like(t_weights)
+            x_t = motion.clone()
+            x_t = motion * motion_mask
 
-            cond["y"]["scale"] = (
-                torch.ones(batch_size, device=length.device)
-                * self.model_cfg.diffusion.guidance_param
+            pred_x_start = self.denoiser(
+                x_t, diffusion._scale_timesteps(t), return_aux=False, **denoiser_kwargs
             )
-            diff_sampler = self.model_cfg.diffusion.get("sampler", "ddim")
-            if diff_sampler == "ddim":
-                sample_fn = diffusion.ddim_sample_loop
-                kwargs = {"eta": self.model_cfg.diffusion.ddim_eta}
-            else:
-                sample_fn = diffusion.p_sample_loop
-                kwargs = {}
-
-            samples = sample_fn(
-                denoiser,
-                (batch_size, self.denoiser.njoints, self.denoiser.nfeats, self.max_len),
-                clip_denoised=False,
-                model_kwargs=cond,
-                skip_timesteps=0,  # 0 is the default value - i.e. don't skip any step
-                init_image=None,
-                progress=progress,
-                dump_steps=None,
-                noise=None,
-                const_noise=False,
-                **kwargs,
-            )
-            samples = samples.squeeze(2).permute(0, 2, 1).contiguous()
+            samples = pred_x_start.squeeze(2).permute(0, 2, 1).contiguous()
             pred_cam = samples[:, :, 17 * 2 + 3 + 6:17 * 2 + 3 + 6 + 3]
             static_conf_logits = samples[:, :, 17 * 2 + 3 + 6 + 3:17 * 2 + 3 + 6 + 3 + 6]
             sample = samples[:, :, -151:]

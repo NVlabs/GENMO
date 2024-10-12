@@ -13,7 +13,7 @@ from .rich_utils import (
 from hmr4d.utils.geo_transform import apply_T_on_points, transform_mat, compute_cam_angvel
 from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
 from hmr4d.utils.smplx_utils import make_smplx
-from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle
+from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix, matrix_to_axis_angle
 from hmr4d.utils.geo.hmr_cam import resize_K
 
 

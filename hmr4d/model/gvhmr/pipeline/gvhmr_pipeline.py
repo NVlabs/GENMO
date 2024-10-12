@@ -16,7 +16,7 @@ from hmr4d.model.gvhmr.utils.postprocess import (
 )
 from hmr4d.model.gvhmr.utils import stats_compose
 
-from pytorch3d.transforms import (
+from motiondiff.models.mdm.rotation_conversions import (
     matrix_to_rotation_6d,
     rotation_6d_to_matrix,
     axis_angle_to_matrix,

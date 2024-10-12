@@ -30,7 +30,7 @@ parser.add_argument('-u', '--user', help='cluster username', required=True)
 parser.add_argument('-a', '--account', help='cluster account/team', default='nvr_torontoai_humanmotionfm')
 parser.add_argument('-b', '--branch', default='main', help='git branch of the code base to run on cluster')
 parser.add_argument('-p', '--push_changes', action="store_true")
-parser.add_argument('-j', '--job_tag', default="motiondiff")
+parser.add_argument('-j', '--job_tag', default="mfm-hmr")
 parser.add_argument('-group', '--wandb_group', default=None)
 parser.add_argument('-dg', '--disable_wandb_group', action="store_true")
 parser.add_argument('-si', '--start_ind', type=int, default=0, help='start index of cfgs')
@@ -38,12 +38,86 @@ parser.add_argument('-ei', '--end_ind', type=int, default=None, help='end index 
 parser.add_argument('-nc', '--num_cfg', type=int, default=None, help='number of cfgs to run')
 parser.add_argument('-gm', '--git_message', default=None, help='git commit message')
 parser.add_argument('-slack', '--slack_mode', default='fail', help='slack mode for ADLR script')
-parser.add_argument('-test_ar', '--test_autoresume_timer', type=int, default=-1)
+parser.add_argument('-test_ar', '--test_autoresume_timer', help='in minutes', type=int, default=-1)
 parser.add_argument('-r', '--resume', action="store_true")
 parser.add_argument('-rcp', '--resume_cp', default="last")
 args = parser.parse_args()
 
 
-cmd = f"python tools/train.py exp={args.cfg} exp_name_var={args.cfg_var} pl_trainer.devices={args.gpus}"
-if args.resume:
-    cmd += f" --resume --cp {args.resume_cp}"
+if not args.debug:
+    cmd = f"tools/train_v2.py exp={args.cfg} exp_name_var={args.cfg_var} pl_trainer.devices={args.gpus}"
+    if args.resume:
+        cmd += " resume_mode=last"
+else:
+    args.partition = "interactive"
+    cmd = ' --version; sleep 1000'
+
+cfg_tag = f'{args.cfg.replace("/", "_")}_{args.cfg_var}'
+if args.gpus > 1:
+    cfg_tag += f'_{args.gpus}gpus'
+if args.nodes > 1:
+    cfg_tag += f'_{args.nodes}nodes'
+
+slurm_cmds = []
+tag = f'{args.job_tag}.{cfg_tag}'
+tag = tag[:110] if len(tag) > 110 else tag
+print(tag)
+slurm_cmds.append((cmd, tag))
+
+print(cmd)
+
+exp_base_folder = f'/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_exp/{args.user}'
+subprocess_run(f"ssh {args.user}@cs-oci-ord-login-02 'mkdir -p {exp_base_folder}'", shell=True)
+
+now_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+exp_folder = f'{exp_base_folder}/{now_str}-gvhmr-{(args.cfg).replace("/", "_")}_{args.cfg_var}'
+repo_folder = str(pathlib.Path(__file__).resolve().parent.parent)    # the root of the project
+
+include_files = [
+    'motiondiff/**',
+    'hmr4d/**',
+    'tools/**',
+    'setup.py',
+    'dyn_ddns.py',
+    'third_party/**',
+]
+exclude_files = [
+    '/inputs',
+    '/outputs*',
+    '/glove',
+    '**/out',
+    '**/wandb',
+    '**/__pycache__',
+    '**/doc',
+    '**/docs'
+]
+include_str = ' '.join([f'--include="{f}"' for f in include_files])
+exclude_str = ' '.join([f'--exclude="{f}"' for f in exclude_files])
+
+
+rsync_cmd = f'rsync -az --partial -m --chmod=775 {exclude_str} {include_str} --exclude="*/*" {repo_folder}/ {args.user}@cs-oci-ord-dc-02:{exp_folder}/'
+subprocess_run(rsync_cmd, shell=True)
+
+link_dataset_cmd = f'ln -s /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR {exp_folder}/inputs'
+subprocess_run(f"ssh {args.user}@cs-oci-ord-login-02 '{link_dataset_cmd}'", shell=True)
+
+for cmd, tag in slurm_cmds:
+    job_cmd = f"cd {exp_folder}; tools/slurm_job.sh {args.user} {args.branch} {cmd}"
+
+    autoresume_str = f'--autoresume_timer {args.test_autoresume_timer}' if args.test_autoresume_timer > 0 else f'--autoresume_before_timelimit {args.autoresume_before_timelimit}'
+    autoresume_str += " --autoresume_ignore_failure"
+    account_str = f'--account {args.account}' if args.account is not None else ''
+    ssh_cmd = \
+    f'submit_job --partition {args.partition} {account_str} --duration {args.time} --gpu {args.gpus} --nodes {args.nodes} --tasks_per_node {args.gpus} {autoresume_str} --email_mode {args.slack_mode} --image /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/docker/motiondiff_0.3.5.sqsh' + \
+    f' --name {tag} --command "{job_cmd}"'
+
+    print(f"ssh {args.user}@cs-oci-ord-login-02 '{ssh_cmd}'")
+    if not args.debug:
+        subprocess_run(f"ssh {args.user}@cs-oci-ord-login-02 '{ssh_cmd}'", shell=True)
+    else:
+        ssh_cmd = (
+            f"submit_job --partition {args.partition} {account_str} --duration {args.time} --gpu {args.gpus} --nodes {args.nodes} --tasks_per_node {args.gpus} {autoresume_str} --email_mode {args.slack_mode} --image /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/docker/motiondiff_0.3.5.sqsh"
+            + f' --name {tag} --command "{job_cmd}"'
+        )
+
+        print(ssh_cmd)

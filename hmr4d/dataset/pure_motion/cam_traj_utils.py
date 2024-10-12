@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from numpy.random import rand, randn
-from pytorch3d.transforms import (
+from motiondiff.models.mdm.rotation_conversions import (
     axis_angle_to_matrix,
     matrix_to_axis_angle,
     matrix_to_rotation_6d,

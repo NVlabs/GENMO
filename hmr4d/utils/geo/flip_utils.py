@@ -1,5 +1,5 @@
 import torch
-from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle
+from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix, matrix_to_axis_angle
 
 
 def flip_heatmap_coco17(output_flipped):

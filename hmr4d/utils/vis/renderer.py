@@ -15,7 +15,7 @@ from pytorch3d.renderer import (
 from pytorch3d.structures import Meshes
 from pytorch3d.structures.meshes import join_meshes_as_scene
 from pytorch3d.renderer.cameras import look_at_rotation
-from pytorch3d.transforms import axis_angle_to_matrix
+from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix
 
 from .renderer_tools import get_colors, checkerboard_geometry
 

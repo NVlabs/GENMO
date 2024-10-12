@@ -148,22 +148,35 @@ class MDMBase(nn.Module):
         self, batch, target_x, gt_pred_cam, static_gt
     ):
         f_condition = batch["f_condition"]
+        if 'clean_f_condition' in batch:
+            clean_f_condition = batch["clean_f_condition"]
+        else:
+            clean_f_condition = f_condition
 
         length = f_condition["length"]
         obs = f_condition["obs"]
+        clean_obs = clean_f_condition["obs"]
+
         f_cliffcam = f_condition["f_cliffcam"]  # (B, L, 3)
         f_cam_angvel = f_condition["f_cam_angvel"]  # (B, L, 6)
         f_imgseq = f_condition["f_imgseq"]  # (B, L, C)
+
+        clean_f_cliffcam = clean_f_condition["f_cliffcam"]  # (B, L, 3)
+        clean_f_cam_angvel = clean_f_condition["f_cam_angvel"]  # (B, L, 6)
+        clean_f_imgseq = clean_f_condition["f_imgseq"]  # (B, L, C)
 
         B, L, J, C = obs.shape
         assert J == 17 and C == 3
         # Main token from observation (2D pose)
         obs = obs.clone()
+        clean_obs = clean_obs.clone()
         visible_mask = obs[..., [2]] > 0.5  # (B, L, J, 1)
         obs[~visible_mask[..., 0]] = 0  # set low-conf to all zeros
         f_obs = obs[..., :2]  # (B, L, J, 32)
         f_obs = f_obs * visible_mask + self.learned_pos_params.repeat(B, L, 1, 1) * ~visible_mask  # (B, L, J, 2)
         f_obs = f_obs.reshape(B, L, -1)
+        clean_f_obs = clean_obs[..., :2]
+        clean_f_obs = clean_f_obs.reshape(B, L, -1)
 
         vis_mask = length_to_mask(length, L)  # (B, L)
         pmask = ~vis_mask  # (B, L)
@@ -174,12 +187,22 @@ class MDMBase(nn.Module):
 
         # 34 + 3 + 6 + 3 + 6 + 151
         motion = torch.cat([f_obs, f_cliffcam, f_cam_angvel, gt_pred_cam, static_gt, target_x], dim=-1)
+        clean_motion = torch.cat([clean_f_obs, clean_f_cliffcam, clean_f_cam_angvel, gt_pred_cam, static_gt, target_x], dim=-1)
         motion_mask = torch.zeros_like(motion)
         motion_mask[..., :17 * 2 + 3 + 6] = 1
         motion_mask = motion_mask * vis_mask[..., None]
 
         motion = motion * vis_mask[..., None]
-        return motion, motion_mask
+        clean_motion = clean_motion * vis_mask[..., None]
+
+        if 'f_condition_valid_mask' in batch:
+            f_condition_valid_mask = batch['f_condition_valid_mask']
+            # j2d_visible_mask = batch['j2d_visible_mask'][..., None].to(motion)
+            # j2d_visible_mask = j2d_visible_mask.repeat(1, 1, 1, 2).reshape(B, L, 34)
+            # motion_mask[:, :, :17 * 2] *= (f_condition_valid_mask['obs'][..., None].to(motion) * j2d_visible_mask)
+            motion_mask[:, :, 17 * 2:17 * 2 + 3] *= f_condition_valid_mask['f_cliffcam'][..., None].to(motion)
+            motion_mask[:, :, 17 * 2 + 3:17 * 2 + 3 + 6] *= f_condition_valid_mask['f_cam_angvel'][..., None].to(motion)
+        return motion, motion_mask, clean_motion
 
     def get_diffusion_pred_target(self, batch, target_x, gt_pred_cam, static_gt):
         diffusion = self.train_diffusion if self.training else self.test_diffusion
@@ -188,12 +211,13 @@ class MDMBase(nn.Module):
         f_condition = batch["f_condition"]
         length = f_condition["length"]
 
-        motion, motion_mask = self.generate_motion_rep(
+        motion, motion_mask, clean_motion = self.generate_motion_rep(
             batch, target_x, gt_pred_cam, static_gt
         )
         B, L, _ = motion.shape
         motion = motion.permute(0, 2, 1).unsqueeze(2).contiguous()
         motion_mask = motion_mask.permute(0, 2, 1).unsqueeze(2).contiguous()
+        clean_motion = clean_motion.permute(0, 2, 1).unsqueeze(2).contiguous()
         # Setup length and make padding mask
         vis_mask = length_to_mask(length, L)  # (B, L)
         if L > self.max_len:
@@ -232,9 +256,15 @@ class MDMBase(nn.Module):
         static_conf_logits = pred_x_start[:, :, 17 * 2 + 3 + 6 + 3:17 * 2 + 3 + 6 + 3 + 6]
         sample = pred_x_start[:, :, -151:]
 
+        clean_j2d_visible_mask = batch["clean_j2d_visible_mask"]
+        clean_j2d_visible_mask = clean_j2d_visible_mask[..., None].repeat(1, 1, 1, 2).reshape(B, L, 34)
+        valid_loss_mask = torch.ones_like(pred_x_start)
+        valid_loss_mask[..., :34] = clean_j2d_visible_mask
+
         output = {
             "pred_x_start": pred_x_start,
             "target_x_start": target_x_start,
+            "valid_loss_mask": valid_loss_mask,
             "pred_x": sample,
             "pred_cam": pred_cam,
             "static_conf_logits": static_conf_logits,
@@ -281,7 +311,7 @@ class MDMBase(nn.Module):
 
     def forward_test(self, inputs, train=False, postproc=False, static_cam=False, progress=False):
         diffusion = self.test_diffusion
-        denoiser = self.guided_denoiser
+        denoiser = self.denoiser
         length = inputs["length"]  # (B,) effective length of each sample
 
         f_condition = inputs["f_condition"]
@@ -302,7 +332,7 @@ class MDMBase(nn.Module):
                 target_x_chunk = torch.zeros(B, seqlen, 151).to(cliff_cam)
                 gt_pred_cam_chunk = torch.zeros_like(cliff_cam_chunk)
                 static_gt_chunk = torch.zeros(B, seqlen, 6).to(cliff_cam)
-                motion, motion_mask = self.generate_motion_rep(
+                motion, motion_mask, clean_motion = self.generate_motion_rep(
                     inputs_chunk, target_x_chunk, gt_pred_cam_chunk, static_gt_chunk
                 )
                 motion = motion.permute(0, 2, 1).unsqueeze(2).contiguous()
@@ -312,9 +342,9 @@ class MDMBase(nn.Module):
 
             motion = torch.cat(motion_list, dim=0)
             motion_mask = torch.cat(motion_mask_list, dim=0)
-            vis_mask = torch.ones(motion.shape[:2]).to(motion)
-            vis_mask = vis_mask.reshape(B, 1, 1, L)
-            B, _, _, _ = motion.shape
+            B, _, _, seqlen = motion.shape
+            vis_mask = torch.ones(B, seqlen).to(motion)
+            vis_mask = vis_mask.reshape(B, 1, 1, seqlen)
 
             denoiser_kwargs = {
                 "y": {
@@ -379,15 +409,13 @@ class MDMBase(nn.Module):
             x_t = motion.clone()
             x_t = motion * motion_mask
 
-            samples = samples.squeeze(2).permute(0, 2, 1).contiguous()
-            pred_cam = samples[:, :, 17 * 2 + 3 + 6:17 * 2 + 3 + 6 + 3]
-            static_conf_logits = samples[:, :, 17 * 2 + 3 + 6 + 3:17 * 2 + 3 + 6 + 3 + 6]
-            sample = samples[:, :, -151:]
-
             pred_x_start = self.denoiser(
                 x_t, diffusion._scale_timesteps(t), return_aux=False, **denoiser_kwargs
             )
             samples = pred_x_start.squeeze(2).permute(0, 2, 1).contiguous()
+            pred_cam = samples[:, :, 17 * 2 + 3 + 6:17 * 2 + 3 + 6 + 3]
+            static_conf_logits = samples[:, :, 17 * 2 + 3 + 6 + 3:17 * 2 + 3 + 6 + 3 + 6]
+            sample = samples[:, :, -151:]
 
             output = {
                 "pred_x": sample,

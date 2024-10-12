@@ -4,12 +4,20 @@ import os
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks.checkpoint import Checkpoint
 
+import wandb
 from hmr4d.utils.pylogger import Log
 from hmr4d.configs import register_store_gvhmr
 from hmr4d.utils.vis.rich_logger import print_cfg
 from hmr4d.utils.net_utils import load_pretrained_model, get_resume_ckpt_path
 from motiondiff.utils.tools import find_last_version
 from pytorch_lightning.utilities import rank_zero_only
+from hmr4d.utils.callbacks.autoresume_callback import AutoResumeCallback, AutoResume
+import yaml
+from pytorch_lightning.loggers.tensorboard import TensorBoardLogger
+
+
+def wandb_run_exists():
+    return isinstance(wandb.run, wandb.sdk.wandb_run.Run)
 
 
 def get_callbacks(cfg: DictConfig) -> list:
@@ -40,6 +48,15 @@ def train(cfg: DictConfig) -> None:
         Log.info(f"[GPU x Batch] = {cfg.pl_trainer.devices} x {cfg.data.loader_opts.train.batch_size}")
     pl.seed_everything(cfg.seed)
 
+    if AutoResume is not None:
+        details = AutoResume.get_resume_details()
+        if details:
+            cfg.resume_mode = 'last'
+            if 'wandb_id' in details:
+                cfg.wandb_run = details['wandb_id']
+                cfg.logger.version = details['version']
+            print(f"[Auto Resume] Loading. checkpoint: {details['checkpoint']} wandb_id: {details.get('wandb_id', None)}")
+        
     # preparation
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(cfg.data, _recursive_=False)
     model: pl.LightningModule = hydra.utils.instantiate(cfg.model, _recursive_=False)
@@ -47,20 +64,28 @@ def train(cfg: DictConfig) -> None:
         load_pretrained_model(model, cfg.ckpt_path)
 
     # PL callbacks and logger
-    callbacks = get_callbacks(cfg)
-    has_ckpt_cb = any([isinstance(cb, Checkpoint) for cb in callbacks])
-    if not has_ckpt_cb and cfg.pl_trainer.get("enable_checkpointing", True):
-        Log.warning("No checkpoint-callback found. Disabling PL auto checkpointing.")
-        cfg.pl_trainer = {**cfg.pl_trainer, "enable_checkpointing": False}
 
     global_rank = rank_zero_only.rank if rank_zero_only.rank is not None else 0
     if global_rank == 0:
 
         slurm_job_id = int(os.environ.get("SLURM_JOB_ID", "-1"))
         run_name = f'{cfg.exp_name}_{slurm_job_id}' if slurm_job_id > 0 else f'{cfg.exp_name}'
-        if cfg.task == 'fit':
-            cfg.logger.name = run_name
-            cfg.logger.version = run_name
+        cfg.logger.name = run_name
+
+        tb_logger = TensorBoardLogger(f'{cfg.logger.save_dir}', version=None, name='')
+        version = tb_logger.version
+
+        meta = {'wandb_run': wandb.run.id if wandb_run_exists() else None}
+        yaml.safe_dump(meta, open(f'{tb_logger.log_dir}/meta.yaml', 'w'))
+        cfg.logger.version = version
+
+    callbacks = get_callbacks(cfg)
+    has_ckpt_cb = any([isinstance(cb, Checkpoint) for cb in callbacks])
+    if not has_ckpt_cb and cfg.pl_trainer.get("enable_checkpointing", True):
+        Log.warning("No checkpoint-callback found. Disabling PL auto checkpointing.")
+        cfg.pl_trainer = {**cfg.pl_trainer, "enable_checkpointing": False}
+    if AutoResume is not None:
+        callbacks.append(AutoResumeCallback(cfg.logger.version))
 
     logger = hydra.utils.instantiate(cfg.logger, _recursive_=False)
 

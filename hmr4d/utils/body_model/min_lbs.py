@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from pytorch3d.transforms import axis_angle_to_matrix
+from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix
 from smplx.utils import Struct, to_np, to_tensor
 from hmr4d.utils.smplx_utils import forward_kinematics_motion
 

@@ -4,7 +4,7 @@ from yacs.config import CfgNode
 from .vit import ViT
 from .smpl_head import SMPLTransformerDecoderHead
 
-from pytorch3d.transforms import matrix_to_axis_angle
+from motiondiff.models.mdm.rotation_conversions import matrix_to_axis_angle
 from hmr4d.utils.geo.hmr_cam import compute_transl_full_cam
 
 

@@ -7,7 +7,7 @@ from hmr4d.utils.pylogger import Log
 import hydra
 from hydra import initialize_config_module, compose
 from pathlib import Path
-from pytorch3d.transforms import quaternion_to_matrix
+from motiondiff.models.mdm.rotation_conversions import quaternion_to_matrix
 
 from hmr4d.configs import register_store_gvhmr
 from hmr4d.utils.video_io_utils import (
@@ -63,7 +63,8 @@ def parse_args_to_cfg():
         if args.output_root is not None:
             overrides.append(f"output_root={args.output_root}")
         register_store_gvhmr()
-        cfg = compose(config_name="demo", overrides=overrides)
+        # cfg = compose(config_name="demo", overrides=overrides)
+        cfg = compose(config_name="demo_mfm", overrides=overrides)
 
     # Output
     Log.info(f"[Output Dir]: {cfg.output_dir}")
@@ -262,7 +263,7 @@ def render_global(cfg):
     _, _, K = create_camera_sensor(width, height, 24)  # render as 24mm lens
 
     # renderer
-    renderer = Renderer(width, height, device="cuda", faces=faces_smpl, K=K)
+    renderer = Renderer(width, height, device="cuda", faces=faces_smpl, K=K, bin_size=0)
     # renderer = Renderer(width, height, device="cuda", faces=faces_smpl, K=K, bin_size=0)
 
     # -- render mesh -- #

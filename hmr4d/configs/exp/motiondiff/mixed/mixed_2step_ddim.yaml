@@ -25,7 +25,7 @@ defaults:
           - metric_rich
           - metric_3dpw
 
-exp_name_base: mixed
+exp_name_base: mixed_2step_ddim
 exp_name_var: ""
 exp_name: ${exp_name_base}_${exp_name_var}
 data_name: mocap_mixed_v1
@@ -33,17 +33,16 @@ data_name: mocap_mixed_v1
 pipeline:
     _target_: hmr4d.model.gvhmr.pipeline.mfm_pipeline.Pipeline
     args_denoiser3d:
-        _target_: hmr4d.network.mdm.mdm.MDM
+        _target_: hmr4d.network.mdm.mdm_2step.MDM2Step
         model_cfg:
             pretrained_checkpoint:
                 path:  /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jiefengl/jiefengl/mdm_egosmpl_v12_contact_b64_gpu8_node1/version_3/checkpoints/model-step=0100000.ckpt
-                # path:  outputs/mocap_mixed_v1/mixed_onestep_b256-clip-xstart_loss_v1/checkpoints
                 strict: false
                 try_load: true
             diffusion:
                 sampler: ddim
                 train_timestep_respacing: ''
-                test_timestep_respacing: '2'
+                test_timestep_respacing: '50'
                 schedule_sampler_type: uniform
                 noise_schedule: cosine
                 sigma_small: true
@@ -99,8 +98,6 @@ pipeline:
         pred_cam_dim: 3
         static_conf_dim: 6
         preload_checkpoint: true
-        zero_unknown_motion: -1.0
-        pred_2dkpt: true
 
     args:
         endecoder_opt: ${endecoder}
@@ -141,5 +138,3 @@ logger:
     version: ""
     resume: 'allow'
     dir: "/tmp"
-
-wandb_run:

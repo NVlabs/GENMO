@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from pytorch3d.transforms import (
+from motiondiff.models.mdm.rotation_conversions import (
     rotation_6d_to_matrix,
     matrix_to_axis_angle,
     axis_angle_to_matrix,

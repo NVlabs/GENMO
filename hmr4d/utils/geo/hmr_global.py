@@ -1,5 +1,5 @@
 import torch
-from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle, matrix_to_quaternion, quaternion_to_matrix
+from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix, matrix_to_axis_angle, matrix_to_quaternion, quaternion_to_matrix
 import hmr4d.utils.matrix as matrix
 from hmr4d.utils.net_utils import gaussian_smooth
 

@@ -2,13 +2,13 @@ from pathlib import Path
 import numpy as np
 import torch
 from hmr4d.utils.pylogger import Log
-from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle
+from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix, matrix_to_axis_angle
+
 from time import time
 
 from hmr4d.configs import MainStore, builds
 from hmr4d.utils.smplx_utils import make_smplx
 from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
-from hmr4d.utils.vis.renderer_utils import simple_render_mesh_background
 from hmr4d.utils.video_io_utils import read_video_np, save_video
 
 import hmr4d.utils.matrix as matrix
@@ -205,6 +205,7 @@ class BedlamDatasetV2(ImgfeatMotionDatasetBase):
             print("Skeleton", (skeleton_beta[0] - data["skeleton"]).abs().max())  # (1.2e-7)
 
         if False:  # cam-overlay
+            from hmr4d.utils.vis.renderer_utils import simple_render_mesh_background
             smplx = make_smplx("supermotion")
 
             # *. original bedlam param

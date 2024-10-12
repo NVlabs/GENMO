@@ -4,7 +4,7 @@ from datetime import datetime
 import torch
 import numpy as np
 from einops import einsum
-from pytorch3d.transforms import axis_angle_to_matrix
+from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix
 
 
 def make_wis3d(output_dir="outputs/wis3d", name="debug", time_postfix=False):

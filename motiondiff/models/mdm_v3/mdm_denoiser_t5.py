@@ -465,6 +465,7 @@ class MDMDenoiser(nn.Module):
                 assert observed_motion is not None
                 x_orig = x
                 if force_motion_mask is not None:
+                    assert NotImplementedError, "force_motion_mask is not implemented"
                     force_motion_mask = force_motion_mask.reshape(bs, 1, 1, 1)
                     init_motion_mask = init_motion_mask.transpose(1, 2).unsqueeze(2)
                     init_observed_motion = init_observed_motion.transpose(1, 2).unsqueeze(2)
@@ -479,6 +480,7 @@ class MDMDenoiser(nn.Module):
                 else:
                     x = torch.cat([x, motion_mask], axis=1)
             else:
+                assert NotImplementedError, "motion_mask is not implemented"
                 if force_motion_mask is not None:
                     force_motion_mask = force_motion_mask.reshape(bs, 1, 1, 1)
                     init_motion_mask = init_motion_mask.transpose(1, 2).unsqueeze(2)
@@ -540,6 +542,8 @@ class MDMDenoiser(nn.Module):
                 src_key_padding_mask[:, pose_start_ind:] = ~y['mask'][:, 0, 0]
             if self.autoregressive:
                 src_mask = generate_ar_mask(xseq.shape[0], xseq.shape[0], tgt_start_dim=pose_start_ind, src_start_dim=pose_start_ind).to(x.device)
+            if True:
+                xseq[pose_start_ind:, ] = xseq[pose_start_ind:, ] * y['mask'].squeeze(1).permute(2, 0, 1)
             output = self.seqTransEncoder(xseq, mask=src_mask, src_key_padding_mask=src_key_padding_mask)[pose_start_ind:]  # , src_key_padding_mask=~maskseq)  # [seqlen, bs, d]
 
         elif self.arch == 'trans_dec':

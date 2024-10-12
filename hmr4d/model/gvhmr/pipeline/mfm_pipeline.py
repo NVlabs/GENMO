@@ -16,7 +16,7 @@ from hmr4d.model.gvhmr.utils.postprocess import (
 )
 from hmr4d.model.gvhmr.utils import stats_compose
 
-from pytorch3d.transforms import (
+from motiondiff.models.mdm.rotation_conversions import (
     matrix_to_rotation_6d,
     rotation_6d_to_matrix,
     axis_angle_to_matrix,
@@ -69,15 +69,29 @@ class Pipeline(nn.Module):
             "f_imgseq": inputs["f_imgseq"],  # (B, L, C=1024)
             "length": inputs["length"],
         }
+        clean_f_condition = {
+            "obs": inputs["clean_obs"] if 'clean_obs' in inputs else inputs["obs"],  # (B, L, J, 3)
+            "f_cliffcam": cliff_cam.clone(),  # (B, L, 3)
+            "f_cam_angvel": f_cam_angvel.clone(),  # (B, L, C=6)
+            "f_imgseq": inputs["f_imgseq"].clone(),  # (B, L, C=1024)
+            "length": inputs["length"].clone(),
+        }
         if train:
-            f_condition = randomly_set_null_condition(f_condition, 0.1)
+            f_condition, f_condition_valid_mask = randomly_set_null_condition(f_condition, 0.1)
+            inputs["f_condition_valid_mask"] = f_condition_valid_mask
 
         inputs["f_condition"] = f_condition
+        inputs["clean_f_condition"] = clean_f_condition
         # Forward & output
         model_output = self.denoiser3d(inputs, train=train, postproc=postproc, static_cam=static_cam)  # pred_x, pred_cam, static_conf_logits
         # model_output = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
         decode_dict = self.endecoder.decode(model_output["pred_x"])  # (B, L, C) -> dict
         outputs.update({"model_output": model_output, "decode_dict": decode_dict})
+        if "pred_x_init" in model_output:
+            outputs_init = dict()
+
+            decode_dict_init = self.endecoder.decode(model_output["pred_x_init"])  # (B, L, C) -> dict
+            outputs_init.update({"model_output": model_output, "decode_dict": decode_dict_init})
 
         # Post-processing
         outputs["pred_smpl_params_incam"] = {
@@ -86,6 +100,13 @@ class Pipeline(nn.Module):
             "global_orient": decode_dict["global_orient"],  # (B, L, 3)
             "transl": compute_transl_full_cam(model_output["pred_cam"], inputs["bbx_xys"], inputs["K_fullimg"]),
         }
+        if 'pred_x_init' in model_output:
+            outputs_init["pred_smpl_params_incam"] = {
+                "body_pose": decode_dict_init["body_pose"],  # (B, L, 63)
+                "betas": decode_dict_init["betas"],  # (B, L, 10)
+                "global_orient": decode_dict_init["global_orient"],  # (B, L, 3)
+                "transl": compute_transl_full_cam(model_output["pred_cam_init"], inputs["bbx_xys"], inputs["K_fullimg"]),
+            }
         if not train:
             pred_smpl_params_global = get_smpl_params_w_Rt_v2(  # This function has for-loop
                 global_orient_gv=decode_dict["global_orient_gv"],
@@ -115,7 +136,7 @@ class Pipeline(nn.Module):
         # ========== Compute Loss ========== #
         total_loss = 0
         mask = inputs["mask"]["valid"]  # (B, L)
-
+        valid_loss_mask = model_output["valid_loss_mask"]  # (B, L, C)
         # 1. Simple loss: MSE
         # pred_x = model_output["pred_x"]  # (B, L, C)
         # target_x = self.endecoder.encode(inputs)  # (B, L, C)
@@ -124,10 +145,20 @@ class Pipeline(nn.Module):
         t_weights = model_output["t_weights"]   # (B)
         simple_loss = F.mse_loss(pred_x_start, target_x_start, reduction="none")
         mask_simple = mask[:, :, None].expand(-1, -1, pred_x_start.size(2)).clone()  # (B, L, C)
-        mask_simple[inputs["mask"]["spv_incam_only"], :, 142:] = False  # 3dpw training
-        simple_loss = (simple_loss * mask_simple * t_weights[:, None, None]).mean()
+        mask_simple[inputs["mask"]["spv_incam_only"], :, -9:] = False  # 3dpw training
+        simple_loss = (simple_loss * mask_simple * valid_loss_mask * t_weights[:, None, None]).mean()
         total_loss += simple_loss
         outputs["simple_loss"] = simple_loss
+
+        if "pred_x_start_init" in model_output:
+            pred_x_start_init = model_output["pred_x_start_init"]
+            simple_loss_init = F.mse_loss(pred_x_start_init, target_x_start, reduction="none")
+            mask_simple_init = mask[:, :, None].expand(-1, -1, pred_x_start_init.size(2)).clone()  # (B, L, C)
+            mask_simple_init[inputs["mask"]["spv_incam_only"], :, -9:] = False  # 3dpw training
+            simple_loss_init = (simple_loss_init * mask_simple_init * valid_loss_mask * t_weights[:, None, None]).mean()
+            total_loss += simple_loss_init
+            outputs["simple_loss_init"] = simple_loss_init
+            outputs_init["simple_loss"] = simple_loss_init
 
         # 2. Extra loss
         extra_funcs = [
@@ -139,6 +170,12 @@ class Pipeline(nn.Module):
             total_loss += extra_loss
             outputs.update(extra_loss_dict)
 
+        if "pred_x_init" in model_output:
+            extra_loss, extra_loss_dict = extra_func(inputs, outputs_init, self)
+            total_loss += extra_loss
+            outputs_init.update(extra_loss_dict)
+            for k, v in outputs_init.items():
+                outputs[k + "_init"] = v
         outputs["loss"] = total_loss
         return outputs
 
@@ -146,20 +183,25 @@ class Pipeline(nn.Module):
 def randomly_set_null_condition(f_condition, uncond_prob=0.1):
     """Conditions are in shape (B, L, *)"""
     keys = list(f_condition.keys())
+    f_condition_valid_mask = {}
     for k in keys:
+        if k == "length":
+            continue
         if f_condition[k] is None:
             continue
         f_condition[k] = f_condition[k].clone()
         mask = torch.rand(f_condition[k].shape[:2]) < uncond_prob
-        f_condition[k][mask] = 0.0
-    return f_condition
+        # set this later in the motion mask
+        # f_condition[k][mask] = 0.0
+        f_condition_valid_mask[k] = ~mask
+    return f_condition, f_condition_valid_mask
 
 
 def compute_extra_incam_loss(inputs, outputs, ppl):
     model_output = outputs["model_output"]
     t_weights = model_output["t_weights"]   # (B)
 
-    decode_dict = outputs["decode_dict"]
+    # decode_dict = outputs["decode_dict"]
     endecoder = ppl.endecoder
     weights = ppl.weights
     args = ppl.args

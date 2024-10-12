@@ -25,7 +25,7 @@ defaults:
           - metric_rich
           - metric_3dpw
 
-exp_name_base: mixed
+exp_name_base: mixed_zero
 exp_name_var: ""
 exp_name: ${exp_name_base}_${exp_name_var}
 data_name: mocap_mixed_v1
@@ -43,7 +43,7 @@ pipeline:
             diffusion:
                 sampler: ddim
                 train_timestep_respacing: ''
-                test_timestep_respacing: '2'
+                test_timestep_respacing: '50'
                 schedule_sampler_type: uniform
                 noise_schedule: cosine
                 sigma_small: true
@@ -99,8 +99,7 @@ pipeline:
         pred_cam_dim: 3
         static_conf_dim: 6
         preload_checkpoint: true
-        zero_unknown_motion: -1.0
-        pred_2dkpt: true
+        zero_unknown_motion: 0.5
 
     args:
         endecoder_opt: ${endecoder}

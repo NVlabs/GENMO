@@ -17,9 +17,9 @@ from hmr4d.utils.geo_transform import apply_T_on_points, compute_T_ayfz2ay
 from hmr4d.utils.smplx_utils import make_smplx
 from einops import einsum, rearrange
 
-from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle
+from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix, matrix_to_axis_angle
 from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines, get_colors_by_conf
-from hmr4d.utils.vis.renderer import Renderer, get_global_cameras_static, get_ground_params_from_points
+# from hmr4d.utils.vis.renderer import Renderer, get_global_cameras_static, get_ground_params_from_points
 from hmr4d.utils.geo.hmr_cam import estimate_focal_length
 from hmr4d.utils.video_io_utils import read_video_np, save_video, get_writer
 import imageio
