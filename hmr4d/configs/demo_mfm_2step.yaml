@@ -1,0 +1,98 @@
+defaults:
+    - _self_
+    - model: gvhmr/gvhmr_pl_demo
+    - network: gvhmr/relative_transformer
+    - endecoder: gvhmr/v1_amass_local_bedlam_cam
+
+pipeline:
+    _target_: hmr4d.model.gvhmr.pipeline.mfm_pipeline.Pipeline
+    args_denoiser3d:
+        _target_: hmr4d.network.mdm.mdm_2step.MDM2Step
+        model_cfg:
+            pretrained_checkpoint:
+                path:  /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jiefengl/jiefengl/mdm_egosmpl_v12_contact_b64_gpu8_node1/version_3/checkpoints/model-step=0100000.ckpt
+                strict: false
+                try_load: true
+            diffusion:
+                sampler: ddim
+                train_timestep_respacing: ''
+                test_timestep_respacing: '5'
+                schedule_sampler_type: uniform
+                noise_schedule: cosine
+                sigma_small: true
+                guidance_param: 2.5
+                ddim_eta: 0.0
+            denoiser:
+                type: motiondiff.models.mdm_v3.mdm_denoiser_t5.MDMDenoiser
+                modeltype: ''
+                nfeats: 1
+                num_actions: 1
+                translation: true
+                pose_rep: rot6d
+                glob: true
+                glob_rot: true
+                latent_dim: 512
+                ff_size: 512
+                num_layers: 8
+                num_heads: 4
+                dropout: 0.1
+                activation: gelu
+                data_rep: hml_vec
+                cond_mode: text
+                cond_mask_prob: 0.5
+                action_emb: tensor
+                arch: trans_enc
+                emb_trans_dec: false
+                max_text_len: 50
+                text_embed_model: t5
+                llm_dim: 1024
+                llm_version: 't5-3b'
+                text_enc_mode: seq_concat
+                use_motion_mask: true
+        motion_rep_dim: 203
+        max_len: 120
+        cliffcam_dim: 3
+        cam_angvel_dim: 6
+        imgseq_dim: 1024
+        latent_dim: 512
+        num_layers: 12
+        num_heads: 8
+        mlp_ratio: 4.0
+        pred_cam_dim: 3
+        static_conf_dim: 6
+        preload_checkpoint: true
+        # zero_unknown_motion: -1.0
+        # pred_2dkpt: true
+    args:
+        endecoder_opt: ${endecoder}
+        normalize_cam_angvel: True
+        weights: null
+        static_conf: null
+
+ckpt_path: outputs/mocap_mixed_v1/mixed_2step_ddim_motionmask/checkpoints/e449-s169650.ckpt
+
+# ================================ #
+#          global setting          #
+# ================================ #
+
+video_name: ???
+output_root: outputs/demo
+output_dir: "${output_root}/${video_name}"
+preprocess_dir: ${output_dir}/preprocess
+video_path: "${output_dir}/0_input_video.mp4"
+
+# Options
+static_cam: False
+verbose: False
+
+paths:
+    bbx: ${preprocess_dir}/bbx.pt
+    bbx_xyxy_video_overlay: ${preprocess_dir}/bbx_xyxy_video_overlay.mp4
+    vit_features: ${preprocess_dir}/vit_features.pt
+    vitpose: ${preprocess_dir}/vitpose.pt
+    vitpose_video_overlay: ${preprocess_dir}/vitpose_video_overlay.mp4
+    hmr4d_results: ${output_dir}/hmr4d_results.pt
+    incam_video: ${output_dir}/1_incam.mp4
+    global_video: ${output_dir}/2_global.mp4
+    incam_global_horiz_video: ${output_dir}/${video_name}_3_incam_global_horiz.mp4
+    slam: ${preprocess_dir}/slam_results.pt

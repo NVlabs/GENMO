@@ -136,15 +136,15 @@ class Pipeline(nn.Module):
         # ========== Compute Loss ========== #
         total_loss = 0
         mask = inputs["mask"]["valid"]  # (B, L)
-        valid_loss_mask = model_output["valid_loss_mask"]  # (B, L, C)
+        valid_loss_mask = model_output["valid_loss_mask"][:, :, -151:]  # (B, L, C)
         # 1. Simple loss: MSE
         # pred_x = model_output["pred_x"]  # (B, L, C)
         # target_x = self.endecoder.encode(inputs)  # (B, L, C)
         pred_x_start = model_output["pred_x_start"]
         target_x_start = model_output["target_x_start"]
         t_weights = model_output["t_weights"]   # (B)
-        simple_loss = F.mse_loss(pred_x_start, target_x_start, reduction="none")
-        mask_simple = mask[:, :, None].expand(-1, -1, pred_x_start.size(2)).clone()  # (B, L, C)
+        simple_loss = F.mse_loss(pred_x_start, target_x_start, reduction="none")[:, :, -151:]
+        mask_simple = mask[:, :, None].expand(-1, -1, simple_loss.size(2)).clone()  # (B, L, C)
         mask_simple[inputs["mask"]["spv_incam_only"], :, -9:] = False  # 3dpw training
         simple_loss = (simple_loss * mask_simple * valid_loss_mask * t_weights[:, None, None]).mean()
         total_loss += simple_loss
@@ -152,8 +152,8 @@ class Pipeline(nn.Module):
 
         if "pred_x_start_init" in model_output:
             pred_x_start_init = model_output["pred_x_start_init"]
-            simple_loss_init = F.mse_loss(pred_x_start_init, target_x_start, reduction="none")
-            mask_simple_init = mask[:, :, None].expand(-1, -1, pred_x_start_init.size(2)).clone()  # (B, L, C)
+            simple_loss_init = F.mse_loss(pred_x_start_init, target_x_start, reduction="none")[:, :, -151:]
+            mask_simple_init = mask[:, :, None].expand(-1, -1, simple_loss_init.size(2)).clone()  # (B, L, C)
             mask_simple_init[inputs["mask"]["spv_incam_only"], :, -9:] = False  # 3dpw training
             simple_loss_init = (simple_loss_init * mask_simple_init * valid_loss_mask * t_weights[:, None, None]).mean()
             total_loss += simple_loss_init

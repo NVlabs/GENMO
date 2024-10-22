@@ -10,10 +10,14 @@ from motiondiff.models.common.transformer import generate_ar_mask
 from motiondiff.utils.torch_utils import move_module_dict_to_device
 from motiondiff.utils.tools import are_arrays_equal
 from hmr4d.network.base_arch.transformer.encoder_rope_s import EncoderRoPEBlock
+from hmr4d.network.base_arch.transformer.encoder_rope import EncoderRoPEBlock as EncoderRoPEBlock_old
+from timm.models.vision_transformer import Mlp
+from einops import einsum, rearrange, repeat
+from hmr4d.network.base_arch.transformer.layer import zero_module
 
 
 class MDMDenoiserROPE(nn.Module):
-    def __init__(self, pl_module, modeltype, njoints, nfeats, num_frames, num_actions, translation, pose_rep, glob, glob_rot,
+    def __init__(self, pl_module, modeltype, njoints, nfeats, num_frames, num_actions, translation, pose_rep, glob, glob_rot, output_dim,
                  latent_dim=256, ff_size=1024, num_layers=8, num_heads=4, dropout=0.1,
                  ablation=None, activation="gelu", padding_mask=False, legacy=False, data_rep='rot', dataset='amass', llm_dim=512, max_text_len=20,
                  arch='trans_enc', emb_trans_dec=False, add_x_to_memory=False, autoregressive=False, llm_type="t5", llm_version="t5-small", text_enc_mode='mean', pretrained_checkpoint=None, 
@@ -54,6 +58,7 @@ class MDMDenoiserROPE(nn.Module):
         self.action_emb = kargs.get('action_emb', None)
 
         self.input_feats = self.njoints * self.nfeats
+        self.output_dim = output_dim
 
         self.normalize_output = kargs.get('normalize_encoder_output', False)
 
@@ -73,10 +78,12 @@ class MDMDenoiserROPE(nn.Module):
         if use_global_constraints:
             self.global_feat_dims = 66 * len(global_feat_type)
             input_dim += self.global_feat_dims
-        self.input_process = InputProcess(self.data_rep, input_dim, self.latent_dim)
+        # self.input_process = InputProcess(self.data_rep, input_dim, self.latent_dim)
 
         self.sequence_pos_encoder = PositionalEncoding(self.latent_dim, self.dropout)
         self.sequence_time_encoder = PositionalEncoding(self.latent_dim, self.dropout)
+        motion_pe = torch.zeros(1, 1, self.latent_dim)
+        self.motion_pe = nn.Parameter(motion_pe, requires_grad=False)
         self.emb_trans_dec = emb_trans_dec
         self.add_x_to_memory = add_x_to_memory
         self.autoregressive = autoregressive
@@ -90,7 +97,9 @@ class MDMDenoiserROPE(nn.Module):
             atexit.register(self.cleanup)
         self.obs_motion_constraints = obs_motion_constraints
         self.use_obs_diff = use_obs_diff
-        
+
+        self.final_layer = Mlp(self.latent_dim, out_features=self.output_dim)
+        self.add_cond_linear = nn.Linear(self.input_feats * 2 + self.latent_dim, self.latent_dim)
 
         if self.arch == 'trans_enc':
             print("TRANS_ROPE init")
@@ -99,6 +108,17 @@ class MDMDenoiserROPE(nn.Module):
             self.seqTransEncoder = nn.ModuleList(
                 [
                     EncoderRoPEBlock(
+                        self.latent_dim,
+                        self.num_heads,
+                        mlp_ratio=mlp_ratio,
+                        dropout=self.dropout,
+                    )
+                    for _ in range(self.num_layers)
+                ]
+            )
+            self.seqTransEncoder_old = nn.ModuleList(
+                [
+                    EncoderRoPEBlock_old(
                         self.latent_dim,
                         self.num_heads,
                         mlp_ratio=mlp_ratio,
@@ -124,78 +144,30 @@ class MDMDenoiserROPE(nn.Module):
                 # encoded_text = self.encode_text(text)
             self.output_orient = None
 
-            if "action" in self.cond_mode:
-                if self.action_emb == 'scalar':
-                    self.embed_action = EmbedActionScalar(in_features=1, out_features=self.latent_dim,
-                                                          activation=self.activation)
-                elif self.action_emb == 'tensor':
-                    self.embed_action = EmbedActionTensor(self.num_actions, self.latent_dim)
-                else:
-                    raise Exception(f'Unknown action embedding {self.action_emb}.')
-                print('EMBED ACTION')
-            if 'kpt2d+cam_angvel' in self.cond_mode:
-                self.embed_kpt2d = EmbedActionScalar(
-                    in_features=37 * 2,
-                    out_features=self.latent_dim // 2,
-                    activation=self.activation,
-                )
-                self.embed_cam_angvel = EmbedActionScalar(
-                    in_features=6,
-                    out_features=self.latent_dim // 2,
-                    activation=self.activation,
-                )
-                n_joints = 17
-                self.mask_kpt_embedding = nn.Parameter(torch.zeros(1, 1, n_joints, 2))
-                self.embed_kptproj = nn.Linear(self.latent_dim * 2, self.latent_dim)
-                print("EMBED KPT2D+CAM_ANGVEL")
-
-                self.output_orient = nn.Linear(self.latent_dim, 6)
-            if 'local_smplfeat' in self.cond_mode:
-                self.embed_local_smplfeat = EmbedActionScalar(
-                    in_features=147,
-                    out_features=self.latent_dim,
-                    activation=self.activation,
-                )
-                print('EMBED LOCAL SMPL_FEAT')
-                self.output_orient = nn.Linear(self.latent_dim, 6)
-            
-            if 'global_smplfeat' in self.cond_mode:
-                self.embed_global_smplfeat = EmbedActionScalar(
-                    in_features=147,
-                    out_features=self.latent_dim,
-                    activation=self.activation,
-                )
-                print('EMBED GLOBAL SMPL_FEAT')
-                self.output_orient = nn.Linear(self.latent_dim, 6)
-            if "cam_vel" in self.cond_mode:
-                self.embed_cam_vel = EmbedActionScalar(
-                    in_features=9,
-                    out_features=self.latent_dim,
-                    activation=self.activation,
-                )
-                self.embed_camvelproj = nn.Linear(self.latent_dim * 2, self.latent_dim)
-                print("EMBED CAM_VEL")
-
-            if 'cam2world' in self.cond_mode:
-                self.embed_cam2world = nn.Linear(9, self.latent_dim)
-
-                print('EMBED CAM2WORLD')
-                self.output_orient = nn.Linear(self.latent_dim, 6)
-
-            if "plucker_kpt" in self.cond_mode:
-                self.embed_plucker = EmbedActionScalar(
-                    in_features=17 * (6 + 1),
-                    out_features=self.latent_dim,
-                    activation=self.activation,
-                )
-                print("EMBED PLUCKER KPT")
-                self.output_orient = nn.Linear(self.latent_dim, 6)
-
         self.output_process = OutputProcess(self.data_rep, self.input_feats, self.latent_dim, self.njoints,
                                             self.nfeats)
 
+        pred_cam_dim = 3
+        static_conf_dim = 6
+        self.pred_cam_head = Mlp(self.latent_dim, out_features=pred_cam_dim)
         self.register_buffer("pred_cam_mean", torch.tensor([1.0606, -0.0027, 0.2702]), False)
         self.register_buffer("pred_cam_std", torch.tensor([0.1784, 0.0956, 0.0764]), False)
+        self.static_conf_head = Mlp(self.latent_dim, out_features=static_conf_dim)
+
+        self.cam_angvel_dim = 6
+        self.cam_vel_dim = 3
+        self.cam_angvel_embedder = nn.Sequential(
+            nn.Linear(self.cam_angvel_dim, self.latent_dim),
+            nn.SiLU(),
+            nn.Dropout(dropout),
+            zero_module(nn.Linear(self.latent_dim, self.latent_dim)),
+        )
+        self.cam_vel_embedder = nn.Sequential(
+            nn.Linear(self.cam_vel_dim, self.latent_dim),
+            nn.SiLU(),
+            nn.Dropout(dropout),
+            zero_module(nn.Linear(self.latent_dim, self.latent_dim)),
+        )
 
         if pretrained_checkpoint is not None:
             state_dict = torch.load(pretrained_checkpoint, map_location='cpu')
@@ -294,11 +266,27 @@ class MDMDenoiserROPE(nn.Module):
         """
         assert (y is not None) == (self.cond_mode != 'no_cond'
                                    ), "must specify y if and only if the model is class-conditional"
-        bs, njoints, nfeats, nframes = x.shape
+        bs, nframes, nfeats = x.shape
         emb = self.embed_timestep(timesteps)  # [1, bs, d]
 
-        if global_joint_func is not None:
-            g_motion_l_joints, l_joints_diff = global_joint_func(x, global_motion, global_joint_mask)
+        f_cond = y["f_cond"]
+
+        if x.shape[2] == 6 + 9 + 151:
+            # only have cam_angvel
+            cam_angvel = x[:, :, :6] * (1 - motion_mask[:, :, :6]) + observed_motion[:, :, :6] * motion_mask[:, :, :6]
+            f_to_add = self.cam_angvel_embedder(cam_angvel)
+            assert self.s_pred_ind == 6, f"s_pred_ind should be 6, but got {self.s_pred_ind}"
+        elif x.shape[2] == 6 + 3 + 9 + 151:
+            # have cam_angvel and cam_vel
+            cam_angvel = x[:, :, :6] * (1 - motion_mask[:, :, :6]) + observed_motion[:, :, :6] * motion_mask[:, :, :6]
+            cam_vel = x[:, :, 6:9] * (1 - motion_mask[:, :, 6:9]) + observed_motion[:, :, 6:9] * motion_mask[:, :, 6:9]
+            f_to_add = self.cam_angvel_embedder(cam_angvel) + self.cam_vel_embedder(cam_vel)
+            assert self.s_pred_ind == 9, f"s_pred_ind should be 9, but got {self.s_pred_ind}"
+        f_cond = f_cond + f_to_add
+
+        x = x[:, :, self.s_pred_ind:]
+        motion_mask = motion_mask[:, :, self.s_pred_ind:]
+        observed_motion = observed_motion[:, :, self.s_pred_ind:]
 
         if 'text' in self.cond_mode:
             if 'enc_text' not in y:
@@ -310,10 +298,6 @@ class MDMDenoiserROPE(nn.Module):
             if self.text_enc_mode == 'mean':
                 emb_text = emb_text.mean(dim=1)
                 emb += emb_text
-        if 'action' in self.cond_mode:
-            if not (y['action'] == -1).any():  # FIXME - a hack so we can use already trained models
-                action_emb = self.embed_action(y['action'])
-                emb += self.mask_cond(action_emb)
 
         if self.use_motion_mask:
             force_motion_mask = y.get("force_motion_mask", None)
@@ -324,6 +308,7 @@ class MDMDenoiserROPE(nn.Module):
                 assert observed_motion is not None
                 x_orig = x
                 if force_motion_mask is not None:
+                    raise NotImplementedError
                     force_motion_mask = force_motion_mask.reshape(bs, 1, 1, 1)
                     init_motion_mask = init_motion_mask.transpose(1, 2).unsqueeze(2)
                     init_observed_motion = init_observed_motion.transpose(1, 2).unsqueeze(2)
@@ -332,13 +317,10 @@ class MDMDenoiserROPE(nn.Module):
 
                 x = x * (1 - motion_mask) + observed_motion * motion_mask
 
-                if self.use_obs_diff:
-                    motion_diff = ((observed_motion - x_orig) * motion_mask)[:, :67]
-                    x = torch.cat([x, motion_mask, motion_diff], axis=1)
-                else:
-                    x = torch.cat([x, motion_mask], axis=1)
+                x = torch.cat([x, motion_mask], axis=2)
             else:
                 if force_motion_mask is not None:
+                    raise NotImplementedError
                     force_motion_mask = force_motion_mask.reshape(bs, 1, 1, 1)
                     init_motion_mask = init_motion_mask.transpose(1, 2).unsqueeze(2)
                     init_observed_motion = init_observed_motion.transpose(1, 2).unsqueeze(2)
@@ -349,74 +331,79 @@ class MDMDenoiserROPE(nn.Module):
                     motion_mask = torch.zeros_like(x)
                 x = x * (1 - motion_mask) + observed_motion * motion_mask
 
-                if self.use_obs_diff:
-                    x = torch.cat([x, motion_mask, torch.zeros_like(x[:, :67])], axis=1)
-                else:
-                    x = torch.cat([x, motion_mask], axis=1)
+                x = torch.cat([x, motion_mask], axis=2)
             assert not self.use_obs_diff
-            
-        if self.use_global_constraints:
-            if global_motion is not None:
-                local_vars = locals()
-                global_feat = torch.cat([local_vars[feat] for feat in self.global_feat_type], dim=-1)
-                x = torch.cat([x, global_feat.transpose(1, 2).unsqueeze(2)], axis=1)
-            else:
-                x = torch.cat([x, torch.zeros((x.shape[0], self.global_feat_dims, *x.shape[2:]), device=x.device, dtype=x.dtype)], axis=1)
 
-        x = self.input_process(x)
+        xseq = self.add_cond_linear(torch.cat([x, f_cond], dim=2))
 
-        if self.arch == 'trans_enc':
-            # adding the timestep embed
-            pose_start_ind = 1
-            xseq = x
+        # adding the timestep embed
+        pose_start_ind = 1
 
-            # xseq = torch.cat((emb, xseq), axis=0)  # [seqlen+1, bs, d]
-            xseq = torch.cat((emb, xseq), axis=0)  # [seqlen+1, bs, d]
-            if self.text_enc_mode == "seq_concat":
-                xseq = torch.cat((emb_text.transpose(0, 1), xseq), axis=0)
-                pose_start_ind += emb_text.shape[1]
+        xseq = torch.cat((emb.transpose(0, 1), xseq), axis=1)  # [bs, seqlen+1, d]
+        if self.text_enc_mode == 'seq_concat':
+            xseq = torch.cat((emb_text, xseq), axis=1)
+            pose_start_ind += emb_text.shape[1]
 
-            xseq_start = xseq[:pose_start_ind]
-            xseq_start = self.sequence_pos_encoder(xseq_start)  # [seqlen+1, bs, 2d]
-            xseq[:pose_start_ind] = xseq_start
-            xseq[pose_start_ind:] = xseq[pose_start_ind:] + self.sequence_pos_encoder.pe[-1:, :]
-            # xseq = self.sequence_pos_encoder(xseq)  # [seqlen+1, bs, 2d]
+        xseq_start = xseq[:, :pose_start_ind, :]
+        xseq_start = self.sequence_pos_encoder(xseq_start)  # [bs, seqlen+1, 2d]
+        xseq[:, :pose_start_ind, :] = xseq_start
+        # xseq[pose_start_ind:] = xseq[pose_start_ind:] + self.motion_pe
+        # xseq = self.sequence_pos_encoder(xseq)  # [seqlen+1, bs, 2d]
 
-            if nframes > self.num_frames:
-                attnmask = torch.ones((nframes, nframes), device=x.device, dtype=torch.bool)
-                for i in range(nframes):
-                    min_ind = max(0, i - self.num_frames // 2)
-                    max_ind = min(nframes, i + self.num_frames // 2)
-                    max_ind = max(self.num_frames, max_ind)
-                    min_ind = min(nframes - self.num_frames, min_ind)
-                    attnmask[i, min_ind:max_ind] = False
-            else:
-                attnmask = None
+        if nframes > self.num_frames:
+            attnmask = torch.ones((nframes, nframes), device=x.device, dtype=torch.bool)
+            for i in range(nframes):
+                min_ind = max(0, i - self.num_frames // 2)
+                max_ind = min(nframes, i + self.num_frames // 2)
+                max_ind = max(self.num_frames, max_ind)
+                min_ind = min(nframes - self.num_frames, min_ind)
+                attnmask[i, min_ind:max_ind] = False
+            attnmask_full = torch.ones((nframes + pose_start_ind, nframes + pose_start_ind), device=x.device, dtype=torch.bool)
+            attnmask_full[pose_start_ind:, pose_start_ind:] = attnmask
+            attnmask = attnmask_full
+            attnmask = attnmask_full[pose_start_ind:, pose_start_ind:]
+        else:
+            attnmask = None
 
-            pmask = ~y['mask'][:, 0, 0, :]
-            pmask = torch.cat([torch.zeros_like(pmask[:, :1]).repeat(1, pose_start_ind), pmask], dim=1)
-            xseq = xseq.transpose(0, 1)
-            for block in self.seqTransEncoder:
-                xseq = block(
-                    xseq,
-                    attn_mask=attnmask,
-                    tgt_key_padding_mask=pmask,
-                    pose_start_ind=pose_start_ind,
-                )
-            output = xseq.transpose(0, 1)[pose_start_ind:]
+        pmask = ~y['mask']  # (B, L)
+        pmask = torch.cat([torch.zeros_like(pmask[:, :1]).repeat(1, pose_start_ind), pmask], dim=1)
+
+        # for block in self.seqTransEncoder:
+        #     xseq = block(
+        #         xseq,
+        #         attn_mask=attnmask,
+        #         tgt_key_padding_mask=pmask,
+        #         pose_start_ind=pose_start_ind,
+        #     )
+        xseq = xseq[:, pose_start_ind:]
+        pmask = ~y["mask"]
+        for block in self.seqTransEncoder_old:
+            xseq = block(xseq, attn_mask=attnmask, tgt_key_padding_mask=pmask)
 
         out_aux = {}
 
-        output = self.output_process(output)  # [bs, njoints, nfeats, nframes]
+        # Output
+        output = self.final_layer(xseq)  # (B, L, C)
+
+        length = y['length']
+        L = output.shape[1]
+        if True:
+            betas = (output[..., 126:136] * (~pmask[..., None])).sum(1) / length[:, None]  # (B, C)
+            betas = repeat(betas, "b c -> b l c", l=L)
+            output = torch.cat([output[..., :126], betas, output[..., 136:]], dim=-1)
+
         # predict camera
-        pred_cam = output[:, 17 * 2 + 3 + 6 : 17 * 2 + 3 + 6 + 3, :, :]     # [bs, 3, nfeats, nframes]
-        pred_cam = pred_cam * self.pred_cam_std.reshape(1, 3, 1, 1) + self.pred_cam_mean.reshape(1, 3, 1, 1)
+        pred_cam = self.pred_cam_head(xseq)
+        pred_cam = pred_cam * self.pred_cam_std + self.pred_cam_mean
         torch.clamp_min_(pred_cam[..., 0], 0.25)  # min_clamp s to 0.25 (prevent negative prediction)
-        output[:, 17 * 2 + 3 + 6 : 17 * 2 + 3 + 6 + 3, :, :] = pred_cam
+        output[..., self.s_pred_ind:self.s_pred_ind + 3] = pred_cam
+
+        static_conf_logits = self.static_conf_head(xseq)
+        output[..., self.s_pred_ind + 3 :self.s_pred_ind + 3 + 6] = static_conf_logits
 
         if self.use_motion_mask and motion_mask is not None:
             if self.obs_motion_constraints == 'hard':
-                output = output * (1 - motion_mask) + observed_motion * motion_mask
+                output[..., self.s_pred_ind:] = output[..., self.s_pred_ind:] * (1 - motion_mask) + observed_motion * motion_mask
         
         if return_aux:
             return output, out_aux

@@ -10,7 +10,7 @@ from .rich_utils import (
     parse_seqname_info,
     get_cam_key_wham_vid,
 )
-from hmr4d.utils.geo_transform import apply_T_on_points, transform_mat, compute_cam_angvel
+from hmr4d.utils.geo_transform import apply_T_on_points, transform_mat, compute_cam_angvel, compute_cam_tvel
 from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
 from hmr4d.utils.smplx_utils import make_smplx
 from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix, matrix_to_axis_angle
@@ -140,7 +140,9 @@ class RichSmplFullSeqDataset(data.Dataset):
         length = data["length"]
         f_imgseq = data["f_imgseq"]  # (F, 1024)
         R_w2c = data["T_w2c"][:3, :3].repeat(length, 1, 1)  # (L, 4, 4)
+        t_w2c = data["T_w2c"][:3, 3].repeat(length, 1)  # (L, 3)
         cam_angvel = compute_cam_angvel(R_w2c)  # (L, 6)
+        cam_tvel = compute_cam_tvel(t_w2c)  # (L, 3)
 
         # Return
         data = {
@@ -152,6 +154,7 @@ class RichSmplFullSeqDataset(data.Dataset):
             "length": length,
             "f_imgseq": f_imgseq,
             "cam_angvel": cam_angvel,
+            "cam_tvel": cam_tvel,
             "bbx_xys": data["bbx_xys"],  # (F, 3)
             "K_fullimg": data["K"][None].expand(length, -1, -1),  # (F, 3, 3)
             "kp2d": data["kp2d"],  # (F, 17, 3)

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from hmr4d.utils.pylogger import Log
 from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
-from hmr4d.utils.geo_transform import compute_cam_angvel
+from hmr4d.utils.geo_transform import compute_cam_angvel, compute_cam_tvel
 from hmr4d.utils.geo.hmr_cam import estimate_K, resize_K
 from hmr4d.utils.geo.flip_utils import flip_kp2d_coco17
 
@@ -70,7 +70,8 @@ class ThreedpwSmplFullSeqDataset(data.Dataset):
         bbx_xys = self.vid2bbx[vid]["bbx_xys"]  # (F, 3)
         kp2d = self.vid2kp2d[vid]  # (F, 17, 3)
         cam_angvel = compute_cam_angvel(data["T_w2c"][:, :3, :3])  # (L, 6)
-        data.update({"bbx_xys": bbx_xys, "kp2d": kp2d, "cam_angvel": cam_angvel})
+        cam_tvel = compute_cam_tvel(data["T_w2c"][:, :3, 3])  # (L, 3)
+        data.update({"bbx_xys": bbx_xys, "kp2d": kp2d, "cam_angvel": cam_angvel, "cam_tvel": cam_tvel})
 
         imgfeat_dir = self.threedpw_dir / "imgfeats/3dpw_test"
         f_img_dict = torch.load(imgfeat_dir / f"{vid}.pt")
@@ -105,12 +106,14 @@ class ThreedpwSmplFullSeqDataset(data.Dataset):
 
             R_flip_x = torch.tensor([[-1, 0, 0], [0, 1, 0], [0, 0, 1]]).float()
             flipped_R_w2c = R_flip_x @ data["T_w2c"][:, :3, :3].clone()
+            flipped_t_w2c = (R_flip_x @ data["T_w2c"][:, :3, 3:].clone())[..., 0]
 
             data_flip = {
                 "bbx_xys": flipped_bbx_xys,
                 "f_imgseq": flipped_features,
                 "kp2d": flipped_kp2d,
                 "cam_angvel": compute_cam_angvel(flipped_R_w2c),
+                "cam_tvel": compute_cam_tvel(flipped_t_w2c),
             }
             data["flip_test"] = data_flip
         return data
@@ -129,6 +132,7 @@ class ThreedpwSmplFullSeqDataset(data.Dataset):
             data["bbx_xys"] = data["bbx_xys"][mask].clone()
             data["kp2d"] = data["kp2d"][mask].clone()
             data["cam_angvel"] = data["cam_angvel"][mask].clone()
+            data["cam_tvel"] = data["cam_tvel"][mask].clone()
             data["f_imgseq"] = data["f_imgseq"][mask].clone()
             data["flip_test"] = {k: v[mask].clone() for k, v in data["flip_test"].items()}
 

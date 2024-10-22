@@ -27,7 +27,8 @@ class AutoResumeCallback(Callback):
                 cp = trainer.checkpoint_callback
                 monitor_candidates = cp._monitor_candidates(trainer)
                 cp._save_last_checkpoint(trainer, pl_module, monitor_candidates)
-                checkpoint = cp.output_dir / 'last.ckpt'
+                checkpoint = cp.output_dir / "checkpoints/last.ckpt"
+                # os.makedirs(cp.output_dir / "checkpoints", exist_ok=True)
                 details = {
                     "checkpoint": checkpoint,
                     "wandb_id": wandb.run.id if wandb_run_exists() else "",

@@ -23,7 +23,7 @@ from hmr4d.utils.vis.cv2_utils import draw_bbx_xyxy_on_image_batch, draw_coco17_
 from hmr4d.utils.preproc import Tracker, Extractor, VitPoseExtractor, SLAMModel
 
 from hmr4d.utils.geo.hmr_cam import get_bbx_xys_from_xyxy, estimate_K, convert_K_to_K4, create_camera_sensor
-from hmr4d.utils.geo_transform import compute_cam_angvel
+from hmr4d.utils.geo_transform import compute_cam_angvel, compute_cam_tvel
 from hmr4d.model.gvhmr.gvhmr_pl_demo import DemoPL
 from hmr4d.utils.net_utils import detach_to_cpu, to_cuda
 from hmr4d.utils.smplx_utils import make_smplx
@@ -64,7 +64,7 @@ def parse_args_to_cfg():
             overrides.append(f"output_root={args.output_root}")
         register_store_gvhmr()
         # cfg = compose(config_name="demo", overrides=overrides)
-        cfg = compose(config_name="demo_mfm", overrides=overrides)
+        cfg = compose(config_name="demo_mfm_2step", overrides=overrides)
 
     # Output
     Log.info(f"[Output Dir]: {cfg.output_dir}")
@@ -159,10 +159,13 @@ def load_data_dict(cfg):
     length, width, height = get_video_lwh(cfg.video_path)
     if cfg.static_cam:
         R_w2c = torch.eye(3).repeat(length, 1, 1)
+        t_w2c = torch.zeros(length, 3)
     else:
         traj = torch.load(cfg.paths.slam)
         traj_quat = torch.from_numpy(traj[:, [6, 3, 4, 5]])
         R_w2c = quaternion_to_matrix(traj_quat).mT
+        raise NotImplementedError
+        t_w2c = traj[:, :3]
     K_fullimg = estimate_K(width, height).repeat(length, 1, 1)
     # K_fullimg = create_camera_sensor(width, height, 26)[2].repeat(length, 1, 1)
 
@@ -172,6 +175,7 @@ def load_data_dict(cfg):
         "kp2d": torch.load(paths.vitpose),
         "K_fullimg": K_fullimg,
         "cam_angvel": compute_cam_angvel(R_w2c),
+        "cam_tvel": compute_cam_tvel(t_w2c),
         "f_imgseq": torch.load(paths.vit_features),
     }
     return data

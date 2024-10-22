@@ -17,5 +17,10 @@ echo "SUBMIT_SAVE_ROOT: $SUBMIT_SAVE_ROOT"
 
 source tools/slurm_init.sh $user
 
+echo "==========="
+echo "pwd:"
+pwd
+echo "cmd:"
+echo "python $python_cmd"
 python $python_cmd
 

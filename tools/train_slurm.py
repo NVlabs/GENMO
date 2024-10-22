@@ -79,7 +79,7 @@ include_files = [
     'tools/**',
     'setup.py',
     'dyn_ddns.py',
-    'third_party/**',
+    'third-party/**',
 ]
 exclude_files = [
     '/inputs',
@@ -96,6 +96,7 @@ exclude_str = ' '.join([f'--exclude="{f}"' for f in exclude_files])
 
 
 rsync_cmd = f'rsync -az --partial -m --chmod=775 {exclude_str} {include_str} --exclude="*/*" {repo_folder}/ {args.user}@cs-oci-ord-dc-02:{exp_folder}/'
+print(rsync_cmd)
 subprocess_run(rsync_cmd, shell=True)
 
 link_dataset_cmd = f'ln -s /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR {exp_folder}/inputs'
@@ -103,12 +104,13 @@ subprocess_run(f"ssh {args.user}@cs-oci-ord-login-02 '{link_dataset_cmd}'", shel
 
 for cmd, tag in slurm_cmds:
     job_cmd = f"cd {exp_folder}; tools/slurm_job.sh {args.user} {args.branch} {cmd}"
+    print('job_cmd:', job_cmd)
 
     autoresume_str = f'--autoresume_timer {args.test_autoresume_timer}' if args.test_autoresume_timer > 0 else f'--autoresume_before_timelimit {args.autoresume_before_timelimit}'
     autoresume_str += " --autoresume_ignore_failure"
     account_str = f'--account {args.account}' if args.account is not None else ''
     ssh_cmd = \
-    f'submit_job --partition {args.partition} {account_str} --duration {args.time} --gpu {args.gpus} --nodes {args.nodes} --tasks_per_node {args.gpus} {autoresume_str} --email_mode {args.slack_mode} --image /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/docker/motiondiff_0.3.5.sqsh' + \
+    f'submit_job --partition {args.partition} {account_str} --duration {args.time} --gpu {args.gpus} --nodes {args.nodes} --tasks_per_node {args.gpus} {autoresume_str} --email_mode {args.slack_mode} --image /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/docker/gvhmr+v1.sqsh' + \
     f' --name {tag} --command "{job_cmd}"'
 
     print(f"ssh {args.user}@cs-oci-ord-login-02 '{ssh_cmd}'")
@@ -116,7 +118,7 @@ for cmd, tag in slurm_cmds:
         subprocess_run(f"ssh {args.user}@cs-oci-ord-login-02 '{ssh_cmd}'", shell=True)
     else:
         ssh_cmd = (
-            f"submit_job --partition {args.partition} {account_str} --duration {args.time} --gpu {args.gpus} --nodes {args.nodes} --tasks_per_node {args.gpus} {autoresume_str} --email_mode {args.slack_mode} --image /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/docker/motiondiff_0.3.5.sqsh"
+            f"submit_job --partition {args.partition} {account_str} --duration {args.time} --gpu {args.gpus} --nodes {args.nodes} --tasks_per_node {args.gpus} {autoresume_str} --email_mode {args.slack_mode} --image /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/docker/gvhmr+v1.sqsh"
             + f' --name {tag} --command "{job_cmd}"'
         )
 

@@ -5,7 +5,7 @@ from torch.utils import data
 from hmr4d.utils.pylogger import Log
 from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
 
-from hmr4d.utils.geo_transform import compute_cam_angvel
+from hmr4d.utils.geo_transform import compute_cam_angvel, compute_cam_tvel
 from motiondiff.models.mdm.rotation_conversions import quaternion_to_matrix
 from hmr4d.utils.geo.hmr_cam import estimate_K, resize_K
 from hmr4d.utils.geo.flip_utils import flip_kp2d_coco17
@@ -81,9 +81,12 @@ class EmdbSmplFullSeqDataset(data.Dataset):
         if use_DPVO:
             traj = self.cam_traj[data["meta"]["vid"]]  # (L, 7)
             R_w2c = quaternion_to_matrix(traj[:, [6, 3, 4, 5]]).mT  # (L, 3, 3)
+            assert NotImplementedError
         else:  # GT
             R_w2c = data["T_w2c"][:, :3, :3]  # (L, 3, 3)
+            t_w2c = data["T_w2c"][:, :3, 3]  # (L, 3)
         data["cam_angvel"] = compute_cam_angvel(R_w2c)  # (L, 6)
+        data["cam_tvel"] = compute_cam_tvel(t_w2c)  # (L, 3)
 
         # image bbx, features
         bbx_xys = label["bbx_xys"]
@@ -122,12 +125,14 @@ class EmdbSmplFullSeqDataset(data.Dataset):
 
             R_flip_x = torch.tensor([[-1, 0, 0], [0, 1, 0], [0, 0, 1]]).float()
             flipped_R_w2c = R_flip_x @ R_w2c.clone()
+            flipped_t_w2c = (R_flip_x @ t_w2c.clone()[..., None])[..., 0]
 
             data_flip = {
                 "bbx_xys": flipped_bbx_xys,
                 "f_imgseq": flipped_features,
                 "kp2d": flipped_kp2d,
                 "cam_angvel": compute_cam_angvel(flipped_R_w2c),
+                "cam_tvel": compute_cam_tvel(flipped_t_w2c),
             }
             data["flip_test"] = data_flip
 

@@ -5,7 +5,7 @@ import numpy as np
 
 from hmr4d.utils.pylogger import Log
 from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
-from hmr4d.utils.geo_transform import compute_cam_angvel
+from hmr4d.utils.geo_transform import compute_cam_angvel, compute_cam_tvel
 from hmr4d.utils.geo.hmr_cam import estimate_K, resize_K
 from hmr4d.utils.geo.flip_utils import flip_kp2d_coco17
 from hmr4d.dataset.imgfeat_motion.base_dataset import ImgfeatMotionDatasetBase
@@ -101,7 +101,7 @@ class ThreedpwSmplDataset(ImgfeatMotionDatasetBase):
         smpl_params_w_zero = {k: torch.zeros_like(v) for k, v in smpl_params_c.items()}
         K_fullimg = data["K_fullimg"][None].repeat(length, 1, 1)
         cam_angvel = compute_cam_angvel(data["T_w2c"][:, :3, :3])
-
+        cam_tvel = compute_cam_tvel(data["T_w2c"][:, :3, 3])
         max_len = self.max_motion_frames
         return_data = {
             "meta": data["meta"],
@@ -115,6 +115,7 @@ class ThreedpwSmplDataset(ImgfeatMotionDatasetBase):
             "f_imgseq": data["f_imgseq"],  # (F, D)
             "kp2d": data["kp2d"],  # (F, 17, 3)
             "cam_angvel": cam_angvel,  # (F, 6)
+            "cam_tvel": cam_tvel,  # (F, 3)
             "mask": {
                 "valid": get_valid_mask(max_len, length),
                 "vitpose": False,
@@ -156,6 +157,7 @@ class ThreedpwSmplDataset(ImgfeatMotionDatasetBase):
         return_data["f_imgseq"] = repeat_to_max_len(return_data["f_imgseq"], max_len)
         return_data["kp2d"] = repeat_to_max_len(return_data["kp2d"], max_len)
         return_data["cam_angvel"] = repeat_to_max_len(return_data["cam_angvel"], max_len)
+        return_data["cam_tvel"] = repeat_to_max_len(return_data["cam_tvel"], max_len)
 
         return return_data
 

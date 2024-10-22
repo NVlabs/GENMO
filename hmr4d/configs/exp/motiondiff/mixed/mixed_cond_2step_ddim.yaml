@@ -25,7 +25,7 @@ defaults:
           - metric_rich
           - metric_3dpw
 
-exp_name_base: mixed_onestep_rope
+exp_name_base: mixed_cond_2step_ddim
 exp_name_var: ""
 exp_name: ${exp_name_base}_${exp_name_var}
 data_name: mocap_mixed_v1
@@ -33,28 +33,26 @@ data_name: mocap_mixed_v1
 pipeline:
     _target_: hmr4d.model.gvhmr.pipeline.mfm_pipeline.Pipeline
     args_denoiser3d:
-        _target_: hmr4d.network.mdm.mdm_onestep_rope2.MDMOnestep
+        _target_: hmr4d.network.mdm.mdm_cond_2step.MDM2CondStep
         model_cfg:
-            # pretrained_checkpoint:
-            #     path:  /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jiefengl/jiefengl/mdm_egosmpl_v12_contact_b64_gpu8_node1/version_3/checkpoints/model-step=0100000.ckpt
-            #     strict: false
-            #     try_load: true
+            pretrained_checkpoint:
+                path:  /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jiefengl/jiefengl/mdm_egosmpl_v12_contact_b64_gpu8_node1/version_3/checkpoints/model-step=0100000.ckpt
+                strict: false
+                try_load: true
             diffusion:
                 sampler: ddim
                 train_timestep_respacing: ''
-                test_timestep_respacing: '5'
+                test_timestep_respacing: '50'
                 schedule_sampler_type: uniform
                 noise_schedule: cosine
                 sigma_small: true
                 guidance_param: 2.5
                 ddim_eta: 0.0
             denoiser:
-                type: hmr4d.network.mdm.mdm_denoiser_rope.MDMDenoiserROPE
+                type: motiondiff.models.mdm_v3.mdm_denoiser_t5.MDMDenoiser
                 modeltype: ''
                 nfeats: 1
                 num_actions: 1
-                num_frames: 120
-                output_dim: 166
                 translation: true
                 pose_rep: rot6d
                 # hint_rep: kpt2d_cam_vel
@@ -63,7 +61,7 @@ pipeline:
                 latent_dim: 512
                 ff_size: 512
                 num_layers: 8
-                num_heads: 8
+                num_heads: 4
                 dropout: 0.1
                 activation: gelu
                 data_rep: hml_vec
@@ -88,7 +86,7 @@ pipeline:
                 #     l6: l3
                 #     l7: l3
                 use_motion_mask: true
-        motion_rep_dim: 160
+        motion_rep_dim: 203
         max_len: 120
         cliffcam_dim: 3
         cam_angvel_dim: 6
@@ -140,4 +138,3 @@ logger:
     version: ""
     resume: 'allow'
     dir: "/tmp"
-    id: null

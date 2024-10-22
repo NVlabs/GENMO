@@ -207,6 +207,22 @@ def normalize_kp2d(obs_kp2d, bbx_xys, clamp_scale_min=False):
     return torch.cat([normalized_obs_xy, obs_conf[..., None]], dim=-1)
 
 
+def unnormalize_kp2d(kp2d, bbx_xys, K_fullimg):
+    """
+    Args:
+        kp2d: (B, L, J, 3) [x,y,c]
+        bbx_xys: (B, L, 3)
+        K_fullimg: (B, L, 3, 3)
+    Returns:
+        kp2d: (B, L, J, 3) [x,y,c]
+    """
+    kp2d_xy = kp2d[..., :2]
+    center = bbx_xys[..., :2]
+    scale = bbx_xys[..., [2]]
+    unnormalized_kp2d_xy = kp2d_xy * scale.unsqueeze(-2) / 2 + center.unsqueeze(-2)
+    return torch.cat([unnormalized_kp2d_xy, kp2d[..., 2:]], dim=-1)
+
+
 def get_bbx_xys(i_j2d, bbx_ratio=[192, 256], do_augment=False, base_enlarge=1.2):
     """Args: (B, L, J, 3) [x,y,c] -> Returns: (B, L, 3)"""
     # Center

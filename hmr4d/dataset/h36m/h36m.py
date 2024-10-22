@@ -10,7 +10,7 @@ from hmr4d.utils import matrix
 from hmr4d.utils.smplx_utils import make_smplx
 from tqdm import tqdm
 
-from hmr4d.utils.geo_transform import compute_cam_angvel, apply_T_on_points
+from hmr4d.utils.geo_transform import compute_cam_angvel, compute_cam_tvel, apply_T_on_points
 from hmr4d.utils.geo.hmr_global import get_tgtcoord_rootparam, get_T_w2c_from_wcparams, get_c_rootparam, get_R_c2gv
 
 from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
@@ -147,6 +147,7 @@ class H36mSmplDataset(ImgfeatMotionDatasetBase):
         K_fullimg = data["K_fullimg"].repeat(length, 1, 1)  # (F, 3, 3)
         f_imgseq = data["f_imgseq"]  # (F, 1024)
         cam_angvel = compute_cam_angvel(T_w2c[:, :3, :3])  # (F, 6)  slightly different from WHAM
+        cam_tvel = compute_cam_tvel(T_w2c[:, :3, 3])  # (F, 3)
 
         # Returns: do not forget to make it batchable! (last lines)
         max_len = self.motion_frames
@@ -162,6 +163,7 @@ class H36mSmplDataset(ImgfeatMotionDatasetBase):
             "f_imgseq": f_imgseq,  # (F, D)
             "kp2d": data["kp2d"],  # (F, 17, 3)
             "cam_angvel": cam_angvel,  # (F, 6)
+            "cam_tvel": cam_tvel,  # (F, 3)
             "mask": {
                 "valid": get_valid_mask(max_len, length),
                 "vitpose": False,
@@ -195,7 +197,7 @@ class H36mSmplDataset(ImgfeatMotionDatasetBase):
         return_data["f_imgseq"] = repeat_to_max_len(return_data["f_imgseq"], max_len)
         return_data["kp2d"] = repeat_to_max_len(return_data["kp2d"], max_len)
         return_data["cam_angvel"] = repeat_to_max_len(return_data["cam_angvel"], max_len)
-
+        return_data["cam_tvel"] = repeat_to_max_len(return_data["cam_tvel"], max_len)
         return return_data
 
 

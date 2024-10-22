@@ -22,6 +22,18 @@ from motiondiff.models.mdm.rotation_conversions import (
 )
 # from torchmin import minimize
 from torch.autograd import Variable
+from hmr4d.utils.geo.hmr_cam import (
+    compute_bbox_info_bedlam,
+    compute_transl_full_cam,
+    get_a_pred_cam,
+    project_to_bi01,
+    unnormalize_kp2d,
+)
+from hmr4d.utils.geo_transform import (
+    project_p2d,
+    convert_bbx_xys_to_lurb,
+    cvt_to_bi01_p2d,
+)
 
 
 def gmof(res, sigma):
@@ -835,26 +847,13 @@ class GaussianDiffusion:
 
         Same usage as p_sample().
         """
-        if guide_2d:
+        if guide_2d or 'encoder' in model_kwargs:
 
             var = _extract_into_tensor(self.posterior_variance, t, x.shape)
             sqrt_alphas = _extract_into_tensor(self.sqrt_alphas_cumprod, t, x.shape)
-            cam2world = model_kwargs['y']['cam2world']
-            local_kpt2d = model_kwargs['y']['local_kpt2d']  # [B, T, 17, 2]
-            intrinsics = model_kwargs['y']['cam_intrinsics']    # [B, 1, 3, 3]
-            cam_orient = rotation_6d_to_matrix(cam2world[:, :, :6]) # [B, T, 3, 3]
-            cam_pos = cam2world[:, :, 6:]   # [B, T, 3]
-            local_orient = model_kwargs['y']['local_orient']
-            local_transl = model_kwargs['y']['local_transl']
-            betas = model_kwargs['y']['betas']
-            kpt2d_score = model_kwargs['y']['kpt2d_score']
-            R0 = local_orient[:, :1]    # [B, 1, 3, 3]
-            t0 = local_transl[:, :1]    # [B, 1, 3]
-            focal = intrinsics[:, :, 0, 0]  # [B, 1]
-            # pred_xstart = out["pred_xstart"]
-            # gt_global_orient = model_kwargs['y']['global_orient']
-            # gt_global_transl = model_kwargs['y']['global_transl']
             bs = x.shape[0]
+            endecoder = model_kwargs['encoder']
+            inputs = model_kwargs['inputs']
 
             use_optimize = False
             if use_optimize:
@@ -949,68 +948,54 @@ class GaussianDiffusion:
                     )
                     out = out_orig
                     pred_xstart = out_orig["pred_xstart"]
-                    joints17 = self.motion2global(
-                        pred_xstart,
-                        mean=self.motion_mean,
-                        std=self.motion_std,
-                        smpl=self.smpl,
-                        return_smpl=False,
-                    )
-                    
-                    joints17 = (R0 @ joints17.transpose(2, 3)).transpose(2, 3) + t0[:, :, None, :]
+                    samples = pred_xstart.squeeze(2).permute(0, 2, 1).contiguous()
+                    pred_cam = samples[:, :, 17 * 2 + 3 + 6:17 * 2 + 3 + 6 + 3]
+                    static_conf_logits = samples[:, :, 17 * 2 + 3 + 6 + 3:17 * 2 + 3 + 6 + 3 + 6]
+                    sample = samples[:, :, -151:]
+                    decode_dict = endecoder.decode(sample)
 
-                    # smpl_pose, smpl_transl = self.motion2global(
-                    #     pred_xstart,
-                    #     mean=self.motion_mean,
-                    #     std=self.motion_std,
-                    #     smpl=self.smpl,
-                    #     return_jts=False
-                    # )
-                    # global_orient = smpl_pose[:, :, 0]
-                    # global_orient = R0 @ global_orient
-                    # smpl_transl = (R0 @ smpl_transl[..., None])[..., 0] + t0
-                    # local_pose = smpl_pose[:, :, 1:]
-                    # bs, seqlen = smpl_pose.shape[:2]
-                    # # gt_global_orient = R0 @ gt_global_orient
-                    # # gt_global_transl = (R0 @ gt_global_transl[..., None])[..., 0] + t0
-                    # # gt_local_orient = cam_orient.transpose(2, 3) @ gt_global_orient
-                    # # gt_local_transl = (cam_orient.transpose(2, 3) @ (gt_global_transl - cam_pos)[..., None])[..., 0]
+                    outputs = dict()
+                    # Post-processing
+                    outputs["pred_smpl_params_incam"] = {
+                        "body_pose": decode_dict["body_pose"],  # (B, L, 63)
+                        "betas": decode_dict["betas"],  # (B, L, 10)
+                        "global_orient": decode_dict["global_orient"],  # (B, L, 3)
+                        "transl": compute_transl_full_cam(pred_cam, inputs["bbx_xys"], inputs["K_fullimg"]),
+                    }
+                    clean_obs_kp2d = inputs['clean_f_condition']['obs']
+                    clean_kp2d = unnormalize_kp2d(clean_obs_kp2d, inputs['bbx_xys'], inputs["K_fullimg"])
+                    bbx_lurb = convert_bbx_xys_to_lurb(inputs['bbx_xys'])
+                    clean_kp2d_bi01 = cvt_to_bi01_p2d(clean_kp2d[..., :2], bbx_lurb)
+                    conf = clean_kp2d[..., 2:3]
 
-                    # sout = self.smpl(
-                    #     global_orient=global_orient.reshape(bs * seqlen, 1, 3, 3),
-                    #     body_pose=local_pose.reshape(bs * seqlen, 23, 3, 3),
-                    #     betas=betas.reshape(bs * seqlen, 10),
-                    #     root_trans=smpl_transl.reshape(bs * seqlen, 3),
-                    #     orig_joints=True,
-                    #     pose2rot=False,
-                    # )
-                    # joints17 = torch.einsum("bik,ji->bjk", [sout.vertices, self.smpl.J_regressor_wham])[:, :17]
-                    # joints17 = joints17.reshape(bs, seqlen, 17, 3)
+                    if 'mask' in inputs:
+                        mask = inputs["mask"]["valid"]  # effective length mask
+                        mask_reproj = ~inputs["mask"]["spv_incam_only"]  # do not supervise reproj for 3DPW
 
-                    # project 3D joints to 2D
-                    joints = (cam_orient.transpose(2, 3) @ (joints17 - cam_pos[:, :, None]).transpose(2, 3)).transpose(2, 3)
-                    joints = joints / joints[..., 2:3]
-                    joints = (intrinsics @ joints.transpose(2, 3)).transpose(2, 3)
-                    joints = joints[..., :2]
-                    diff = (joints - local_kpt2d)
-                    robust_sqr_dist = gmof(diff, sigma=100)
-                    loss = ((kpt2d_score**2) * robust_sqr_dist).mean()
+                    pred_c_j3d = endecoder.fk_v2(**outputs["pred_smpl_params_incam"])
+                    reproj_z_thr = 0.3
+                    pred_c_j3d_z0_mask = pred_c_j3d[..., 2].abs() <= reproj_z_thr
+                    # pred_c_j3d[pred_c_j3d_z0_mask] = reproj_z_thr
+                    pred_j2d_01 = project_to_bi01(pred_c_j3d, inputs["bbx_xys"], inputs["K_fullimg"])  # 22 joints
+
+                    # 22 -> 10
+                    select_smplx = [16, 17, 18, 19, 20, 21, 4, 5, 7, 8]
+                    select_coco = [5, 6, 7, 8, 9, 10, 13, 14, 15, 16]
+                    loss = (conf[..., select_coco, :] * ((clean_kp2d_bi01[..., select_coco, :] - pred_j2d_01[..., select_smplx, :])**2)).mean()
 
                     # loss = (((joints - local_kpt2d).abs() * kpt2d_score / focal[..., None, None]) ** 2).mean()
                     loss.backward()
                     grad = x.grad
-                    grad[:, 9:] = 0
 
                     # self.thresh_grad = 'clip_norm'
-                    # self.thresh_grad = None
-                    # self.thresh_grad = 'var'
+                    # # self.thresh_grad = None
+                    # # self.thresh_grad = 'var'
                     # self.thresh_grad_param = 10.0
                     # if self.thresh_grad == 'var':
                     #     grad = grad * var.mean()
                     # elif self.thresh_grad == 'clip_norm':
                     #     max_norm = self.thresh_grad_param
                     #     grad_norm = torch.linalg.vector_norm(grad, ord=2, dim=(1,2,3))
-                    #     # print(grad_norm)
                     #     clip_coef = max_norm / (grad_norm + 1e-6)
                     #     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
                     #     grad = grad * clip_coef_clamped[:,None,None,None]
@@ -1019,18 +1004,23 @@ class GaussianDiffusion:
                     #     grad = torch.clamp(grad, min=-clip_val, max=clip_val)
 
                     # pred_xstart = pred_xstart.detach() - grad
-                    x = x - grad
-
-                    # out_orig = self.p_mean_variance(
-                    #     model,
-                    #     x,
-                    #     t,
-                    #     clip_denoised=clip_denoised,
-                    #     denoised_fn=denoised_fn,
-                    #     model_kwargs=model_kwargs,
-                    # )
-                    # out = out_orig
-                    # pred_xstart = out["pred_xstart"]
+                    # import ipdb; ipdb.set_trace()
+                    # x = x - torch.clamp(grad * 3e7, min=-1, max=1) # * out["variance"]
+                    x = x.detach()
+                    x = x - torch.clamp(grad * 3e7, min=-1, max=1) # * out["variance"]
+                    # x[:, :-9] = x[:, :-9] - torch.clamp(grad[:, :-9] * 3e7, min=-1, max=1) # * out["variance"]
+                    # pred_xstart = pred_xstart.detach() - grad * 3e6
+                with torch.no_grad():
+                    out_orig = self.p_mean_variance(
+                        model,
+                        x,
+                        t,
+                        clip_denoised=clip_denoised,
+                        denoised_fn=denoised_fn,
+                        model_kwargs=model_kwargs,
+                    )
+                    out = out_orig
+                    pred_xstart = out["pred_xstart"]
                     # self.thresh_pred = "dynamic"
                     # self.thresh_pred = None
                     # self.thresh_pred_param = 0.98, 10.0

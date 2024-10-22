@@ -576,6 +576,16 @@ def compute_cam_angvel(R_w2c, padding_last=True):
     return cam_angvel.float()
 
 
+def compute_cam_tvel(t_w2c, padding_last=True):
+    """
+    t_w2c : (F, 3)
+    """
+    cam_tvel = (t_w2c[1:] - t_w2c[:-1])
+    assert padding_last
+    cam_tvel = torch.cat([cam_tvel, cam_tvel[-1:]], dim=0)  # (F, 3)
+    return cam_tvel.float()
+
+
 def ransac_gravity_vec(xyz, num_iterations=100, threshold=0.05, verbose=False):
     # xyz: (L, 3)
     N = xyz.shape[0]

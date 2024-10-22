@@ -584,7 +584,8 @@ class MDMDenoiser(nn.Module):
         # predict camera
         pred_cam = output[:, 17 * 2 + 3 + 6 : 17 * 2 + 3 + 6 + 3, :, :]     # [bs, 3, nfeats, nframes]
         pred_cam = pred_cam * self.pred_cam_std.reshape(1, 3, 1, 1) + self.pred_cam_mean.reshape(1, 3, 1, 1)
-        torch.clamp_min_(pred_cam[..., 0], 0.25)  # min_clamp s to 0.25 (prevent negative prediction)
+        # torch.clamp_min_(pred_cam[..., 0], 0.25)  # min_clamp s to 0.25 (prevent negative prediction)
+        torch.clamp_min_(pred_cam[:, 0, :, :], 0.25)  # min_clamp s to 0.25 (prevent negative prediction)
         output[:, 17 * 2 + 3 + 6 : 17 * 2 + 3 + 6 + 3, :, :] = pred_cam
 
         # # predict static
