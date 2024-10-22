@@ -73,11 +73,10 @@ def train(cfg: DictConfig) -> None:
     # PL callbacks and logger
 
     global_rank = rank_zero_only.rank if rank_zero_only.rank is not None else 0
+    tb_logger = TensorBoardLogger(f'{cfg.logger.save_dir}', version=version, name='')
+    version = tb_logger.version
+    
     if global_rank == 0:
-
-        tb_logger = TensorBoardLogger(f'{cfg.logger.save_dir}', version=version, name='')
-        version = tb_logger.version
-
         slurm_job_id = int(os.environ.get("SLURM_JOB_ID", "-1"))
         run_name = f'{cfg.exp_name}_v{version}_{slurm_job_id}' if slurm_job_id > 0 else f'{cfg.exp_name}'
         cfg.logger.name = run_name
@@ -85,7 +84,7 @@ def train(cfg: DictConfig) -> None:
         os.makedirs(tb_logger.log_dir, exist_ok=True)
         cfg.logger.save_dir = tb_logger.log_dir
         cfg.output_dir = tb_logger.log_dir
-        cfg.logger.version = version
+        # cfg.logger.version = version  # shouldn't set version for Wandb
 
         if cfg.resume_mode == 'last' and os.path.exists(f'{tb_logger.log_dir}/meta.yaml'):
             meta = yaml.safe_load(open(f'{tb_logger.log_dir}/meta.yaml', 'r'))
