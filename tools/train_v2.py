@@ -62,7 +62,7 @@ def train(cfg: DictConfig) -> None:
             print(f"[Auto Resume] Loading. checkpoint: {details['checkpoint']} wandb_id: {details.get('wandb_id', None)}")
     
     if version is None:
-        version = find_last_version(cfg.logger.save_dir + '/checkpoints_resume', cp=None)
+        version = find_last_version(cfg.logger.save_dir + '/checkpoints', cp=None)
 
     # preparation
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(cfg.data, _recursive_=False)
@@ -99,7 +99,7 @@ def train(cfg: DictConfig) -> None:
         cfg.pl_trainer = {**cfg.pl_trainer, "enable_checkpointing": False}
     checkpoint_epoch_cb = ModelCheckpoint(
         monitor=None,
-        dirpath=tb_logger.log_dir + "/checkpoints_resume",
+        dirpath=tb_logger.log_dir + "/checkpoints",
         filename="model-{epoch:02d}",
         save_last=True,
         save_top_k=-1,
@@ -133,10 +133,9 @@ def train(cfg: DictConfig) -> None:
     if cfg.task == "fit":
         resume_path = None
         if cfg.resume_mode is not None:
-            save_dir = cfg.logger.save_dir + "/checkpoints_resume"
+            save_dir = cfg.logger.save_dir + "/checkpoints"
             print('='*20)
-            print('save dir')
-            print(save_dir)
+            print('save dir', save_dir)
             resume_path = get_resume_ckpt_path(cfg.resume_mode, ckpt_dir=save_dir)
             Log.info(f"Resume training from {resume_path}")
         Log.info("Start Fitiing...")
