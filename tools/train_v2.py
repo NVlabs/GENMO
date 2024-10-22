@@ -108,7 +108,7 @@ def train(cfg: DictConfig) -> None:
     )
     callbacks.append(checkpoint_epoch_cb)
     if AutoResume is not None:
-        callbacks.append(AutoResumeCallback(cfg.logger.version))
+        callbacks.append(AutoResumeCallback(version))
 
     logger = hydra.utils.instantiate(cfg.logger, _recursive_=False)
     if global_rank == 0:
