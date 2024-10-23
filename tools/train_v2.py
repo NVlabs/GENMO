@@ -75,15 +75,14 @@ def train(cfg: DictConfig) -> None:
     global_rank = rank_zero_only.rank if rank_zero_only.rank is not None else 0
     tb_logger = TensorBoardLogger(f'{cfg.logger.save_dir}', version=version, name='')
     version = tb_logger.version
+    os.makedirs(tb_logger.log_dir, exist_ok=True)
+    cfg.logger.save_dir = tb_logger.log_dir
+    cfg.output_dir = tb_logger.log_dir
     
     if global_rank == 0:
         slurm_job_id = int(os.environ.get("SLURM_JOB_ID", "-1"))
         run_name = f'{cfg.exp_name}_v{version}_{slurm_job_id}' if slurm_job_id > 0 else f'{cfg.exp_name}'
         cfg.logger.name = run_name
-
-        os.makedirs(tb_logger.log_dir, exist_ok=True)
-        cfg.logger.save_dir = tb_logger.log_dir
-        cfg.output_dir = tb_logger.log_dir
         # cfg.logger.version = version  # shouldn't set version for Wandb
 
         if cfg.resume_mode == 'last' and os.path.exists(f'{tb_logger.log_dir}/meta.yaml'):
@@ -97,16 +96,6 @@ def train(cfg: DictConfig) -> None:
     if not has_ckpt_cb and cfg.pl_trainer.get("enable_checkpointing", True):
         Log.warning("No checkpoint-callback found. Disabling PL auto checkpointing.")
         cfg.pl_trainer = {**cfg.pl_trainer, "enable_checkpointing": False}
-    checkpoint_epoch_cb = ModelCheckpoint(
-        monitor=None,
-        dirpath=tb_logger.log_dir + "/checkpoints",
-        filename="model-{epoch:02d}",
-        save_last=True,
-        save_top_k=-1,
-        mode="min",
-        every_n_epochs=1,
-    )
-    callbacks.append(checkpoint_epoch_cb)
     if AutoResume is not None:
         callbacks.append(AutoResumeCallback(version))
 

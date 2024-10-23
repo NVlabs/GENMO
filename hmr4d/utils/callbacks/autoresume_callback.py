@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Any
 import wandb
@@ -20,15 +21,54 @@ class AutoResumeCallback(Callback):
         if AutoResume is not None:
             AutoResume.init()
         self.version = version
+        self.last_epoch_checkpoint = None
+
+    def _dump_current_checkpoint(self, trainer):
+        cp = trainer.checkpoint_callback
+        try:
+            checkpoint_dict = trainer._checkpoint_connector.dump_checkpoint(
+                cp.save_weights_only
+            )
+        except ValueError:
+            # This can happen for 16 precision for the first iterations
+            # when the GradScaler is still adapting and skipping steps
+            checkpoint_dict = None
+        return checkpoint_dict
+
+    def _save_checkpoint(self, trainer, checkpoint, filepath):
+        """Save a checkpoint to the memory."""
+
+        trainer.strategy.save_checkpoint(
+            checkpoint,
+            filepath,
+        )
+        # trainer.strategy.barrier("Trainer.save_checkpoint")
+
+    def _save_last_checkpoints(self, trainer):
+        cp = trainer.checkpoint_callback
+        monitor_candidates = cp._monitor_candidates(trainer)
+
+        # Save last epoch. This is the one we will use for the autoresume
+        filepath_epoch = cp.output_dir / 'last.ckpt'
+        if self.last_epoch_checkpoint is not None:
+            self._save_checkpoint(trainer, self.last_epoch_checkpoint, filepath_epoch)
+        else:
+            filepath_epoch = None
+
+        # Save last step just in case
+        # filepath_step = cp.output_dir / 'last_step.ckpt'
+        # last_step_checkpoint = self._dump_current_checkpoint(trainer)
+        # if last_step_checkpoint is not None:
+        #     self._save_checkpoint(trainer, last_step_checkpoint, filepath_step)
+
+        # save top k
+        # self._save_topk_checkpoint(trainer)
+        return filepath_epoch
 
     def _check_autoresume(self, trainer, pl_module):
         if AutoResume is not None and AutoResume.termination_requested():
             if trainer.global_rank == 0:
-                cp = trainer.checkpoint_callback
-                monitor_candidates = cp._monitor_candidates(trainer)
-                cp._save_last_checkpoint(trainer, pl_module, monitor_candidates)
-                checkpoint = cp.output_dir / "checkpoints/last.ckpt"
-                # os.makedirs(cp.output_dir / "checkpoints", exist_ok=True)
+                checkpoint = self._save_last_checkpoints(trainer)
                 details = {
                     "checkpoint": checkpoint,
                     "wandb_id": wandb.run.id if wandb_run_exists() else "",
@@ -46,6 +86,18 @@ class AutoResumeCallback(Callback):
                 trainer.limit_val_batches = 0
             else:
                 print(f"[Auto Resume] Rank {trainer.global_rank} exiting.", flush=True)
+
+    def on_train_epoch_end(
+        self,
+        trainer: Trainer,
+        pl_module: LightningModule,
+    ) -> None:
+        # only for rank 0
+        if trainer.global_rank == 0:
+            # save the last epoch checkpoint in memory
+            # this is the one we will dump for the "last" checkpoint
+            checkpoint_dict = self._dump_current_checkpoint(trainer)
+            self.last_epoch_checkpoint = checkpoint_dict
 
     def on_train_batch_end(
         self,
