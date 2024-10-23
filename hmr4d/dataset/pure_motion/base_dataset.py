@@ -178,6 +178,7 @@ class BaseDataset(Dataset):
         return_data["K_fullimg"] = repeat_to_max_len(return_data["K_fullimg"], max_len)
         return_data["cam_angvel"] = repeat_to_max_len(return_data["cam_angvel"], max_len)
         return_data["cam_tvel"] = repeat_to_max_len(return_data["cam_tvel"], max_len)
+        return_data["T_w2c"] = repeat_to_max_len(return_data["T_w2c"], max_len)
         return return_data
 
     def __getitem__(self, idx):

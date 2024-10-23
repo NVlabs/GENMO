@@ -116,6 +116,7 @@ class ThreedpwSmplDataset(ImgfeatMotionDatasetBase):
             "kp2d": data["kp2d"],  # (F, 17, 3)
             "cam_angvel": cam_angvel,  # (F, 6)
             "cam_tvel": cam_tvel,  # (F, 3)
+            "T_w2c": data["T_w2c"],  # (F, 4, 4)
             "mask": {
                 "valid": get_valid_mask(max_len, length),
                 "vitpose": False,
@@ -158,6 +159,7 @@ class ThreedpwSmplDataset(ImgfeatMotionDatasetBase):
         return_data["kp2d"] = repeat_to_max_len(return_data["kp2d"], max_len)
         return_data["cam_angvel"] = repeat_to_max_len(return_data["cam_angvel"], max_len)
         return_data["cam_tvel"] = repeat_to_max_len(return_data["cam_tvel"], max_len)
+        return_data["T_w2c"] = repeat_to_max_len(return_data["T_w2c"], max_len)
 
         return return_data
 

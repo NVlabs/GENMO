@@ -36,11 +36,14 @@ class MV2D(pl.LightningModule):
         pipeline,
         optimizer=None,
         scheduler_cfg=None,
+        model_cfg=None,
         ignored_weights_prefix=["smplx", "pipeline.endecoder"],
     ):
         super().__init__()
         self.pipeline = instantiate(pipeline, _recursive_=False)
         self.optimizer = instantiate(optimizer)
+        self.model_cfg = model_cfg
+        self.num_views = model_cfg.num_views
         self.scheduler_cfg = scheduler_cfg
 
         # Options
@@ -51,6 +54,34 @@ class MV2D(pl.LightningModule):
 
         # SMPLX
         self.smplx = make_smplx("supermotion_v437coco17")
+        
+    def obtain_mv2d(self, batch, gt_j3d):
+        gt_j3d = gt_j3d.float()
+        h36m_index = torch.tensor([meta["data_name"] == "h36m" for meta in batch["meta"]])
+        rot_angle_base = torch.zeros(gt_j3d.shape[0], 3).float()
+        rot_angle_base[h36m_index, 2] = 0.5 * np.pi
+        rot_angle_base[~h36m_index, 1] = 0.5 * np.pi
+        
+        with torch.autocast(device_type='cuda', enabled=False):
+            mv2d = []
+            T_c2w = batch["T_w2c"].float().inverse()
+            gt_j3d_world = apply_T_on_points(gt_j3d, T_c2w)
+            gt_root_world = gt_j3d_world[:, :, 0]
+            T_c2w[..., :3, -1] -= gt_root_world
+            for i in range(self.num_views):
+                y_rot = angle_axis_to_rotation_matrix(rot_angle_base * i).unsqueeze(1)
+                T_y_rot = make_transform(y_rot, torch.zeros(3).to(T_c2w))
+                T_c2w_new = T_y_rot @ T_c2w
+                T_c2w_new[..., :3, -1] += gt_root_world
+                T_w2c_new = T_c2w_new.inverse()
+                gt_j3d_local = apply_T_on_points(gt_j3d_world, T_w2c_new) 
+                new_j2d = perspective_projection(gt_j3d_local, batch["K_fullimg"])
+                mv2d.append(new_j2d)
+        mv2d = torch.stack(mv2d, dim=2)
+        # mv2d = torch.cat([mv2d, (mv2d[..., [11], :] + mv2d[..., [12], :]) * 0.5], dim=-2)
+        # vis_id = 0
+        # draw_motion_2d(mv2d[vis_id].cpu(), f"out/debug_vis/{batch['meta'][vis_id]['data_name']}.mp4", coco_joint_parents, 1000, 1000, fps=30)
+        return mv2d
 
     def training_step(self, batch, batch_idx):
         B, F = batch["smpl_params_c"]["body_pose"].shape[:2]
@@ -134,26 +165,18 @@ class MV2D(pl.LightningModule):
         batch["clean_obs"] = normalize_kp2d(clean_obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
         batch["clean_j2d_visible_mask"] = clean_j2d_visible_mask
         
+        mv2d = self.obtain_mv2d(batch, gt_j3d)
+        mv2d[:, :, 0] = clean_obs_i_j2d
+        mv2d = torch.cat([mv2d, clean_j2d_visible_mask[:, :, None, :, None].repeat(1, 1, self.num_views, 1, 1)], dim=-1)
+        mv2d_bbox = [batch["bbx_xys"]]
+        mv2d_norm = [batch["clean_obs"]]
+        for i in range(1, self.num_views):
+            bbox = get_bbx_xys(mv2d[:, :, i], do_augment=False)
+            mv2d_bbox.append(bbox)
+            mv2d_norm.append(normalize_kp2d(mv2d[:, :, i], bbox))
+        mv2d_bbox = torch.stack(mv2d_bbox, dim=2)
+        mv2d_norm = torch.stack(mv2d_norm, dim=2)
         
-        with torch.autocast(device_type='cuda', enabled=False):
-            T_c2w = T_c2w_old = batch["T_w2c"].float().inverse()
-            gt_j3d_world = apply_T_on_points(gt_j3d.float(), T_c2w)
-            gt_root_world = gt_j3d_world.float()[:, :, 0]
-            T_c2w[..., :3, -1] -= gt_root_world
-            y_rot = angle_axis_to_rotation_matrix(torch.tensor([0, np.pi, 0]).to(T_c2w))
-            T_y_rot = make_transform(y_rot, torch.zeros(3).to(T_c2w))
-            T_c2w = T_y_rot @ T_c2w
-            T_c2w[..., :3, -1] += gt_root_world
-            T_w2c_new = T_c2w.inverse()
-            
-        gt_j3d_local = apply_T_on_points(gt_j3d_world, T_w2c_new) 
-            
-        new_j2d = perspective_projection(gt_j3d_local, batch["K_fullimg"])
-        mv2d = torch.stack([clean_obs_i_j2d, new_j2d], dim=2)
-        mv2d = torch.cat([mv2d, (mv2d[..., [11], :] + mv2d[..., [12], :]) * 0.5], dim=-2)
-        draw_motion_2d(mv2d[1].cpu(), f"out/debug_vis/{batch_idx}.mp4", coco_joint_parents, 1000, 1000, fps=30)
-        
-
         if True:  # Use some detected vitpose (presave data)
             prob = 0.5
             mask_real_vitpose = (torch.rand(B).to(obs_kp2d) < prob) * batch["mask"]["vitpose"]
@@ -356,6 +379,7 @@ mv2d = builds(
     pipeline="${pipeline}",
     optimizer="${optimizer}",
     scheduler_cfg="${scheduler_cfg}",
+    model_cfg="${model_cfg}",
     populate_full_signature=True,  # Adds all the arguments to the signature
 )
 MainStore.store(name="mv2d", node=mv2d, group="model/gvhmr")
