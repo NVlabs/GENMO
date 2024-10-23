@@ -174,8 +174,14 @@ class MV2D(pl.LightningModule):
             bbox = get_bbx_xys(mv2d[:, :, i], do_augment=False)
             mv2d_bbox.append(bbox)
             mv2d_norm.append(normalize_kp2d(mv2d[:, :, i], bbox))
-        mv2d_bbox = torch.stack(mv2d_bbox, dim=2)
-        mv2d_norm = torch.stack(mv2d_norm, dim=2)
+        batch['mv2d_bbox'] = mv2d_bbox = torch.stack(mv2d_bbox, dim=2)
+        batch['mv2d_norm'] = mv2d_norm = torch.stack(mv2d_norm, dim=2)
+        
+        # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
+        # draw_motion_2d((mv2d_norm[1, ..., :2].cpu() + 1.0) * 400, f"out/debug_vis/{batch['meta'][1]['data_name']}_new.mp4", coco_joint_parents, 1000, 1000, fps=30)
+        # mv2d_norm[:, :, 0, :17] = obs
+        # mv2d_norm[:, :, :, [17]] = (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5
+        # draw_motion_2d((mv2d_norm[1, ..., :2].cpu() + 1.0) * 400, f"out/debug_vis/{batch['meta'][1]['data_name']}_obs.mp4", coco_joint_parents, 1000, 1000, fps=30)
         
         if True:  # Use some detected vitpose (presave data)
             prob = 0.5
@@ -185,6 +191,8 @@ class MV2D(pl.LightningModule):
         # Set untrusted frames to False
         batch["obs"][~batch["mask"]["valid"]] = 0
         batch["clean_obs"][~batch["mask"]["valid"]] = 0
+        batch["mv2d_bbox"][~batch["mask"]["valid"]] = 0
+        batch["mv2d_norm"][~batch["mask"]["valid"]] = 0
         assert batch["clean_obs"].shape == batch["obs"].shape, f"{batch['clean_obs'].shape} != {batch['obs'].shape}"
 
         if False:  # wis3d
