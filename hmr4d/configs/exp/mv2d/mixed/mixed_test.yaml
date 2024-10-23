@@ -24,7 +24,7 @@ defaults:
           - metric_emdb2
           - metric_rich
           - metric_3dpw
-    - override /network: gvhmr/relative_transformer
+    - override /network: mv2d/relative_transformer
 
 exp_name_base: mixed
 exp_name_var: ""
@@ -35,7 +35,7 @@ model_cfg:
     num_views: 4
 
 pipeline:
-    _target_: hmr4d.model.gvhmr.pipeline.gvhmr_pipeline.Pipeline
+    _target_: hmr4d.model.gvhmr.pipeline.mv2d_pipeline.Pipeline
     args_denoiser3d: ${network}
     args:
         endecoder_opt: ${endecoder}

@@ -28,3 +28,4 @@ import hmr4d.utils.callbacks.lr_monitor
 
 # Networks
 import hmr4d.network.gvhmr.relative_transformer
+import hmr4d.network.mv2d.relative_transformer
