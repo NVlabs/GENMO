@@ -3,7 +3,6 @@ import os
 import os.path as osp
 import subprocess
 import platform
-import vtk
 import random
 import cv2 as cv
 import seaborn as sns
@@ -255,6 +254,7 @@ def resize_bbox(bbox, scale):
 
 def nparray_to_vtk_matrix(array):
     """Convert a numpy.ndarray to a vtk.vtkMatrix4x4 """
+    import vtk
     matrix = vtk.vtkMatrix4x4()
     for i in range(array.shape[0]):
         for j in range(array.shape[1]):

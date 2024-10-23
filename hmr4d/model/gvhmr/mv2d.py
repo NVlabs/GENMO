@@ -24,7 +24,10 @@ from hmr4d.utils.video_io_utils import save_video
 from hmr4d.utils.vis.cv2_utils import draw_bbx_xys_on_image_batch
 from hmr4d.utils.geo.flip_utils import flip_smplx_params, avg_smplx_aa
 from hmr4d.model.gvhmr.utils.postprocess import pp_static_joint, pp_static_joint_cam, process_ik
-from motiondiff.utils.torch_transform import angle_axis_to_rotation_matrix, make_transform
+from motiondiff.utils.torch_transform import angle_axis_to_rotation_matrix, make_transform, transform_trans
+from .utils.mv2d_utils import draw_motion_2d, coco_joint_parents
+
+
 
 
 class MV2D(pl.LightningModule):
@@ -131,9 +134,24 @@ class MV2D(pl.LightningModule):
         batch["clean_obs"] = normalize_kp2d(clean_obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
         batch["clean_j2d_visible_mask"] = clean_j2d_visible_mask
         
-        T_c2w = T_c2w_old = batch["T_w2c"].inverse()
-        T_c2w[:, :3, 0] -= gt_j3d[:, :, 0]
-        rota
+        
+        with torch.autocast(device_type='cuda', enabled=False):
+            T_c2w = T_c2w_old = batch["T_w2c"].float().inverse()
+            gt_j3d_world = apply_T_on_points(gt_j3d.float(), T_c2w)
+            gt_root_world = gt_j3d_world.float()[:, :, 0]
+            T_c2w[..., :3, -1] -= gt_root_world
+            y_rot = angle_axis_to_rotation_matrix(torch.tensor([0, np.pi, 0]).to(T_c2w))
+            T_y_rot = make_transform(y_rot, torch.zeros(3).to(T_c2w))
+            T_c2w = T_y_rot @ T_c2w
+            T_c2w[..., :3, -1] += gt_root_world
+            T_w2c_new = T_c2w.inverse()
+            
+        gt_j3d_local = apply_T_on_points(gt_j3d_world, T_w2c_new) 
+            
+        new_j2d = perspective_projection(gt_j3d_local, batch["K_fullimg"])
+        mv2d = torch.stack([clean_obs_i_j2d, new_j2d], dim=2)
+        mv2d = torch.cat([mv2d, (mv2d[..., [11], :] + mv2d[..., [12], :]) * 0.5], dim=-2)
+        draw_motion_2d(mv2d[1].cpu(), f"out/debug_vis/{batch_idx}.mp4", coco_joint_parents, 1000, 1000, fps=30)
         
 
         if True:  # Use some detected vitpose (presave data)

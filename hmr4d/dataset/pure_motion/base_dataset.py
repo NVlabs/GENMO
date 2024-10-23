@@ -160,7 +160,8 @@ class BaseDataset(Dataset):
             "f_imgseq": torch.zeros((length, 1024)),  # (F, D)  # NOTE: a placeholder
             "kp2d": torch.zeros(length, 17, 3),  # (F, 17, 3)
             "cam_angvel": cam_angvel,  # (F, 6)
-            "cam_tvel": cam_tvel,  # (F, 3)
+            "cam_tvel": cam_tvel,  # (F, 3),
+            "T_w2c": T_w2c,
             "mask": {
                 "valid": get_valid_mask(length, length),
                 "vitpose": False,
