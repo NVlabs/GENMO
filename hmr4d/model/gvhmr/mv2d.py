@@ -156,21 +156,11 @@ class MV2D(pl.LightningModule):
         batch["obs"] = obs
         batch["j2d_visible_mask"] = j2d_visible_mask
 
-        # obtain clean obs
-        clean_j3d = gt_j3d.clone()
-        clean_obs_i_j2d = perspective_projection(clean_j3d, batch["K_fullimg"])  # (B, L, J, 2)
-        clean_j2d_visible_mask = torch.ones_like(j2d_visible_mask)
-        clean_j2d_visible_mask[clean_j3d[..., 2] < 0.3] = False  # Set close-to-image-plane points as invisible
-        clean_obs_kp2d = torch.cat([clean_obs_i_j2d, clean_j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
-        batch["clean_obs"] = normalize_kp2d(clean_obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
-        batch["clean_j2d_visible_mask"] = clean_j2d_visible_mask
-        
         mv2d = self.obtain_mv2d(batch, gt_j3d)
-        mv2d[:, :, 0] = clean_obs_i_j2d
-        mv2d = torch.cat([mv2d, clean_j2d_visible_mask[:, :, None, :, None].repeat(1, 1, self.num_views, 1, 1)], dim=-1)
-        mv2d_bbox = [batch["bbx_xys"]]
-        mv2d_norm = [batch["clean_obs"]]
-        for i in range(1, self.num_views):
+        mv2d = torch.cat([mv2d, torch.ones_like(mv2d[..., :1])], dim=-1)
+        mv2d_bbox = []
+        mv2d_norm = []
+        for i in range(self.num_views):
             bbox = get_bbx_xys(mv2d[:, :, i], do_augment=False)
             mv2d_bbox.append(bbox)
             mv2d_norm.append(normalize_kp2d(mv2d[:, :, i], bbox))
@@ -190,10 +180,8 @@ class MV2D(pl.LightningModule):
 
         # Set untrusted frames to False
         batch["obs"][~batch["mask"]["valid"]] = 0
-        batch["clean_obs"][~batch["mask"]["valid"]] = 0
         batch["mv2d_bbox"][~batch["mask"]["valid"]] = 0
         batch["mv2d_norm"][~batch["mask"]["valid"]] = 0
-        assert batch["clean_obs"].shape == batch["obs"].shape, f"{batch['clean_obs'].shape} != {batch['obs'].shape}"
 
         if False:  # wis3d
             wis3d = make_wis3d(name="debug-aug-kp3d")
