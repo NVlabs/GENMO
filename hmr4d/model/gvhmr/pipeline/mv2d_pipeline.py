@@ -128,8 +128,10 @@ class Pipeline(nn.Module):
         simple_loss = F.mse_loss(pred_x, target_x, reduction="none")
         mask_simple = mask[:, :, None].expand(-1, -1, pred_x.size(2)).clone()  # (B, L, C)
         mask_simple[inputs["mask"]["spv_incam_only"], :, 142:] = False  # 3dpw training
+        if self.weights.get('simple_loss_local_only', False):
+            mask_simple[..., 142:] = False
         simple_loss = (simple_loss * mask_simple).mean()
-        total_loss += simple_loss
+        total_loss += simple_loss * self.weights.get("simple", 1.0)
         outputs["simple_loss"] = simple_loss
 
         # 2. Extra loss

@@ -82,7 +82,7 @@ def train(cfg: DictConfig) -> None:
     
     if global_rank == 0:
         slurm_job_id = int(os.environ.get("SLURM_JOB_ID", "-1"))
-        run_name = f'{cfg.exp_name}_v{version}_{slurm_job_id}' if slurm_job_id > 0 else f'{cfg.exp_name}'
+        run_name = f'{cfg.exp_name}_v{version}_{slurm_job_id}' if slurm_job_id > 0 else f'{cfg.exp_name}_v{version}'
         cfg.logger.name = run_name
         # cfg.logger.version = version  # shouldn't set version for Wandb
 
