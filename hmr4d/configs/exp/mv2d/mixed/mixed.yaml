@@ -24,25 +24,30 @@ defaults:
           - metric_emdb2
           - metric_rich
           - metric_3dpw
-    - override /network: gvhmr/relative_transformer
+    - override /network: mv2d/relative_transformer
 
 exp_name_base: mixed
 exp_name_var: ""
 exp_name: ${exp_name_base}_${exp_name_var}
 data_name: mocap_mixed_v1
 
+model_cfg:
+    num_views: 4
+
 pipeline:
-    _target_: hmr4d.model.gvhmr.pipeline.gvhmr_pipeline.Pipeline
+    _target_: hmr4d.model.gvhmr.pipeline.mv2d_pipeline.Pipeline
     args_denoiser3d: ${network}
     args:
         endecoder_opt: ${endecoder}
         normalize_cam_angvel: True
+        num_views: ${model_cfg.num_views}
         weights:
             cr_j3d: 500.
             transl_c: 1.
             cr_verts: 500.
             j2d: 1000.
             verts2d: 1000.
+            mv2d: 10.
 
             transl_w: 1.
             static_conf_bce: 1.

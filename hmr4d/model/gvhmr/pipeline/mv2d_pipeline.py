@@ -39,6 +39,7 @@ class Pipeline(nn.Module):
         self.weights = args.weights  # loss weights
 
         # Networks
+        self.num_views = args.num_views
         self.denoiser3d = instantiate(args_denoiser3d, _recursive_=False)
         # Log.info(self.denoiser3d)
 
@@ -110,6 +111,16 @@ class Pipeline(nn.Module):
         # ========== Compute Loss ========== #
         total_loss = 0
         mask = inputs["mask"]["valid"]  # (B, L)
+        
+        # 0. MV2D loss
+        mv2d = model_output["mv2d"]
+        mv2d = mv2d.reshape(mv2d.shape[:2] + (self.num_views, 17, 2))  # (B, L, C)
+        target_mv2d = inputs["mv2d_norm"]
+        mv2d_loss = F.mse_loss(mv2d, target_mv2d[..., :2], reduction="none")
+        mv2d_loss *= target_mv2d[..., [2]]  # weight by confidence
+        mv2d_loss = (mv2d_loss * mask[..., None, None, None]).mean()
+        total_loss += self.weights.mv2d * mv2d_loss
+        outputs["mv2d_loss"] = mv2d_loss
 
         # 1. Simple loss: MSE
         pred_x = model_output["pred_x"]  # (B, L, C)

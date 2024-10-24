@@ -33,6 +33,7 @@ class NetworkEncoderRoPE(nn.Module):
         dropout=0.1,
         # other
         avgbeta=True,
+        num_views=4
     ):
         super().__init__()
 
@@ -69,9 +70,13 @@ class NetworkEncoderRoPE(nn.Module):
                 for _ in range(self.num_layers)
             ]
         )
+        
+        self.num_views = num_views
+        self.mv2d_dim = num_views * 17 * 2
+        self.mv2d_head = Mlp(self.latent_dim, out_features=self.mv2d_dim)
 
         # Output heads
-        self.final_layer = Mlp(self.latent_dim, out_features=self.output_dim)
+        self.final_layer = Mlp(self.mv2d_dim, out_features=self.output_dim)
         self.pred_cam_head = pred_cam_dim > 0  # keep extra_output for easy-loading old ckpt
         if self.pred_cam_head:
             self.pred_cam_head = Mlp(self.latent_dim, out_features=pred_cam_dim)
@@ -158,8 +163,11 @@ class NetworkEncoderRoPE(nn.Module):
         for block in self.blocks:
             x = block(x, attn_mask=attnmask, tgt_key_padding_mask=pmask)
 
+        # MV2D
+        mv2d = self.mv2d_head(x)
+        
         # Output
-        sample = self.final_layer(x)  # (B, L, C)
+        sample = self.final_layer(mv2d)  # (B, L, C)
         if self.avgbeta:
             betas = (sample[..., 126:136] * (~pmask[..., None])).sum(1) / length[:, None]  # (B, C)
             betas = repeat(betas, "b c -> b l c", l=L)
@@ -181,6 +189,7 @@ class NetworkEncoderRoPE(nn.Module):
             "pred_x": sample,
             "pred_cam": pred_cam,
             "static_conf_logits": static_conf_logits,
+            "mv2d": mv2d,
         }
         return output
 

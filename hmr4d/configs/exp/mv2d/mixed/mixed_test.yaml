@@ -40,12 +40,14 @@ pipeline:
     args:
         endecoder_opt: ${endecoder}
         normalize_cam_angvel: True
+        num_views: ${model_cfg.num_views}
         weights:
             cr_j3d: 500.
             transl_c: 1.
             cr_verts: 500.
             j2d: 1000.
             verts2d: 1000.
+            mv2d: 10.
 
             transl_w: 1.
             static_conf_bce: 1.
