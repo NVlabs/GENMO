@@ -63,7 +63,7 @@ def train(cfg: DictConfig) -> None:
             print(f"[Auto Resume] Loading. checkpoint: {details['checkpoint']} wandb_id: {details.get('wandb_id', None)}")
     
     if version is None:
-        version = find_last_version(cfg.logger.save_dir + '/checkpoints', cp=None)
+        version = find_last_version(cfg.logger.save_dir, cp=None)
 
     # preparation
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(cfg.data, _recursive_=False)

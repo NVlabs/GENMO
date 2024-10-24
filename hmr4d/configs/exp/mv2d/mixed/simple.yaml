@@ -47,7 +47,7 @@ pipeline:
             cr_verts: 500.
             j2d: 1000.
             verts2d: 1000.
-            mv2d: 10.
+            mv2d: 3.
 
             transl_w: 1.
             static_conf_bce: 1.
