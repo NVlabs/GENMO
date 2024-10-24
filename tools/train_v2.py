@@ -1,6 +1,7 @@
 import hydra
 import pytorch_lightning as pl
 import os
+from datetime import datetime
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks.checkpoint import Checkpoint
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -89,8 +90,9 @@ def train(cfg: DictConfig) -> None:
             meta = yaml.safe_load(open(f'{tb_logger.log_dir}/meta.yaml', 'r'))
             if wandb_run is None:
                 wandb_run = meta['wandb_run']
+        if wandb_run is None:
+            wandb_run = f"{cfg.exp_name.replace('/', '_')}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
         cfg.logger.id = wandb_run
-
     callbacks = get_callbacks(cfg)
     has_ckpt_cb = any([isinstance(cb, Checkpoint) for cb in callbacks])
     if not has_ckpt_cb and cfg.pl_trainer.get("enable_checkpointing", True):
@@ -102,8 +104,10 @@ def train(cfg: DictConfig) -> None:
     logger = hydra.utils.instantiate(cfg.logger, _recursive_=False)
     if global_rank == 0:
         # wandb.config.update({"cfg": OmegaConf.to_container(cfg)}, allow_val_change=True)
-        meta = {"wandb_run": wandb.run.id if wandb_run_exists() else None}
+        assert cfg.logger.id is not None
+        meta = {"wandb_run": cfg.logger.id}
         yaml.safe_dump(meta, open(f"{tb_logger.log_dir}/meta.yaml", "w"))
+        print("saved meta:", meta)
 
     # PL-Trainer
     if cfg.task == "test":

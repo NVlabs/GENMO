@@ -24,7 +24,6 @@ defaults:
           - metric_emdb2
           - metric_rich
           - metric_3dpw
-    - override /network: mv2d/relative_transformer
 
 exp_name_base: ${hydra:runtime.choices.exp}
 exp_name_var: ""
@@ -55,18 +54,22 @@ pipeline:
         static_conf:
             vel_thr: 0.15
 
+network:
+    _target_: hmr4d.network.mv2d.factorized_transformer.NetworkEncoderRoPE
+    num_views: ${model_cfg.num_views}
+
 data:
     loader_opts:
         train:
-            batch_size: 12
+            batch_size: 96
             num_workers: 12
 
 pl_trainer:
     precision: 16-mixed
-    log_every_n_steps: 1
+    log_every_n_steps: 10
     gradient_clip_val: 0.5
     max_epochs: 500
-    check_val_every_n_epoch: 1
+    check_val_every_n_epoch: 10
     devices: 1
 
 logger:
@@ -79,4 +82,3 @@ logger:
     resume: 'allow'
     dir: "/tmp"
     id: null
-
