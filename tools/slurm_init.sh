@@ -7,12 +7,10 @@ declare -A wandb_keys=(
     ["haotianz"]="a8222cccae5b1338d8afe0a35cc18c4a1c0ae3d3"
     ["jiefengl"]="7ecf9f6fe9e8b7263e6141fb8fc69158c2bd7fa0"
 )
- 
+
 # wandb login ${wandb_keys[${user}]}
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/nvidia
-
-mkdir -p outputs
 
 # rm -rf /root/.cache
 # if [ ! -d "/root/.cache" ]; then
@@ -30,11 +28,11 @@ results_dir="/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/wor
 if [ ! -d "$results_dir" ]; then
     mkdir -p $results_dir
 fi
-if [ ! -d "out/motiondiff" ]; then
+if [ ! -d "outputs" ]; then
     ln -s $results_dir outputs
 fi
 
-if [ "$LOCAL_RANK" -ne 0 ]; then
+if [[ -n "$LOCAL_RANK" && "$LOCAL_RANK" -ne 0 ]]; then
     # Place the commands you want to run here
     echo "sleep 30s since LOCAL_RANK is not 0"
     sleep 30
@@ -45,7 +43,5 @@ pip install moviepy imageio
 pip install einops
 pip install dnspython
 
-cd third-party/DPVO
-pip install -e .
-cd ../../
+# pip install -e third-party/DPVO
 pip install -e .
