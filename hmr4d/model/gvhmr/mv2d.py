@@ -106,6 +106,7 @@ class MV2D(pl.LightningModule):
             "prog_bar": True,
             "logger": True,
             "sync_dist": True,
+            "batch_size": outputs["batch_size"],
         }
         self.log("train/loss", outputs["loss"], **log_kwargs)
         for k, v in outputs.items():
@@ -226,6 +227,7 @@ class MV2D(pl.LightningModule):
 
         # Forward and get loss
         outputs = self.pipeline.forward(batch, train=True)
+        outputs['batch_size'] = B
 
         return outputs
     
