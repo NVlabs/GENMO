@@ -18,6 +18,7 @@ defaults:
   - optimizer: null
   - scheduler_cfg: default
   - train_datasets: null
+  - train_2d_datasets: null
   - test_datasets: null
   - endecoder: null # normalize/unnormalize data
   - refiner: null

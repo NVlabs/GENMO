@@ -33,6 +33,7 @@ class KP2DDatasetV2(torch.utils.data.Dataset):
             self.motion_mean = None
             self.motion_std = None
         self.normalize_motion = self.motion_mean is not None
+        self.video_augmentor = None
         self.hand_leg_aug = hand_leg_aug
         
     def get_naive_intrinsics(self, res, focal_scale=1.0):
@@ -98,34 +99,6 @@ class KP2DDatasetV2(torch.utils.data.Dataset):
         local_kpt2d_new[..., 1] = self.img_h - local_kpt2d_new[..., 1]
         return local_kpt2d_new
     
-    def normalize_ours(self, local_kpt2d, center=None, normalize_size=None):
-        if self.normalize_type == 'image_size':
-            motion_2d = (local_kpt2d / torch.tensor([self.img_w, self.img_h]).float() - 0.5) * 2
-            center = normalize_size = None
-        elif self.normalize_type in {'bbox_frame', 'bbox_seq'}:
-            # local_kpt2d: [bs, num_views, njoints, 2]
-            if center is not None:
-                motion_2d = (local_kpt2d - center[:, :, None]) / normalize_size * 2
-            else:
-                front_view = local_kpt2d[:, 0, self.smplx_bbox_joints]     # only use limb joints for bbox size, and only use front views
-                bbox_min = front_view.min(dim=1)[0]
-                bbox_max = front_view.max(dim=1)[0]
-                center = (local_kpt2d[:, :, 1] + local_kpt2d[:, :, 2]) * 0.5
-                bbox_size = (bbox_max - bbox_min).max(dim=1)[0]
-                if self.normalize_type == 'bbox_seq':
-                    normalize_size = bbox_size.mean() * self.bbox_scale
-                    motion_2d = (local_kpt2d - center[:, :, None]) / normalize_size * 2
-                elif self.normalize_type == 'bbox_frame':
-                    normalize_size = bbox_size[:, None, None, None] * self.bbox_scale
-                    motion_2d = (local_kpt2d - center[:, :, None]) / normalize_size * 2
-            
-            # size = motion_2d[:, 0, self.smplx_bbox_joints].max(dim=1)[0] - motion_2d[:, 0, self.smplx_bbox_joints].min(dim=1)[0]
-            # motion_2d_vis = (motion_2d + 1) * 0.5 * torch.tensor([self.img_w, self.img_w]).float()
-            # draw_motion_2d(motion_2d_vis, 'out/vis/test_amass1.mp4', self.joint_parents, self.img_w, self.img_h, fps=30)
-        else:
-            raise ValueError
-        return motion_2d, center, normalize_size
-    
     def get_input(self, target):
         gt_kp3d = target['kp3d']
         
@@ -137,20 +110,8 @@ class KP2DDatasetV2(torch.utils.data.Dataset):
         cam_dict = self.generate_cam(target)
         in_kp2d = self.project_keypoints(inpt_kp3d, cam_dict)
         gt_kp2d = self.project_keypoints(gt_kp3d, cam_dict)
-        target['raw_gt_kp2d'] = gt_kp2d.clone()
-        
-        if self.use_our_normalization:
-            gt_kp2d, center, normalize_size = self.normalize_ours(gt_kp2d)
-            in_kp2d, _, _ = self.normalize_ours(in_kp2d, center, normalize_size)
-        else:
-            gt_kp2d, bbox = self.keypoints_normalizer(gt_kp2d.reshape(-1, *gt_kp2d.shape[2:]), target['res'], self.cam_intrinsics, 224, 224, use_multi_view_bbox=True, num_views=self.num_views, do_augment=False)
-            in_kp2d, bbox = self.keypoints_normalizer(in_kp2d.reshape(-1, *in_kp2d.shape[2:]), target['res'], self.cam_intrinsics, 224, 224, bbox=bbox, use_multi_view_bbox=True, num_views=self.num_views, do_augment=False)
-            in_kp2d = in_kp2d[..., :-3].reshape(-1, self.num_views, 25, 2)
-            gt_kp2d = gt_kp2d[..., :-3].reshape(-1, self.num_views, 25, 2)
-            bbox = bbox.reshape(-1, self.num_views, 3)
-        
-        target['obs_kp2d'] = in_kp2d.reshape(in_kp2d.shape[0], -1).numpy()
-        target['gt_kp2d'] = gt_kp2d.reshape(gt_kp2d.shape[0], -1).numpy()
+        target['obs_kp2d'] = in_kp2d.numpy()
+        target['gt_kp2d'] = gt_kp2d.numpy()
         target['cam_dict'] = cam_dict
         
         # motion_2d_vis = (gt_kp2d + 1) * 0.5 * torch.tensor([self.img_w, self.img_w]).float()
@@ -164,12 +125,12 @@ class KP2DDatasetV2(torch.utils.data.Dataset):
         # for key, val in target.items():
         #     if key not in ['cam_dict']:
         #         print(key, val.shape)
-        for key in {'obs_kp2d', 'gt_kp2d', 'raw_gt_kp2d', 'pose', 'betas', 'kp3d', 'f_imgseq'}:
+        for key in {'obs_kp2d', 'gt_kp2d', 'pose', 'betas', 'kp3d', 'f_imgseq'}:
             if key in target and isinstance(target[key], torch.Tensor):
                 target[key] = target[key].numpy()
         
         if m_length < self.num_frames:
             for key, val in target.items():
-                if key in {'obs_kp2d', 'gt_kp2d', 'raw_gt_kp2d', 'pose', 'betas', 'kp3d', 'f_imgseq'}:
+                if key in {'obs_kp2d', 'gt_kp2d', 'pose', 'betas', 'kp3d', 'f_imgseq'}:
                     target[key] = np.concatenate([val, np.zeros((self.num_frames - val.shape[0],) + val.shape[1:])], axis=0)
         return

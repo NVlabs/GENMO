@@ -19,13 +19,13 @@ from torchvision.transforms import transforms
 from motiondiff.utils.torch_transform import rotation_matrix_to_angle_axis, quaternion_to_angle_axis, quat_mul, angle_axis_to_quaternion, angle_axis_to_rotation_matrix, quaternion_to_rotation_matrix
 
 from hmr4d.dataset.wild.kp2d_dataset_v2 import KP2DDatasetV2
-from hmr4d.dataset.wild.utils.models import build_body_model
+from hmr4d.utils.smplx_utils import make_smplx
 
 
 class Bones2DDatasetV2(KP2DDatasetV2):
     def __init__(self, datapath='/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/bones_to_smpl/bones_to_smpl_v14.7/smpl',
                  meta_file='/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/bones_full_raw_v14/metadata_240527_v014.csv',
-                 split_folder='assets/mv2d/splits/v1', num_keypoints=14, num_frames=81, split="train", debug=False, rng=None, img_w=1024, img_h=1024, num_views=4, cam_radius=8, cam_elevation=0, focal_scale=2, synthetic_view_type='even', normalize_type='image_size', bbox_scale=1.4, use_coco_pelvis=False,normalize_stats_dir=None, sample_beta=False, cam_aug_cfg={}, use_our_normalization=False, always_start_from_first_frame=False, **kwargs):
+                 split_folder='inputs/mv2d/splits/v1', num_keypoints=17, num_frames=81, split="train", debug=False, rng=None, img_w=1024, img_h=1024, num_views=4, cam_radius=8, cam_elevation=0, focal_scale=2, synthetic_view_type='even', normalize_type='image_size', bbox_scale=1.4, use_coco_pelvis=False,normalize_stats_dir=None, sample_beta=False, cam_aug_cfg={}, use_our_normalization=False, always_start_from_first_frame=False, **kwargs):
         super().__init__(num_frames, img_w, img_h, num_views, cam_radius, cam_elevation, focal_scale, synthetic_view_type, normalize_type, bbox_scale, normalize_stats_dir, cam_aug_cfg, use_our_normalization)
         self.datapath = datapath
         meta = pd.read_csv(meta_file)
@@ -41,7 +41,7 @@ class Bones2DDatasetV2(KP2DDatasetV2):
         self.rng_mapping = rng_mapping
         
         self.debug = debug
-        self.get_coco_keypoints = num_keypoints == 25
+        self.get_coco_keypoints = True
         self.sample_beta = sample_beta
         self.mean = None
         self.std = None
@@ -50,12 +50,12 @@ class Bones2DDatasetV2(KP2DDatasetV2):
         self.use_coco_pelvis = use_coco_pelvis
         self.always_start_from_first_frame = always_start_from_first_frame
         self.data_files = sorted([f for f in os.listdir(datapath) if f.endswith('.npz')])
-        self.wham_regressor = torch.tensor(np.load('data/smpl/J_regressor_wham.npy'))
+        self.coco17_regressor = torch.load("hmr4d/utils/body_model/smpl_coco17_J_regressor.pt")
         self.coco_joints = ['Nose', 'L_Eye', 'R_Eye', 'L_Ear', 'R_Ear', 'L_Shoulder', 'R_Shoulder', 'L_Elbow', 'R_Elbow', 'L_Wrist',
                             'R_Wrist', 'L_Hip', 'R_Hip', 'L_Knee', 'R_Knee', 'L_Ankle', 'R_Ankle']
         self.base_rot = torch.tensor([[0.5, 0.5, 0.5, 0.5]])
         self.base_rot_mat = quaternion_to_rotation_matrix(torch.tensor([[0.5, 0.5, 0.5, 0.5]]))
-        self.smpl = build_body_model('cpu', num_frames)
+        self.smpl = make_smplx('smpl')
         
     def get_global_rot_augmentation(self, rng):
         """Global coordinate augmentation. Random rotation around y-axis"""
@@ -99,14 +99,14 @@ class Bones2DDatasetV2(KP2DDatasetV2):
             'res': torch.tensor([self.img_w, self.img_h]).float()
         }
         
-        output = self.smpl.get_output(
+        output = self.smpl(
             body_pose=target['pose'][:, 1:],
             global_orient=target['pose'][:, :1],
             betas=target['betas'],
             pose2rot=False)
         
-        coco_joints = output.joints[:, :17]
-        target['kp3d'] = torch.tensor(coco_joints).float()
+        coco_joints = self.coco17_regressor @ output.vertices
+        target['kp3d'] = coco_joints
         
         self.get_input(target)
         self.pad_motion(target)
@@ -114,17 +114,13 @@ class Bones2DDatasetV2(KP2DDatasetV2):
         text = ''
         motion = target['gt_kp2d']
         cam_dict = target['cam_dict']
-        m_length = motion.shape[0]
+        m_length = pose.shape[0]
         info = {
-            'smpl_valid_joints': self.smplx_valid_joints,
             'dataset_name': 'bones2d_v2'
         }
         aux_data = {
             'kpt3d': target['kp3d'],
             'obs_kpt2d': target['obs_kp2d'],
-            'raw_gt_kpt2d': target['raw_gt_kp2d'],
-            'smpl_pose': target['pose'],
-            'smpl_shape': target['betas'],
         }   
         return text, motion, m_length, cam_dict, aux_data, info
 
@@ -147,13 +143,11 @@ class Bones2DDatasetV2SingleView(Bones2DDatasetV2):
         conf = mask[:, None].repeat(self.num_keypoints, axis=-1)
         return {
             'text': text,
-            'motion_2d': motion_2d.astype(np.float32),
-            'obs_kpt2d': aux_data['obs_kpt2d'].astype(np.float32),
-            'motion_mask': mask.astype(np.float32),
-            'vit_feats': np.zeros((self.num_frames, 1024), dtype=np.float32),
+            'gt_kp2d': motion_2d.astype(np.float32),
+            'obs_kp2d': aux_data['obs_kpt2d'].astype(np.float32),
+            'mask': mask.astype(np.bool8),
             'conf': conf,
-            'lengths': m_length,
-            'smpl_valid_joints': np.array(self.smplx_valid_joints),
+            'length': m_length,
             'is_2d': True,
             'dataset_name': 'bones2d_singleview_v2'
         }
@@ -166,8 +160,8 @@ if __name__ == '__main__':
         'radius_min': 2,
         'radius_max': 16
     }
-    dataset = Bones2DDatasetV2(debug=True, normalize_type='bbox_frame', num_keypoints=25, use_coco_pelvis=True, use_our_normalization=False, cam_aug_cfg=cam_aug_cfg)
-    # dataset = Bones2DDatasetV2SingleView(debug=True, normalize_type='bbox_frame', num_keypoints=25, use_coco_pelvis=True, use_our_normalization=False, sample_beta=True)
+    # dataset = Bones2DDatasetV2(debug=True, normalize_type='bbox_frame', num_keypoints=25, use_coco_pelvis=True, use_our_normalization=False, cam_aug_cfg=cam_aug_cfg)
+    dataset = Bones2DDatasetV2SingleView(debug=True, normalize_type='bbox_frame', num_keypoints=25, use_coco_pelvis=True, use_our_normalization=False, sample_beta=True)
     for i in range(len(dataset)):
         print(dataset[i])
         # break

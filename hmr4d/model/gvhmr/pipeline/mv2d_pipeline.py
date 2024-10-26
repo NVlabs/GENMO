@@ -114,7 +114,6 @@ class Pipeline(nn.Module):
         
         # 0. MV2D loss
         mv2d = model_output["mv2d"]
-        mv2d = mv2d.reshape(mv2d.shape[:2] + (self.num_views, 17, 2))  # (B, L, C)
         target_mv2d = inputs["mv2d_norm"]
         mv2d_loss = F.mse_loss(mv2d, target_mv2d[..., :2], reduction="none")
         mv2d_loss *= target_mv2d[..., [2]]  # weight by confidence
@@ -145,6 +144,82 @@ class Pipeline(nn.Module):
             outputs.update(extra_loss_dict)
 
         outputs["loss"] = total_loss
+        return outputs
+    
+    def forward_2d(self, inputs, train=False):
+        outputs = dict()
+        length = inputs["length"]  # (B,) effective length of each sample
+        device = inputs["obs"].device
+        B, L = inputs["obs"].shape[:2]
+
+        # *. Conditions
+        f_condition = {
+            "f_cliffcam": torch.zeros(B, L, 3).to(device),  # (B, L, 3)
+            "f_cam_angvel": torch.zeros(B, L, 6).to(device),  # (B, L, C=6)
+            "f_imgseq": inputs.get("f_imgseq", torch.zeros(B, L, 1024).to(device))
+        }
+        if train:
+            f_condition = randomly_set_null_condition(f_condition, 0.1)
+        f_condition["obs"] = inputs["obs"]  # (B, L, J, 3)
+
+        # Forward & output
+        model_output = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
+        decode_dict = self.endecoder.decode(model_output["pred_x"])  # (B, L, C) -> dict
+        outputs.update({"2d_model_output": model_output, "2d_decode_dict": decode_dict})
+        
+        # second view generation
+        second_view = np.random.randint(1, self.num_views)
+        view_correspondence = (np.arange(self.num_views) + second_view) % self.num_views
+        input_view_id = (-second_view) % self.num_views
+        mv2d_shuffle = model_output["mv2d"][:, :, view_correspondence]
+        obs_sv = mv2d_shuffle[:, :, 0]
+        obs_sv = torch.cat([obs_sv, torch.zeros_like(obs_sv[..., :1])], dim=-1)  # (B, L, J, 3)
+        f_condition = {
+            "obs": obs_sv,  # (B, L, J, 3)
+            "f_cliffcam": torch.zeros(B, L, 3).to(device),  # (B, L, 3)
+            "f_cam_angvel": torch.zeros(B, L, 6).to(device),  # (B, L, C=6)
+            "f_imgseq": torch.zeros(B, L, 1024).to(device)
+        }
+        model_output_sv = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
+        decode_dict_sv = self.endecoder.decode(model_output_sv["pred_x"])  # (B, L, C) -> dict
+        outputs.update({"2d_model_output_sv": model_output_sv, "2d_decode_dict_sv": decode_dict_sv})
+        
+
+        # ========== Compute Loss ========== #
+        total_loss = 0
+        mask = inputs["mask"]
+        
+        # 0. cycle input 2d loss
+        mv2d_sv = model_output_sv["mv2d"]
+        mv2d_sv_input_view = mv2d_sv[:, :, input_view_id]
+        cycle_in2d_loss = F.mse_loss(mv2d_sv_input_view, inputs["obs"][..., :2], reduction="none")
+        cycle_in2d_loss *= inputs["obs"][..., [2]]
+        cycle_in2d_loss = (cycle_in2d_loss * mask[..., None, None]).mean()
+        total_loss += self.weights.cycle_in2d * cycle_in2d_loss
+        outputs["cycle_in2d_loss"] = cycle_in2d_loss
+        
+        # 1. cycle mv2d loss
+        mv2d_sv_target = mv2d_shuffle
+        if self.weights.get("cycle_detach_mv2d_target", True):
+            mv2d_sv_target = mv2d_sv_target.detach()
+        cycle_mv2d_loss = F.mse_loss(mv2d_sv, mv2d_sv_target, reduction="none")
+        cycle_mv2d_loss = (cycle_mv2d_loss * mask[..., None, None, None]).mean()
+        total_loss += self.weights.cycle_mv2d * cycle_mv2d_loss
+        outputs["cycle_mv2d_loss"] = cycle_mv2d_loss
+
+        # 2. cycle pose loss
+        pose_loss = F.mse_loss(decode_dict["body_pose"], decode_dict_sv["body_pose"], reduction="none")
+        pose_loss = (pose_loss * mask[..., None]).mean()
+        total_loss += self.weights.cycle_pose * pose_loss
+        outputs["cycle_pose_loss"] = pose_loss
+        
+        # 3. cycle beta loss
+        beta_loss = F.mse_loss(decode_dict["betas"], decode_dict_sv["betas"], reduction="none")
+        beta_loss = (beta_loss * mask[..., None]).mean()
+        total_loss += self.weights.cycle_betas * beta_loss
+        outputs["cycle_beta_loss"] = beta_loss
+
+        outputs["loss_2d"] = total_loss
         return outputs
 
 

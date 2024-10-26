@@ -200,6 +200,7 @@ class NetworkEncoderRoPE(nn.Module):
 
         # MV2D
         mv2d = self.mv2d_head(x)
+        mv2d = mv2d.view(B, L, self.num_views, 17, 2)
         
         # Output
         sample = self.final_layer(mv2d.reshape(B, L, -1))  # (B, L, C)

@@ -82,8 +82,39 @@ class MV2D(pl.LightningModule):
         # vis_id = 0
         # draw_motion_2d(mv2d[vis_id].cpu(), f"out/debug_vis/{batch['meta'][vis_id]['data_name']}.mp4", coco_joint_parents, 1000, 1000, fps=30)
         return mv2d
-
+    
     def training_step(self, batch, batch_idx):
+        if not ('3d' in batch or '2d' in batch):
+            batch = {'3d': batch}
+            
+        outputs = {}
+        if '3d' in batch:
+            outputs_3d = self.train_3d_step(batch['3d'], batch_idx)
+            outputs.update(outputs_3d)
+        
+        if '2d' in batch:
+            outputs_2d = self.train_2d_step(batch['2d'], batch_idx)
+            if 'loss_2d' in outputs_2d:
+                outputs['loss'] += outputs_2d['loss_2d']
+            else:
+                outputs['loss'] = outputs_2d['loss']
+            outputs.update(outputs_2d)
+
+        # Log
+        log_kwargs = {
+            "on_epoch": True,
+            "prog_bar": True,
+            "logger": True,
+            "sync_dist": True,
+        }
+        self.log("train/loss", outputs["loss"], **log_kwargs)
+        for k, v in outputs.items():
+            if "_loss" in k:
+                self.log(f"train/{k}", v, **log_kwargs)
+                
+        return outputs
+
+    def train_3d_step(self, batch, batch_idx):
         B, F = batch["smpl_params_c"]["body_pose"].shape[:2]
 
         # Create augmented noisy-obs : gt_j3d(coco17)
@@ -168,10 +199,10 @@ class MV2D(pl.LightningModule):
         batch['mv2d_norm'] = mv2d_norm = torch.stack(mv2d_norm, dim=2)
         
         # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
-        # draw_motion_2d((mv2d_norm[1, ..., :2].cpu() + 1.0) * 400, f"out/debug_vis/{batch['meta'][1]['data_name']}_new.mp4", coco_joint_parents, 1000, 1000, fps=30)
+        # draw_motion_2d((mv2d_norm[1, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/{batch['meta'][1]['data_name']}_new.mp4", coco_joint_parents, 1000, 1000, fps=30)
         # mv2d_norm[:, :, 0, :17] = obs
         # mv2d_norm[:, :, :, [17]] = (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5
-        # draw_motion_2d((mv2d_norm[1, ..., :2].cpu() + 1.0) * 400, f"out/debug_vis/{batch['meta'][1]['data_name']}_obs.mp4", coco_joint_parents, 1000, 1000, fps=30)
+        # draw_motion_2d((mv2d_norm[1, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/{batch['meta'][1]['data_name']}_obs.mp4", coco_joint_parents, 1000, 1000, fps=30)
         
         if True:  # Use some detected vitpose (presave data)
             prob = 0.5
@@ -196,18 +227,27 @@ class MV2D(pl.LightningModule):
         # Forward and get loss
         outputs = self.pipeline.forward(batch, train=True)
 
-        # Log
-        log_kwargs = {
-            "on_epoch": True,
-            "prog_bar": True,
-            "logger": True,
-            "batch_size": B,
-            "sync_dist": True,
-        }
-        self.log("train/loss", outputs["loss"], **log_kwargs)
-        for k, v in outputs.items():
-            if "_loss" in k:
-                self.log(f"train/{k}", v, **log_kwargs)
+        return outputs
+    
+    def train_2d_step(self, batch, batch_idx):
+        B = batch["obs_kp2d"].shape[0]
+        obs_kp2d = batch['obs_kp2d'].squeeze(2)
+        conf = batch['conf']
+        batch["bbx_xys"] = get_bbx_xys(obs_kp2d, do_augment=False)
+        
+        obs_kp2d = torch.cat([obs_kp2d, conf[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
+        obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
+        batch["obs"] = obs
+        
+        # mv2d_norm = obs.unsqueeze(2)
+        # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
+        # draw_motion_2d((mv2d_norm[1, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/2d_test.mp4", coco_joint_parents, 1000, 1000, fps=30)
+
+        # Set untrusted frames to False
+        batch["obs"][~batch["mask"]] = 0
+
+        # Forward and get loss
+        outputs = self.pipeline.forward_2d(batch, train=True)
 
         return outputs
 
