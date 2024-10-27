@@ -58,7 +58,6 @@ def train(cfg: DictConfig) -> None:
             cfg.resume_mode = 'last'
             if 'wandb_id' in details:
                 wandb_run = details['wandb_id']
-                cfg.logger.version = details['version']
                 version = int(details['version'])
             print(f"[Auto Resume] Loading. checkpoint: {details['checkpoint']} wandb_id: {details.get('wandb_id', None)}")
     
