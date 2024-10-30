@@ -65,8 +65,9 @@ def train(cfg: DictConfig) -> None:
                 version = int(details['version'])
             print(f"[Auto Resume] Loading. checkpoint: {details['checkpoint']} wandb_id: {details.get('wandb_id', None)}")
     
+    run_root_dir = cfg.output_dir
     if version is None:
-        version = find_last_version(cfg.output_dir, cp=None)
+        version = find_last_version(run_root_dir, cp=None)
 
     # preparation
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(cfg.data, _recursive_=False)
@@ -77,7 +78,6 @@ def train(cfg: DictConfig) -> None:
     # PL callbacks and logger
 
     global_rank = rank_zero_only.rank if rank_zero_only.rank is not None else 0
-    run_root_dir = cfg.output_dir
     if global_rank == 0:
         tb_logger = TensorBoardLogger(run_root_dir, version=version, name='')
         version = tb_logger.version
@@ -103,7 +103,7 @@ def train(cfg: DictConfig) -> None:
 
     if global_rank != 0:
         if version is None:
-            version = find_last_version(cfg.cfg_dir, cp=None)
+            version = find_last_version(run_root_dir, cp=None)
         cfg.output_dir = f'{run_root_dir}/version_{version}'
         
     callbacks = get_callbacks(cfg)

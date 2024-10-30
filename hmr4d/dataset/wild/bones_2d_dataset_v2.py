@@ -214,22 +214,22 @@ if __name__ == '__main__':
     exit()
     
     """ gen data """
-    dataset = Bones2DDatasetV2SingleView(use_orig_length=True, num_frames=800, device='cuda')
+    dataset = Bones2DDatasetV2SingleView(use_orig_length=True, num_frames=800, device='cuda', precompute_data_folder=None)
     start = args.index * len(dataset) // args.num_jobs
     end = ((args.index + 1) * len(dataset) // args.num_jobs) if args.index + 1 < args.num_jobs else len(dataset)
     print(start, end, len(dataset))
     
     for i in range(start, end):
         idx = dataset.split_index[i]
-        idx2 = dataset.split_index[i+1]
+        idx2 = dataset.split_index[min(i+1, len(dataset)-1)]
         fname = f"{output_folder}/{idx:06d}.pkl"
         fname_next = f"{output_folder}/{idx2:06d}.pkl"
         if os.path.exists(fname) and os.path.exists(fname_next):
-            print(f"Skipping {i}")
+            print(f"Skipping {i} {idx}")
             continue
         
         data = dataset[i]
-        print(data['idx'])
+        print(i, data['idx'])
         # print(data['obs_kp2d'][0, 0])
         pickle.dump(data, open(f"{output_folder}/{data['idx']:06d}.pkl", 'wb'))
     # import os, sys
