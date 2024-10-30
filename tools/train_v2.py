@@ -65,7 +65,7 @@ def train(cfg: DictConfig) -> None:
             print(f"[Auto Resume] Loading. checkpoint: {details['checkpoint']} wandb_id: {details.get('wandb_id', None)}")
     
     if version is None:
-        version = find_last_version(cfg.logger.save_dir, cp=None)
+        version = find_last_version(cfg.output_dir, cp=None)
 
     # preparation
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(cfg.data, _recursive_=False)
@@ -76,10 +76,9 @@ def train(cfg: DictConfig) -> None:
     # PL callbacks and logger
 
     global_rank = rank_zero_only.rank if rank_zero_only.rank is not None else 0
-    tb_logger = TensorBoardLogger(f'{cfg.logger.save_dir}', version=version, name='')
+    tb_logger = TensorBoardLogger(f'{cfg.output_dir}', version=version, name='')
     version = tb_logger.version
     os.makedirs(tb_logger.log_dir, exist_ok=True)
-    cfg.logger.save_dir = tb_logger.log_dir
     cfg.output_dir = tb_logger.log_dir
     
     if global_rank == 0:
@@ -128,7 +127,7 @@ def train(cfg: DictConfig) -> None:
     if cfg.task == "fit":
         resume_path = None
         if cfg.resume_mode is not None:
-            save_dir = cfg.logger.save_dir + "/checkpoints"
+            save_dir = cfg.output_dir + "/checkpoints"
             print('='*20)
             print('save dir', save_dir)
             resume_path = get_resume_ckpt_path(cfg.resume_mode, ckpt_dir=save_dir)

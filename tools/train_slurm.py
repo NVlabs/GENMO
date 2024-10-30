@@ -99,9 +99,6 @@ rsync_cmd = f'rsync -az --partial -m --chmod=775 {exclude_str} {include_str} --e
 print(rsync_cmd)
 subprocess_run(rsync_cmd, shell=True)
 
-link_dataset_cmd = f'ln -s /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR {exp_folder}/inputs'
-subprocess_run(f"ssh {args.user}@cs-oci-ord-login-02 '{link_dataset_cmd}'", shell=True)
-
 for cmd, tag in slurm_cmds:
     job_cmd = f"cd {exp_folder}; tools/slurm_job.sh {args.user} {args.branch} {cmd}"
     print('job_cmd:', job_cmd)
@@ -117,9 +114,4 @@ for cmd, tag in slurm_cmds:
     if not args.debug:
         subprocess_run(f"ssh {args.user}@cs-oci-ord-login-02 '{ssh_cmd}'", shell=True)
     else:
-        ssh_cmd = (
-            f"submit_job --partition {args.partition} {account_str} --duration {args.time} --gpu {args.gpus} --nodes {args.nodes} --tasks_per_node {args.gpus} {autoresume_str} --email_mode {args.slack_mode} --image /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/docker/gvhmr+v1.sqsh"
-            + f' --name {tag} --command "{job_cmd}"'
-        )
-
         print(ssh_cmd)

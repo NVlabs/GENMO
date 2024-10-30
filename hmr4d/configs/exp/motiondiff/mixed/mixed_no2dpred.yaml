@@ -136,7 +136,7 @@ logger:
     _target_: pytorch_lightning.loggers.WandbLogger
     project: 'mfm-hmr'
     entity: 'nvr-lpr'
-    save_dir: ${output_dir} # /save_dir/name/version/sub_dir
+    save_dir: "/tmp" # /save_dir/name/version/sub_dir
     name: ""
     version: ""
     resume: 'allow'
