@@ -165,7 +165,6 @@ class NetworkEncoderRoPE(nn.Module):
 
         # MV2D
         mv2d = self.mv2d_head(x)
-        mv2d = mv2d.view(B, L, self.num_views, 17, 2)
         
         # Output
         sample = self.final_layer(mv2d)  # (B, L, C)
@@ -185,6 +184,7 @@ class NetworkEncoderRoPE(nn.Module):
         if self.static_conf_head:
             static_conf_logits = self.static_conf_head(x)  # (B, L, C')
 
+        mv2d = mv2d.view(B, L, self.num_views, 17, 2)
         output = {
             "pred_context": x,
             "pred_x": sample,

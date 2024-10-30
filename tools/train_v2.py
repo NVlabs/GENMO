@@ -51,6 +51,9 @@ def train(cfg: DictConfig) -> None:
     pl.seed_everything(cfg.seed)
     wandb_run = None
     version = None
+    
+    if cfg.get('timing', False):
+        os.environ["DEBUG_TIMING"] = "TRUE"
 
     if AutoResume is not None:
         details = AutoResume.get_resume_details()

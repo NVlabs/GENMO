@@ -3,6 +3,7 @@ import numpy as np
 from pathlib import Path
 import torch
 import pytorch_lightning as pl
+import os
 from hydra.utils import instantiate
 from hmr4d.utils.pylogger import Log
 from einops import rearrange, einsum
@@ -25,6 +26,7 @@ from hmr4d.utils.vis.cv2_utils import draw_bbx_xys_on_image_batch
 from hmr4d.utils.geo.flip_utils import flip_smplx_params, avg_smplx_aa
 from hmr4d.model.gvhmr.utils.postprocess import pp_static_joint, pp_static_joint_cam, process_ik
 from motiondiff.utils.torch_transform import angle_axis_to_rotation_matrix, make_transform, transform_trans
+from motiondiff.utils.tools import Timer
 from .utils.mv2d_utils import draw_motion_2d, coco_joint_parents
 
 
@@ -51,6 +53,7 @@ class MV2D(pl.LightningModule):
 
         # The test step is the same as validation
         self.test_step = self.predict_step = self.validation_step
+        self.timing = os.environ.get("DEBUG_TIMING", "FALSE") == "TRUE"
 
         # SMPLX
         self.smplx = make_smplx("supermotion_v437coco17")
@@ -89,16 +92,18 @@ class MV2D(pl.LightningModule):
             
         outputs = {}
         if '3d' in batch:
-            outputs_3d = self.train_3d_step(batch['3d'], batch_idx)
-            outputs.update(outputs_3d)
+            with Timer("train_3d_step", enabled=self.timing):
+                outputs_3d = self.train_3d_step(batch['3d'], batch_idx)
+                outputs.update(outputs_3d)
         
         if '2d' in batch:
-            outputs_2d = self.train_2d_step(batch['2d'], batch_idx)
-            if 'loss_2d' in outputs_2d:
-                outputs['loss'] += outputs_2d['loss_2d']
-            else:
-                outputs['loss'] = outputs_2d['loss']
-            outputs.update(outputs_2d)
+            with Timer("train_2d_step", enabled=self.timing):
+                outputs_2d = self.train_2d_step(batch['2d'], batch_idx)
+                if 'loss_2d' in outputs_2d:
+                    outputs['loss'] += outputs_2d['loss_2d']
+                else:
+                    outputs['loss'] = outputs_2d['loss']
+                outputs.update(outputs_2d)
 
         # Log
         log_kwargs = {

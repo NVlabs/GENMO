@@ -152,7 +152,7 @@ class Pipeline(nn.Module):
         device = inputs["obs"].device
         B, L = inputs["obs"].shape[:2]
 
-        # *. Conditions
+        # input view generation
         f_condition = {
             "f_cliffcam": torch.zeros(B, L, 3).to(device),  # (B, L, 3)
             "f_cam_angvel": torch.zeros(B, L, 6).to(device),  # (B, L, C=6)
@@ -161,8 +161,6 @@ class Pipeline(nn.Module):
         if train:
             f_condition = randomly_set_null_condition(f_condition, 0.1)
         f_condition["obs"] = inputs["obs"]  # (B, L, J, 3)
-
-        # Forward & output
         model_output = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
         decode_dict = self.endecoder.decode(model_output["pred_x"])  # (B, L, C) -> dict
         outputs.update({"2d_model_output": model_output, "2d_decode_dict": decode_dict})
@@ -183,7 +181,6 @@ class Pipeline(nn.Module):
         model_output_sv = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
         decode_dict_sv = self.endecoder.decode(model_output_sv["pred_x"])  # (B, L, C) -> dict
         outputs.update({"2d_model_output_sv": model_output_sv, "2d_decode_dict_sv": decode_dict_sv})
-        
 
         # ========== Compute Loss ========== #
         total_loss = 0
