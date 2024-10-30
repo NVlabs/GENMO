@@ -9,7 +9,7 @@ from hmr4d.dataset.wild.utils.augment import randomly_modify_hands_legs
 class KP2DDatasetV2(torch.utils.data.Dataset):
     def __init__(self, num_frames, img_w=1024, img_h=1024, num_views=4, cam_radius=8, cam_elevation=10,
                  focal_scale=2, synthetic_view_type='even', normalize_type='image_size', bbox_scale=1.4,
-                 normalize_stats_dir=None, cam_aug_cfg={}, use_our_normalization=False, hand_leg_aug=False):
+                 normalize_stats_dir=None, cam_aug_cfg={}, use_our_normalization=False, hand_leg_aug=False, use_orig_length=False):
         super().__init__()
         self.num_frames = num_frames
         self.img_w = img_w
@@ -35,6 +35,7 @@ class KP2DDatasetV2(torch.utils.data.Dataset):
         self.normalize_motion = self.motion_mean is not None
         self.video_augmentor = None
         self.hand_leg_aug = hand_leg_aug
+        self.use_orig_length = use_orig_length
         
     def get_naive_intrinsics(self, res, focal_scale=1.0):
         # Assume 45 degree FOV
@@ -70,16 +71,16 @@ class KP2DDatasetV2(torch.utils.data.Dataset):
         eyes = np.stack([spherical_to_cartesian(r, azimuth, elevation) for azimuth, elevation, r in zip(azimuths, elevations, radius)], axis=0)
         return eyes, azimuths, elevations, radius
     
-    def generate_cam(self, target):
+    def generate_cam(self, target, device):
         cam_dict = []
         eyes, azimuths, elevations, radius = self.generate_eyes(target)
         for i in range(self.num_views):
             eye = eyes[i]
             at = np.array([0, 0, 0])
             up = np.array([0, 0, 1])
-            c2w = torch.tensor(lookat_correct(eye, at, up)).float()
+            c2w = torch.tensor(lookat_correct(eye, at, up)).float().to(device)
             w2c = torch.inverse(c2w)
-            P = torch.matmul(self.cam_intrinsics, w2c[:3, :])
+            P = torch.matmul(self.cam_intrinsics.to(device), w2c[:3, :])
             cam_dict.append({
                 'c2w': c2w,
                 'w2c': w2c,
@@ -101,17 +102,18 @@ class KP2DDatasetV2(torch.utils.data.Dataset):
     
     def get_input(self, target):
         gt_kp3d = target['kp3d']
-        
-        inpt_kp3d = gt_kp3d.clone()
-        if self.video_augmentor is not None:
-            inpt_kp3d = self.video_augmentor(inpt_kp3d)
-        if self.hand_leg_aug:
-            inpt_kp3d = randomly_modify_hands_legs(inpt_kp3d)
-        cam_dict = self.generate_cam(target)
-        in_kp2d = self.project_keypoints(inpt_kp3d, cam_dict)
+        cam_dict = self.generate_cam(target, device=gt_kp3d.device)
         gt_kp2d = self.project_keypoints(gt_kp3d, cam_dict)
-        target['obs_kp2d'] = in_kp2d.numpy()
-        target['gt_kp2d'] = gt_kp2d.numpy()
+        
+        # inpt_kp3d = gt_kp3d.clone()
+        # if self.video_augmentor is not None:
+        #     inpt_kp3d = self.video_augmentor(inpt_kp3d)
+        # if self.hand_leg_aug:
+        #     inpt_kp3d = randomly_modify_hands_legs(inpt_kp3d)
+        # in_kp2d = self.project_keypoints(inpt_kp3d, cam_dict)
+        # target['obs_kp2d'] = in_kp2d.numpy()
+        # target['gt_kp2d'] = gt_kp2d.numpy()
+        target['obs_kp2d'] = gt_kp2d.cpu().numpy()
         target['cam_dict'] = cam_dict
         
         # motion_2d_vis = (gt_kp2d + 1) * 0.5 * torch.tensor([self.img_w, self.img_w]).float()
@@ -127,9 +129,9 @@ class KP2DDatasetV2(torch.utils.data.Dataset):
         #         print(key, val.shape)
         for key in {'obs_kp2d', 'gt_kp2d', 'pose', 'betas', 'kp3d', 'f_imgseq'}:
             if key in target and isinstance(target[key], torch.Tensor):
-                target[key] = target[key].numpy()
+                target[key] = target[key].cpu().numpy()
         
-        if m_length < self.num_frames:
+        if not self.use_orig_length and m_length < self.num_frames:
             for key, val in target.items():
                 if key in {'obs_kp2d', 'gt_kp2d', 'pose', 'betas', 'kp3d', 'f_imgseq'}:
                     target[key] = np.concatenate([val, np.zeros((self.num_frames - val.shape[0],) + val.shape[1:])], axis=0)

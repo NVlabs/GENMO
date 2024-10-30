@@ -2,6 +2,7 @@ import os
 import os.path as osp
 import numpy as np
 import torch
+import pickle
 import cv2
 import json
 import copy
@@ -25,8 +26,11 @@ from hmr4d.utils.smplx_utils import make_smplx
 class Bones2DDatasetV2(KP2DDatasetV2):
     def __init__(self, datapath='/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/bones_to_smpl/bones_to_smpl_v14.7/smpl',
                  meta_file='/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/bones_full_raw_v14/metadata_240527_v014.csv',
-                 split_folder='inputs/mv2d/splits/v1', num_keypoints=17, num_frames=81, split="train", debug=False, rng=None, img_w=1024, img_h=1024, num_views=4, cam_radius=8, cam_elevation=0, focal_scale=2, synthetic_view_type='even', normalize_type='image_size', bbox_scale=1.4, use_coco_pelvis=False,normalize_stats_dir=None, sample_beta=False, cam_aug_cfg={}, use_our_normalization=False, always_start_from_first_frame=False, **kwargs):
-        super().__init__(num_frames, img_w, img_h, num_views, cam_radius, cam_elevation, focal_scale, synthetic_view_type, normalize_type, bbox_scale, normalize_stats_dir, cam_aug_cfg, use_our_normalization)
+                 split_folder='inputs/mv2d/splits/v1', num_keypoints=17, num_frames=120, split="train", debug=False, rng=None, img_w=1024, img_h=1024, num_views=4,
+                 cam_radius=8, cam_elevation=0, focal_scale=2, synthetic_view_type='even', normalize_type='image_size', bbox_scale=1.4, use_coco_pelvis=False, 
+                 normalize_stats_dir=None, sample_beta=True, cam_aug_cfg={}, use_our_normalization=False, always_start_from_first_frame=False, use_orig_length=False, hand_leg_aug=False,
+                 precompute_data_folder='/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR/bones2d/v1', device='cpu', **kwargs):
+        super().__init__(num_frames, img_w, img_h, num_views, cam_radius, cam_elevation, focal_scale, synthetic_view_type, normalize_type, bbox_scale, normalize_stats_dir, cam_aug_cfg, use_our_normalization, hand_leg_aug, use_orig_length)
         self.datapath = datapath
         meta = pd.read_csv(meta_file)
         bvh_files = meta['move_bvh_path'].values
@@ -50,12 +54,15 @@ class Bones2DDatasetV2(KP2DDatasetV2):
         self.use_coco_pelvis = use_coco_pelvis
         self.always_start_from_first_frame = always_start_from_first_frame
         self.data_files = sorted([f for f in os.listdir(datapath) if f.endswith('.npz')])
-        self.coco17_regressor = torch.load("hmr4d/utils/body_model/smpl_coco17_J_regressor.pt")
+        self.coco17_regressor = torch.load("hmr4d/utils/body_model/smpl_coco17_J_regressor.pt").to(device)
         self.coco_joints = ['Nose', 'L_Eye', 'R_Eye', 'L_Ear', 'R_Ear', 'L_Shoulder', 'R_Shoulder', 'L_Elbow', 'R_Elbow', 'L_Wrist',
                             'R_Wrist', 'L_Hip', 'R_Hip', 'L_Knee', 'R_Knee', 'L_Ankle', 'R_Ankle']
         self.base_rot = torch.tensor([[0.5, 0.5, 0.5, 0.5]])
         self.base_rot_mat = quaternion_to_rotation_matrix(torch.tensor([[0.5, 0.5, 0.5, 0.5]]))
-        self.smpl = make_smplx('smpl')
+        self.smpl = make_smplx('smpl').to(device)
+        self.precompute_data_folder = precompute_data_folder
+        self.precompute = self.precompute_data_folder is not None
+        self.device = device
         
     def get_global_rot_augmentation(self, rng):
         """Global coordinate augmentation. Random rotation around y-axis"""
@@ -74,7 +81,7 @@ class Bones2DDatasetV2(KP2DDatasetV2):
         fname = osp.join(self.datapath, f'{name}.npz')
         data = np.load(osp.join(self.datapath, fname))
         pose = torch.tensor(data['thetas'])
-        if pose.shape[0] > self.num_frames:
+        if not self.use_orig_length and pose.shape[0] > self.num_frames:
             if self.always_start_from_first_frame:
                 idx = 0
             else:
@@ -96,13 +103,14 @@ class Bones2DDatasetV2(KP2DDatasetV2):
             'rng': rng,
             'pose': pose,
             'betas': shape,
-            'res': torch.tensor([self.img_w, self.img_h]).float()
+            'res': torch.tensor([self.img_w, self.img_h]).float(),
+            'm_length': pose.shape[0],
         }
         
         output = self.smpl(
-            body_pose=target['pose'][:, 1:],
-            global_orient=target['pose'][:, :1],
-            betas=target['betas'],
+            body_pose=target['pose'][:, 1:].to(self.device),
+            global_orient=target['pose'][:, :1].to(self.device),
+            betas=target['betas'].to(self.device),
             pose2rot=False)
         
         coco_joints = self.coco17_regressor @ output.vertices
@@ -111,18 +119,17 @@ class Bones2DDatasetV2(KP2DDatasetV2):
         self.get_input(target)
         self.pad_motion(target)
         
-        text = ''
-        motion = target['gt_kp2d']
-        cam_dict = target['cam_dict']
-        m_length = pose.shape[0]
-        info = {
-            'dataset_name': 'bones2d_v2'
-        }
-        aux_data = {
-            'kpt3d': target['kp3d'],
-            'obs_kpt2d': target['obs_kp2d'],
-        }   
-        return text, motion, m_length, cam_dict, aux_data, info
+        # text = ''
+        # motion = target['obs_kp2d']
+        # cam_dict = target['cam_dict']
+        # info = {
+        #     'dataset_name': 'bones2d_v2'
+        # }
+        # aux_data = {
+        #     'kpt3d': target['kp3d'],
+        #     'obs_kpt2d': target['obs_kp2d'],
+        # }   
+        return target
 
     def __getitem__(self, item):
         return self.get_motion(item)
@@ -134,26 +141,59 @@ class Bones2DDatasetV2(KP2DDatasetV2):
 class Bones2DDatasetV2SingleView(Bones2DDatasetV2):
     def __init__(self, num_views=1, **kwargs):
         super().__init__(num_views=num_views, **kwargs)
+        
+    def get_precompute_data(self, item):
+        idx = self.split_index[item]
+        data = pickle.load(open(f"{self.precompute_data_folder}/{idx:06d}.pkl", 'rb'))
+        length = data['length']
+        assert length == data['obs_kp2d'].shape[0]
+        # cut or pad
+        if length > self.num_frames:
+            start = np.random.randint(0, length - self.num_frames + 1)
+            end = start + self.num_frames
+            for key in {'obs_kp2d', 'mask', 'conf'}:
+                data[key] = data[key][start:end]
+        elif length < self.num_frames:
+            for key in {'obs_kp2d', 'mask', 'conf'}:
+                val = data[key]
+                data[key] = np.concatenate([val, np.zeros((self.num_frames - val.shape[0],) + val.shape[1:])], axis=0)
+        data['mask'] = data['mask'].astype(np.bool8)
+        for key in {'obs_kp2d', 'conf'}:
+            data[key] = data[key].astype(np.float32)
+        return data
 
     def __getitem__(self, item):
-        text, motion, m_length, cam_dict, aux_data, info = self.get_motion(item)
-        motion_2d = motion
-        mask = np.zeros((self.num_frames, ))
-        mask[:m_length] = 1
-        conf = mask[:, None].repeat(self.num_keypoints, axis=-1)
-        return {
-            'text': text,
-            'gt_kp2d': motion_2d.astype(np.float32),
-            'obs_kp2d': aux_data['obs_kpt2d'].astype(np.float32),
-            'mask': mask.astype(np.bool8),
-            'conf': conf,
-            'length': m_length,
-            'is_2d': True,
-            'dataset_name': 'bones2d_singleview_v2'
-        }
+        if self.precompute:
+            return self.get_precompute_data(item)
+        else:
+            target = self.get_motion(item)
+            m_length = target['m_length']
+            if self.use_orig_length:
+                mask = np.ones((m_length, ))
+            else:
+                mask = np.zeros((self.num_frames, ))
+                mask[:m_length] = 1
+            conf = mask[:, None].repeat(self.num_keypoints, axis=-1)
+            return {
+                'idx': self.split_index[item],
+                'obs_kp2d': target['obs_kp2d'].astype(np.float32),
+                'mask': mask.astype(np.bool8),
+                'conf': conf,
+                'length': m_length,
+                'is_2d': True,
+                'dataset_name': 'bones2d_singleview_v2'
+            }
 
 
 if __name__ == '__main__':
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Process some integers.')
+    parser.add_argument('--index', type=int, default=0, help='Index of the dataset item to process')
+    parser.add_argument('--num_jobs', type=int, default=2, help='Index of the dataset item to process')
+    args = parser.parse_args()
+
+    
     cam_aug_cfg = {
         'elevation_mean': 5,
         'elevation_std': 22.5,
@@ -161,11 +201,37 @@ if __name__ == '__main__':
         'radius_max': 16
     }
     # dataset = Bones2DDatasetV2(debug=True, normalize_type='bbox_frame', num_keypoints=25, use_coco_pelvis=True, use_our_normalization=False, cam_aug_cfg=cam_aug_cfg)
-    dataset = Bones2DDatasetV2SingleView(debug=True, normalize_type='bbox_frame', num_keypoints=25, use_coco_pelvis=True, use_our_normalization=False, sample_beta=True)
-    for i in range(len(dataset)):
-        print(dataset[i])
-        # break
+    output_folder = '/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR/bones2d/v1'
+    os.makedirs(output_folder, exist_ok=True)
     
+    """ test """
+    dataset = Bones2DDatasetV2SingleView(use_orig_length=True, num_frames=250, device='cuda')
+    for i in range(100):
+        data = dataset[i]
+        print(i, data['idx'])
+        print(data['obs_kp2d'].shape)
+        print(data['obs_kp2d'][0, 0])
+    exit()
+    
+    """ gen data """
+    dataset = Bones2DDatasetV2SingleView(use_orig_length=True, num_frames=800, device='cuda')
+    start = args.index * len(dataset) // args.num_jobs
+    end = ((args.index + 1) * len(dataset) // args.num_jobs) if args.index + 1 < args.num_jobs else len(dataset)
+    print(start, end, len(dataset))
+    
+    for i in range(start, end):
+        idx = dataset.split_index[i]
+        idx2 = dataset.split_index[i+1]
+        fname = f"{output_folder}/{idx:06d}.pkl"
+        fname_next = f"{output_folder}/{idx2:06d}.pkl"
+        if os.path.exists(fname) and os.path.exists(fname_next):
+            print(f"Skipping {i}")
+            continue
+        
+        data = dataset[i]
+        print(data['idx'])
+        # print(data['obs_kp2d'][0, 0])
+        pickle.dump(data, open(f"{output_folder}/{data['idx']:06d}.pkl", 'wb'))
     # import os, sys
     # sys.path.append(os.path.join(os.getcwd()))
     # from motiondiff.utils.config import create_config

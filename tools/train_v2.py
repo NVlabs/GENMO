@@ -1,6 +1,7 @@
 import hydra
 import pytorch_lightning as pl
 import os
+import torch.distributed as dist
 from datetime import datetime
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks.checkpoint import Checkpoint
@@ -76,12 +77,13 @@ def train(cfg: DictConfig) -> None:
     # PL callbacks and logger
 
     global_rank = rank_zero_only.rank if rank_zero_only.rank is not None else 0
-    tb_logger = TensorBoardLogger(f'{cfg.output_dir}', version=version, name='')
-    version = tb_logger.version
-    os.makedirs(tb_logger.log_dir, exist_ok=True)
-    cfg.output_dir = tb_logger.log_dir
-    
+    run_root_dir = cfg.output_dir
     if global_rank == 0:
+        tb_logger = TensorBoardLogger(run_root_dir, version=version, name='')
+        version = tb_logger.version
+        os.makedirs(tb_logger.log_dir, exist_ok=True)
+        cfg.output_dir = tb_logger.log_dir
+        
         slurm_job_id = int(os.environ.get("SLURM_JOB_ID", "-1"))
         run_name = f'{cfg.exp_name}_v{version}_{slurm_job_id}' if slurm_job_id > 0 else f'{cfg.exp_name}_v{version}'
         cfg.logger.name = run_name
@@ -94,6 +96,16 @@ def train(cfg: DictConfig) -> None:
         if wandb_run is None:
             wandb_run = f"{cfg.exp_name.replace('/', '_')}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
         cfg.logger.id = wandb_run
+    
+    if cfg.pl_trainer.devices > 1 and 'LOCAL_RANK' in os.environ:
+        dist.init_process_group('nccl')
+        dist.barrier()
+
+    if global_rank != 0:
+        if version is None:
+            version = find_last_version(cfg.cfg_dir, cp=None)
+        cfg.output_dir = f'{run_root_dir}/version_{version}'
+        
     callbacks = get_callbacks(cfg)
     has_ckpt_cb = any([isinstance(cb, Checkpoint) for cb in callbacks])
     if not has_ckpt_cb and cfg.pl_trainer.get("enable_checkpointing", True):
