@@ -85,13 +85,13 @@ def draw_mv_imgs(kp2d, joint_parents, img_w, img_h, bone_color=(0, 255, 0), kp_c
     return mv_imgs
 
 
-def draw_motion_2d(motion_2d, fname, joint_parents, img_w, img_h, fps=30, show_joints=None):
+def draw_motion_2d(motion_2d, fname, joint_parents, img_w, img_h, fps=30, show_joints=None, mask=None):
     frame_dir = os.path.splitext(fname)[0] + '_frames'
     shutil.rmtree(frame_dir, ignore_errors=True)
     os.makedirs(frame_dir, exist_ok=True)
     # create blank image
     for t in range(motion_2d.shape[0]):
-        mv_imgs = draw_mv_imgs(motion_2d[t], joint_parents, img_w, img_h, show_joints=show_joints)
+        mv_imgs = draw_mv_imgs(motion_2d[t], joint_parents, img_w, img_h, show_joints=show_joints, mask=mask[t])
         cv2.imwrite(f'{frame_dir}/{t:06d}.jpg', mv_imgs[..., ::-1])
 
     images_to_video(frame_dir, fname, fps=fps)

@@ -116,7 +116,7 @@ class DataModule(pl.LightningDataModule):
                 drop_last=True,
                 collate_fn=collate_fn,
             )
-            all_train_dataloaders = CombinedLoader({'3d': loader_3d, '2d': loader_2d}, mode='max_size_cycle')
+            all_train_dataloaders = CombinedLoader({'3d': loader_3d, '2d': loader_2d}, mode='min_size')
             return all_train_dataloaders
         else:
             return super().train_dataloader()

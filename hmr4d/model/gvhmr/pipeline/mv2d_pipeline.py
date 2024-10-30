@@ -187,7 +187,7 @@ class Pipeline(nn.Module):
         mask = inputs["mask"]
         
         # 0. cycle input 2d loss
-        input_target = inputs["obs"]
+        input_target = inputs["orig_obs"]
         mv2d_sv = model_output_sv["mv2d"]
         mv2d_sv_input_view = mv2d_sv[:, :, input_view_id]
         cycle_in2d_loss = F.mse_loss(mv2d_sv_input_view, input_target[..., :2], reduction="none")
