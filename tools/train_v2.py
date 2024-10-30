@@ -46,7 +46,7 @@ def train(cfg: DictConfig) -> None:
     """Train/Test"""
     Log.info(f"[Exp Name]: {cfg.exp_name}")
     # use total batch size
-    cfg.data.loader_opts.train.batch_size = cfg.data.loader_opts.train.batch_size // cfg.pl_trainer.devices
+    # cfg.data.loader_opts.train.batch_size = cfg.data.loader_opts.train.batch_size // cfg.pl_trainer.devices   # don't use total batch size
     if cfg.task == "fit":
         Log.info(f"[GPU x Batch] = {cfg.pl_trainer.devices} x {cfg.data.loader_opts.train.batch_size}")
     pl.seed_everything(cfg.seed)
@@ -97,7 +97,7 @@ def train(cfg: DictConfig) -> None:
             wandb_run = f"{cfg.exp_name.replace('/', '_')}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
         cfg.logger.id = wandb_run
     
-    if cfg.pl_trainer.devices > 1 and 'LOCAL_RANK' in os.environ:
+    if cfg.pl_trainer.devices > 1 and "RANK" in os.environ:
         dist.init_process_group('nccl')
         dist.barrier()
 
