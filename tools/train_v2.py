@@ -12,7 +12,7 @@ from hmr4d.utils.pylogger import Log
 from hmr4d.configs import register_store_gvhmr
 from hmr4d.utils.vis.rich_logger import print_cfg
 from hmr4d.utils.net_utils import load_pretrained_model, get_resume_ckpt_path
-from motiondiff.utils.tools import find_last_version
+from motiondiff.utils.tools import find_last_version, get_checkpoint_path
 from pytorch_lightning.utilities import rank_zero_only
 from hmr4d.utils.callbacks.autoresume_callback import AutoResumeCallback, AutoResume
 import yaml
@@ -65,9 +65,16 @@ def train(cfg: DictConfig) -> None:
                 version = int(details['version'])
             print(f"[Auto Resume] Loading. checkpoint: {details['checkpoint']} wandb_id: {details.get('wandb_id', None)}")
     
-    run_root_dir = cfg.output_dir
-    if version is None:
-        version = find_last_version(run_root_dir, cp=None)
+    if cfg.task == 'test':
+        test_cp = cfg.get('test_checkpoint', 'last')
+        remote_run_dir = cfg.output_dir.replace('outputs', cfg.remote_results_path)
+        version = find_last_version(remote_run_dir, cp=test_cp)
+        checkpoint_dir = f'{remote_run_dir}/version_{version}/checkpoints'
+        cfg.ckpt_path = get_checkpoint_path(checkpoint_dir, test_cp)
+    else:    
+        run_root_dir = cfg.output_dir
+        if version is None:
+            version = find_last_version(run_root_dir, cp='last')
 
     # preparation
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(cfg.data, _recursive_=False)
@@ -76,35 +83,35 @@ def train(cfg: DictConfig) -> None:
         load_pretrained_model(model, cfg.ckpt_path)
 
     # PL callbacks and logger
-
     global_rank = rank_zero_only.rank if rank_zero_only.rank is not None else 0
-    if global_rank == 0:
-        tb_logger = TensorBoardLogger(run_root_dir, version=version, name='')
-        version = tb_logger.version
-        os.makedirs(tb_logger.log_dir, exist_ok=True)
-        cfg.output_dir = tb_logger.log_dir
-        
-        slurm_job_id = int(os.environ.get("SLURM_JOB_ID", "-1"))
-        run_name = f'{cfg.exp_name}_v{version}_{slurm_job_id}' if slurm_job_id > 0 else f'{cfg.exp_name}_v{version}'
-        cfg.logger.name = run_name
-        # cfg.logger.version = version  # shouldn't set version for Wandb
+    if cfg.task == "fit":
+        if global_rank == 0:
+            tb_logger = TensorBoardLogger(run_root_dir, version=version, name='')
+            version = tb_logger.version
+            os.makedirs(tb_logger.log_dir, exist_ok=True)
+            cfg.output_dir = tb_logger.log_dir
+            
+            slurm_job_id = int(os.environ.get("SLURM_JOB_ID", "-1"))
+            run_name = f'{cfg.exp_name}_v{version}_{slurm_job_id}' if slurm_job_id > 0 else f'{cfg.exp_name}_v{version}'
+            cfg.logger.name = run_name
+            # cfg.logger.version = version  # shouldn't set version for Wandb
 
-        if cfg.resume_mode == 'last' and os.path.exists(f'{tb_logger.log_dir}/meta.yaml'):
-            meta = yaml.safe_load(open(f'{tb_logger.log_dir}/meta.yaml', 'r'))
+            if cfg.resume_mode == 'last' and os.path.exists(f'{tb_logger.log_dir}/meta.yaml'):
+                meta = yaml.safe_load(open(f'{tb_logger.log_dir}/meta.yaml', 'r'))
+                if wandb_run is None:
+                    wandb_run = meta['wandb_run']
             if wandb_run is None:
-                wandb_run = meta['wandb_run']
-        if wandb_run is None:
-            wandb_run = f"{cfg.exp_name.replace('/', '_')}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        cfg.logger.id = wandb_run
-    
-    if cfg.pl_trainer.devices > 1 and "RANK" in os.environ:
-        dist.init_process_group('nccl')
-        dist.barrier()
+                wandb_run = f"{cfg.exp_name.replace('/', '_')}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            cfg.logger.id = wandb_run
+        
+        if cfg.pl_trainer.devices > 1 and "RANK" in os.environ:
+            dist.init_process_group('nccl')
+            dist.barrier()
 
-    if global_rank != 0:
-        if version is None:
-            version = find_last_version(run_root_dir, cp=None)
-        cfg.output_dir = f'{run_root_dir}/version_{version}'
+        if global_rank != 0:
+            if version is None:
+                version = find_last_version(run_root_dir, cp='last')
+            cfg.output_dir = f'{run_root_dir}/version_{version}'
         
     callbacks = get_callbacks(cfg)
     has_ckpt_cb = any([isinstance(cb, Checkpoint) for cb in callbacks])
@@ -115,7 +122,7 @@ def train(cfg: DictConfig) -> None:
         callbacks.append(AutoResumeCallback(version))
 
     logger = hydra.utils.instantiate(cfg.logger, _recursive_=False)
-    if global_rank == 0:
+    if cfg.task == 'fit' and global_rank == 0:
         # wandb.config.update({"cfg": OmegaConf.to_container(cfg)}, allow_val_change=True)
         assert cfg.logger.id is not None
         meta = {"wandb_run": cfg.logger.id}

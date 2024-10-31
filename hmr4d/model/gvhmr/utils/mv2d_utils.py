@@ -49,7 +49,18 @@ def create_cam(cam_intrinsics, azimuths, elevations, radius):
     return cam_dict
 
     
-def draw_mv_imgs(kp2d, joint_parents, img_w, img_h, bone_color=(0, 255, 0), kp_color=(255, 0, 0), base_img=None, mask=None, show_joints=None):
+def draw_mv_imgs(kp2d, joint_parents, img_w, img_h, bone_color=(0, 255, 0), kp_color=(255, 0, 0), base_img=None, mask=None, show_joints=None, add_coco_root=False, unnormalize=False, line_thickness=1, circle_radius=3, highlight_view=None):
+    kp2d = kp2d.cpu()
+    if add_coco_root and kp2d.shape[-2] == 17:
+        kp2d = torch.cat([kp2d, (kp2d[..., [11], :] + kp2d[..., [12], :]) * 0.5], dim=-2)
+        if kp2d.shape[-1] == 3:
+            kp2d[..., -1, -1] = 1.0
+    if kp2d.shape[-1] == 3:
+        if mask is None:
+            mask = kp2d[..., 2] > 0.5
+        kp2d = kp2d[..., :2]
+    if unnormalize:
+        kp2d = (kp2d + 1) * 0.5 * torch.tensor([img_w, img_h], device=kp2d.device)
     mv_imgs = []
     if base_img is not None:
         base_img = np.split(base_img, kp2d.shape[0], axis=1)
@@ -69,7 +80,7 @@ def draw_mv_imgs(kp2d, joint_parents, img_w, img_h, bone_color=(0, 255, 0), kp_c
             x1, y1 = kp2d[v, i].numpy()
             x2, y2 = kp2d[v, parent].numpy()
             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-            cv2.line(img, (x1, y1), (x2, y2), bone_color_v, 2)
+            cv2.line(img, (x1, y1), (x2, y2), bone_color_v, line_thickness)
         
         # Draw keypoints
         for i in range(kp2d.shape[1]):
@@ -78,7 +89,10 @@ def draw_mv_imgs(kp2d, joint_parents, img_w, img_h, bone_color=(0, 255, 0), kp_c
             kp_color_v = ((255, 255, 0)) if mask is not None and torch.any(mask[v, i]) else kp_color
             x, y = kp2d[v, i].numpy()
             x, y = int(x), int(y)
-            cv2.circle(img, (x, y), 6, kp_color_v, -1)
+            cv2.circle(img, (x, y), circle_radius, kp_color_v, -1)
+            
+        if v == highlight_view:
+            img = cv2.rectangle(img, (0, 0), (img_w, img_h), (0, 255, 0), 4)
         
         mv_imgs.append(img)
     mv_imgs = np.concatenate(mv_imgs, axis=1)

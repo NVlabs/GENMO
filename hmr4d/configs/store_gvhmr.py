@@ -18,6 +18,7 @@ import hmr4d.model.common_utils.scheduler_cfg
 import hmr4d.model.gvhmr.callbacks.metric_emdb
 import hmr4d.model.gvhmr.callbacks.metric_rich
 import hmr4d.model.gvhmr.callbacks.metric_3dpw
+import hmr4d.model.gvhmr.callbacks.vis_2d
 
 
 # PL Callbacks

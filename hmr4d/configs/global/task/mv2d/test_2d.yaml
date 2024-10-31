@@ -1,0 +1,19 @@
+# @package _global_
+defaults:
+  - override /data: mocap/testY
+  - override /test_datasets:
+      - bones_2d_test
+      - 3dpw/fliptest
+  - override /callbacks:
+      - vis_2d
+      - metric_3dpw
+  - _self_
+
+task: test
+remote_results_path: /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/yey/gvhmr
+ckpt_path: ??? # will not override previous setting if already set
+
+# lightning utilities
+pl_trainer:
+  devices: 1
+logger: null

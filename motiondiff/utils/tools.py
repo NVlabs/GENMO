@@ -65,7 +65,7 @@ def find_last_version(folder, prefix='version_', cp='last'):
         elif cp.isdigit():
             suffix = f'*{int(cp):07d}.ckpt'
         else:
-            raise ValueError(f'invalid cp: {cp}')
+            suffix = f'{cp}.ckpt'
         version_folders = [x for x in version_folders if len(glob.glob(f'{x}/**/{suffix}')) > 0]
     version_numbers = sorted([int(osp.basename(x)[len(prefix):]) for x in version_folders])
     if len(version_numbers) == 0:
@@ -126,7 +126,7 @@ def get_checkpoint_path(checkpoint_dir, cp, return_name=False):
     elif cp == 'best': # use best epoch
         cp_name = osp.basename(sorted(glob.glob(f'{checkpoint_dir}/*best*.ckpt'))[-1])
     else:
-        cp_name = f'model-step={int(cp):07d}.ckpt'
+        cp_name = osp.basename(sorted(glob.glob(f'{checkpoint_dir}/{cp}.ckpt'))[-1])
     cp_path = f'{checkpoint_dir}/{cp_name}'
     if return_name:
         return cp_path, cp_name

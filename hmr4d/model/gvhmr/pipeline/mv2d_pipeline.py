@@ -170,6 +170,8 @@ class Pipeline(nn.Module):
         view_correspondence = (np.arange(self.num_views) + second_view) % self.num_views
         input_view_id = (-second_view) % self.num_views
         mv2d_shuffle = model_output["mv2d"][:, :, view_correspondence]
+        model_output['mv2d_shuffle'] = mv2d_shuffle
+        model_output['input_view_id'] = input_view_id
         obs_sv = mv2d_shuffle[:, :, 0]
         obs_sv = torch.cat([obs_sv, torch.zeros_like(obs_sv[..., :1])], dim=-1)  # (B, L, J, 3)
         f_condition = {
@@ -187,41 +189,45 @@ class Pipeline(nn.Module):
         mask = inputs["mask"]
         
         # 0. cycle input 2d loss
-        input_target = inputs["orig_obs"]
-        mv2d_sv = model_output_sv["mv2d"]
-        mv2d_sv_input_view = mv2d_sv[:, :, input_view_id]
-        cycle_in2d_loss = F.mse_loss(mv2d_sv_input_view, input_target[..., :2], reduction="none")
-        cycle_in2d_loss *= input_target[..., [2]]
-        cycle_in2d_loss = (cycle_in2d_loss * mask[..., None, None]).mean()
-        total_loss += self.weights.cycle_in2d * cycle_in2d_loss
-        outputs["cycle_in2d_loss"] = cycle_in2d_loss
+        if self.weights.cycle_in2d > 0.0:
+            input_target = inputs["orig_obs"]
+            mv2d_sv = model_output_sv["mv2d"]
+            mv2d_sv_input_view = mv2d_sv[:, :, input_view_id]
+            cycle_in2d_loss = F.mse_loss(mv2d_sv_input_view, input_target[..., :2], reduction="none")
+            cycle_in2d_loss *= input_target[..., [2]]
+            cycle_in2d_loss = (cycle_in2d_loss * mask[..., None, None]).mean()
+            total_loss += self.weights.cycle_in2d * cycle_in2d_loss
+            outputs["cycle_in2d_loss"] = cycle_in2d_loss
         
         # 1. cycle mv2d loss
-        mv2d_sv_target = mv2d_shuffle
-        if self.weights.cycle_detach_mv2d_target:
-            mv2d_sv_target = mv2d_sv_target.detach()
-        cycle_mv2d_loss = F.mse_loss(mv2d_sv, mv2d_sv_target, reduction="none")
-        cycle_mv2d_loss = (cycle_mv2d_loss * mask[..., None, None, None]).mean()
-        total_loss += self.weights.cycle_mv2d * cycle_mv2d_loss
-        outputs["cycle_mv2d_loss"] = cycle_mv2d_loss
+        if self.weights.cycle_mv2d > 0.0:
+            mv2d_sv_target = mv2d_shuffle
+            if self.weights.cycle_detach_mv2d_target:
+                mv2d_sv_target = mv2d_sv_target.detach()
+            cycle_mv2d_loss = F.mse_loss(mv2d_sv, mv2d_sv_target, reduction="none")
+            cycle_mv2d_loss = (cycle_mv2d_loss * mask[..., None, None, None]).mean()
+            total_loss += self.weights.cycle_mv2d * cycle_mv2d_loss
+            outputs["cycle_mv2d_loss"] = cycle_mv2d_loss
 
         # 2. cycle pose loss
-        body_pose_target = decode_dict["body_pose"]
-        if self.weights.cycle_detach_body_pose_target:
-            body_pose_target = body_pose_target.detach()
-        pose_loss = F.mse_loss(decode_dict_sv["body_pose"], body_pose_target, reduction="none")
-        pose_loss = (pose_loss * mask[..., None]).mean()
-        total_loss += self.weights.cycle_pose * pose_loss
-        outputs["cycle_pose_loss"] = pose_loss
+        if self.weights.cycle_pose > 0.0:
+            body_pose_target = decode_dict["body_pose"]
+            if self.weights.cycle_detach_body_pose_target:
+                body_pose_target = body_pose_target.detach()
+            pose_loss = F.mse_loss(decode_dict_sv["body_pose"], body_pose_target, reduction="none")
+            pose_loss = (pose_loss * mask[..., None]).mean()
+            total_loss += self.weights.cycle_pose * pose_loss
+            outputs["cycle_pose_loss"] = pose_loss
         
         # 3. cycle beta loss
-        beta_target = decode_dict["betas"]
-        if self.weights.cycle_detach_beta_target:
-            beta_target = beta_target.detach()
-        beta_loss = F.mse_loss(decode_dict_sv["betas"], beta_target, reduction="none")
-        beta_loss = (beta_loss * mask[..., None]).mean()
-        total_loss += self.weights.cycle_betas * beta_loss
-        outputs["cycle_beta_loss"] = beta_loss
+        if self.weights.cycle_betas > 0.0:
+            beta_target = decode_dict["betas"]
+            if self.weights.cycle_detach_beta_target:
+                beta_target = beta_target.detach()
+            beta_loss = F.mse_loss(decode_dict_sv["betas"], beta_target, reduction="none")
+            beta_loss = (beta_loss * mask[..., None]).mean()
+            total_loss += self.weights.cycle_betas * beta_loss
+            outputs["cycle_beta_loss"] = beta_loss
 
         outputs["loss_2d"] = total_loss
         return outputs

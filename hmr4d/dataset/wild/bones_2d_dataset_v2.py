@@ -26,7 +26,7 @@ from hmr4d.utils.smplx_utils import make_smplx
 class Bones2DDatasetV2(KP2DDatasetV2):
     def __init__(self, datapath='/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/bones_to_smpl/bones_to_smpl_v14.7/smpl',
                  meta_file='/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/bones_full_raw_v14/metadata_240527_v014.csv',
-                 split_folder='inputs/mv2d/splits/v1', num_keypoints=17, num_frames=120, split="train", debug=False, rng=None, img_w=1024, img_h=1024, num_views=4,
+                 split_folder='inputs/mv2d/splits/v1', num_keypoints=17, num_frames=120, num_data=None, split="train", debug=False, rng=None, img_w=1024, img_h=1024, num_views=4,
                  cam_radius=8, cam_elevation=0, focal_scale=2, synthetic_view_type='even', normalize_type='image_size', bbox_scale=1.4, use_coco_pelvis=False, 
                  normalize_stats_dir=None, sample_beta=True, cam_aug_cfg={}, use_our_normalization=False, always_start_from_first_frame=False, use_orig_length=False, hand_leg_aug=False,
                  precompute_data_folder='/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR/bones2d/v1', device='cpu', **kwargs):
@@ -37,6 +37,9 @@ class Bones2DDatasetV2(KP2DDatasetV2):
         self.motion_names = [x[4:].replace('.bvh', '') for x in bvh_files]
         self.all_index = np.load(pjoin(split_folder, f'filtered_smpl_ind.npy'))
         self.split_index = np.load(pjoin(split_folder, f'{split}_index.npy'))
+        if num_data is not None:
+            self.split_index = self.split_index[:num_data]
+        
         self.rng_dict = pickle.load(open(pjoin(split_folder, f'rng_dict.pkl'), 'rb'))
         rng_mapping = {x: {} for x in self.all_index}
         for k, rng_arr in self.rng_dict.items():
@@ -160,6 +163,9 @@ class Bones2DDatasetV2SingleView(Bones2DDatasetV2):
         data['mask'] = data['mask'].astype(np.bool8)
         for key in {'obs_kp2d', 'conf'}:
             data[key] = data[key].astype(np.float32)
+        data['meta'] = {
+            'dataset_id': 'bones2d_v2',
+        }
         return data
 
     def __getitem__(self, item):
@@ -181,7 +187,9 @@ class Bones2DDatasetV2SingleView(Bones2DDatasetV2):
                 'conf': conf,
                 'length': m_length,
                 'is_2d': True,
-                'dataset_name': 'bones2d_singleview_v2'
+                'meta': {
+                    'dataset_id': 'bones2d_v2',
+                }
             }
 
 
