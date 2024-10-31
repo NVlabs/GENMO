@@ -36,8 +36,9 @@ data_name: mocap_mixed_v1
 
 model_cfg:
     num_views: 4
+    start_2d_training_steps: 10000
     noisy_2d_obs: true
-    kp2d_noise_scale: 1.
+    kp2d_noise_scale: 0.5
 
 pipeline:
     _target_: hmr4d.model.gvhmr.pipeline.mv2d_pipeline.Pipeline
