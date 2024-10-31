@@ -173,7 +173,7 @@ class Pipeline(nn.Module):
         model_output['mv2d_shuffle'] = mv2d_shuffle
         model_output['input_view_id'] = input_view_id
         obs_sv = mv2d_shuffle[:, :, 0]
-        obs_sv = torch.cat([obs_sv, torch.zeros_like(obs_sv[..., :1])], dim=-1)  # (B, L, J, 3)
+        obs_sv = torch.cat([obs_sv, torch.ones_like(obs_sv[..., :1])], dim=-1)  # (B, L, J, 3)
         f_condition = {
             "obs": obs_sv,  # (B, L, J, 3)
             "f_cliffcam": torch.zeros(B, L, 3).to(device),  # (B, L, 3)
