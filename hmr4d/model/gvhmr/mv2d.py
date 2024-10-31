@@ -252,7 +252,7 @@ class MV2D(pl.LightningModule):
         if noisy_2d_obs:
             aug = get_wham_aug_kp3d(obs_kp2d.shape[:2])[..., :2]
             f = torch.tensor([1024., 1024.]).to(aug) / 4.
-            aug *= f * self.model_cfg.kp2d_noise_scale * 5
+            aug *= f * self.model_cfg.kp2d_noise_scale
             obs_kp2d += aug
             obs_kp2d = randomly_modify_hands_legs(obs_kp2d)
             j2d_visible_mask = get_visible_mask(obs_kp2d.shape[:2]).cuda()  # (B, L, J)
