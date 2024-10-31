@@ -258,6 +258,8 @@ class MV2D(pl.LightningModule):
             legs_invisible_mask = get_invisible_legs_mask(obs_kp2d.shape[:2]).cuda()  # (B, L, J)
             j2d_visible_mask[legs_invisible_mask] = False
             j2d_visible_mask *= (conf > 0.5)
+        else:
+            j2d_visible_mask = conf > 0.5
         obs_kp2d = torch.cat([obs_kp2d, j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
         obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
         obs[~batch["mask"]] = 0
