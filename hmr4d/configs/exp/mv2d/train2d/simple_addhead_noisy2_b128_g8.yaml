@@ -87,7 +87,7 @@ pl_trainer:
     precision: 16-mixed
     log_every_n_steps: 10
     gradient_clip_val: 0.5
-    max_epochs: 500
+    max_epochs: 2000
     check_val_every_n_epoch: 10
     devices: 1
 
