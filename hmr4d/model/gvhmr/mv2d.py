@@ -96,7 +96,8 @@ class MV2D(pl.LightningModule):
                 outputs_3d = self.train_3d_step(batch['3d'], batch_idx)
                 outputs.update(outputs_3d)
         
-        if '2d' in batch:
+        start_2d_training_steps = self.model_cfg.get("start_2d_training_steps", 0)
+        if '2d' in batch and self.trainer.global_step >= start_2d_training_steps:
             with Timer("train_2d_step", enabled=self.timing):
                 outputs_2d = self.train_2d_step(batch['2d'], batch_idx)
                 if 'loss_2d' in outputs_2d:
@@ -265,8 +266,6 @@ class MV2D(pl.LightningModule):
         obs[~batch["mask"]] = 0
         batch["obs"] = obs
         
-            
-        
         # vis_ind = 0
         # mv2d_norm = obs.unsqueeze(2)
         # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
@@ -325,6 +324,7 @@ class MV2D(pl.LightningModule):
 
         # Forward and get loss
         outputs = self.pipeline.forward_2d(batch, train=False)
+        outputs["batch"] = batch
         return outputs
         
     def validation_3d(self, batch, batch_idx, dataloader_idx=0):

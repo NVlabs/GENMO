@@ -36,7 +36,6 @@ data_name: mocap_mixed_v1
 
 model_cfg:
     num_views: 4
-    start_2d_training_steps: 10000
 
 pipeline:
     _target_: hmr4d.model.gvhmr.pipeline.mv2d_pipeline.Pipeline
@@ -56,10 +55,10 @@ pipeline:
             transl_w: 1.
             static_conf_bce: 1.
 
-            cycle_in2d: 100.0
-            cycle_mv2d: 0
-            cycle_pose: 0
-            cycle_betas: 0
+            cycle_in2d: 1000.0
+            cycle_mv2d: 1.
+            cycle_pose: 1.
+            cycle_betas: 1.
             cycle_detach_mv2d_target: false
             cycle_detach_body_pose_target: false
             cycle_detach_beta_target: false
@@ -86,7 +85,7 @@ pl_trainer:
     log_every_n_steps: 10
     gradient_clip_val: 0.5
     max_epochs: 500
-    check_val_every_n_epoch: 10
+    val_check_interval: 1
     devices: 1
 
 logger:

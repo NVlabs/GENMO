@@ -4,6 +4,7 @@ import numpy as np
 import wandb
 import os
 import shutil
+import torch.distributed as dist
 from pathlib import Path
 from einops import einsum, rearrange
 
@@ -67,26 +68,27 @@ class Vis2D(pl.Callback):
                 mv_imgs.append(mv2d_sv_img)
                 mv_imgs = np.concatenate(mv_imgs, axis=0)
 
-                cv2.imwrite(f'{frame_dir}/{t:06d}.jpg', mv_imgs[..., ::-1])
+                if trainer.global_rank == 0:
+                    cv2.imwrite(f'{frame_dir}/{t:06d}.jpg', mv_imgs[..., ::-1])
 
-            images_to_video(frame_dir, vid_file, fps=30, verbose=False)
-            shutil.rmtree(frame_dir, ignore_errors=True)
+            if trainer.global_rank == 0:
+                images_to_video(frame_dir, vid_file, fps=30, verbose=False)
+                shutil.rmtree(frame_dir, ignore_errors=True)
             
-            if isinstance(wandb.run, wandb.sdk.wandb_run.Run):
-                pl_module.logger.log_metrics({f'b{batch_idx:03d}_i{ind:02d}': wandb.Video(vid_file)})
-                # wandb.log({f'vis_2d/{ind:04d}': wandb.Video(vid_file)}, step=trainer.global_step if trainer is not None else 0)
+                if isinstance(wandb.run, wandb.sdk.wandb_run.Run):
+                    pl_module.logger.log_metrics({f'b{batch_idx:03d}_i{ind:02d}': wandb.Video(vid_file)})
+                    # wandb.log({f'vis_2d/{ind:04d}': wandb.Video(vid_file)}, step=trainer.global_step if trainer is not None else 0)
         return
 
     # ================== Batch-based Computation  ================== #
     def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
-        """The behaviour is the same for val/test/predict"""
         assert batch["B"] == 1
         dataset_id = batch["meta"][0]["dataset_id"]
         if 'is_2d' not in batch or not batch['is_2d'][0]:
             return
         input_view_id = outputs['2d_model_output']['input_view_id']
-        obs = batch["obs"]
-        orig_obs = batch["orig_obs"]
+        obs = outputs["batch"]["obs"]
+        orig_obs = outputs["batch"]["orig_obs"]
         obs = torch.stack([obs, torch.zeros_like(obs), torch.zeros_like(obs), torch.zeros_like(obs)], dim=2)
         obs[:, :, input_view_id] = orig_obs
         results = {
@@ -97,6 +99,9 @@ class Vis2D(pl.Callback):
             'input_view_id': input_view_id,
         }
         self.log_2d(trainer, pl_module, batch_idx, results)
+        
+        if dist.is_initialized():
+            dist.barrier()
 
     # ================== Epoch Summary  ================== #
     def on_predict_epoch_end(self, trainer, pl_module):

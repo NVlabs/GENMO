@@ -49,6 +49,8 @@ def train(cfg: DictConfig) -> None:
     # cfg.data.loader_opts.train.batch_size = cfg.data.loader_opts.train.batch_size // cfg.pl_trainer.devices   # don't use total batch size
     if cfg.task == "fit":
         Log.info(f"[GPU x Batch] = {cfg.pl_trainer.devices} x {cfg.data.loader_opts.train.batch_size}")
+    if 'bones_2d' in cfg.test_datasets:
+        cfg.test_datasets.bones_2d.num_data *= cfg.pl_trainer.devices
     pl.seed_everything(cfg.seed)
     wandb_run = None
     version = None
