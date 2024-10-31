@@ -71,6 +71,7 @@ def train(cfg: DictConfig) -> None:
         version = find_last_version(remote_run_dir, cp=test_cp)
         checkpoint_dir = f'{remote_run_dir}/version_{version}/checkpoints'
         cfg.ckpt_path = get_checkpoint_path(checkpoint_dir, test_cp)
+        cfg.logger.name = f"{cfg.exp_name}_v{version}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
     else:    
         run_root_dir = cfg.output_dir
         if version is None:

@@ -46,11 +46,11 @@ class Vis2D(pl.Callback):
         # Only validation record the metrics with logger
         self.on_test_epoch_end = self.on_validation_epoch_end = self.on_predict_epoch_end
         
-    def log_2d(self, trainer, results):
+    def log_2d(self, trainer, pl_module, batch_idx, results):
         mv2d = results['mv2d']
         input_view_id = results['input_view_id']
         for ind in range(mv2d.shape[0]):
-            vid_file = f'out/video/vis_2d/{ind:04d}.mp4'
+            vid_file = f'out/video/vis_2d/b{batch_idx:03d}_i{ind:02d}.mp4'
             os.makedirs(os.path.dirname(vid_file), exist_ok=True)
             frame_dir = os.path.splitext(vid_file)[0] + '_frames'
             os.makedirs(frame_dir, exist_ok=True)
@@ -73,7 +73,8 @@ class Vis2D(pl.Callback):
             shutil.rmtree(frame_dir, ignore_errors=True)
             
             if isinstance(wandb.run, wandb.sdk.wandb_run.Run):
-                wandb.log({f'vis_2d/{ind:04d}': wandb.Video(vid_file)}, step=trainer.global_step if trainer is not None else 0)
+                pl_module.logger.log_metrics({f'b{batch_idx:03d}_i{ind:02d}': wandb.Video(vid_file)})
+                # wandb.log({f'vis_2d/{ind:04d}': wandb.Video(vid_file)}, step=trainer.global_step if trainer is not None else 0)
         return
 
     # ================== Batch-based Computation  ================== #
@@ -81,6 +82,8 @@ class Vis2D(pl.Callback):
         """The behaviour is the same for val/test/predict"""
         assert batch["B"] == 1
         dataset_id = batch["meta"][0]["dataset_id"]
+        if 'is_2d' not in batch or not batch['is_2d'][0]:
+            return
         input_view_id = outputs['2d_model_output']['input_view_id']
         obs = batch["obs"]
         orig_obs = batch["orig_obs"]
@@ -93,7 +96,7 @@ class Vis2D(pl.Callback):
             'mv2d_sv': outputs['2d_model_output_sv']['mv2d'],
             'input_view_id': input_view_id,
         }
-        self.log_2d(trainer, results)
+        self.log_2d(trainer, pl_module, batch_idx, results)
 
     # ================== Epoch Summary  ================== #
     def on_predict_epoch_end(self, trainer, pl_module):

@@ -26,7 +26,7 @@ from hmr4d.utils.smplx_utils import make_smplx
 class Bones2DDatasetV2(KP2DDatasetV2):
     def __init__(self, datapath='/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/bones_to_smpl/bones_to_smpl_v14.7/smpl',
                  meta_file='/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/bones_full_raw_v14/metadata_240527_v014.csv',
-                 split_folder='inputs/mv2d/splits/v1', num_keypoints=17, num_frames=120, num_data=None, split="train", debug=False, rng=None, img_w=1024, img_h=1024, num_views=4,
+                 split_folder='inputs/mv2d/splits/v1', num_keypoints=17, num_frames=120, num_data=None, split="train", shuffle_data_seed=None, debug=False, rng=None, img_w=1024, img_h=1024, num_views=4,
                  cam_radius=8, cam_elevation=0, focal_scale=2, synthetic_view_type='even', normalize_type='image_size', bbox_scale=1.4, use_coco_pelvis=False, 
                  normalize_stats_dir=None, sample_beta=True, cam_aug_cfg={}, use_our_normalization=False, always_start_from_first_frame=False, use_orig_length=False, hand_leg_aug=False,
                  precompute_data_folder='/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR/bones2d/v1', device='cpu', **kwargs):
@@ -37,6 +37,9 @@ class Bones2DDatasetV2(KP2DDatasetV2):
         self.motion_names = [x[4:].replace('.bvh', '') for x in bvh_files]
         self.all_index = np.load(pjoin(split_folder, f'filtered_smpl_ind.npy'))
         self.split_index = np.load(pjoin(split_folder, f'{split}_index.npy'))
+        if shuffle_data_seed is not None:
+            rng_state = np.random.RandomState(shuffle_data_seed)
+            self.split_index = rng_state.permutation(self.split_index)
         if num_data is not None:
             self.split_index = self.split_index[:num_data]
         
