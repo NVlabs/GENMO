@@ -82,9 +82,16 @@ def train(cfg: DictConfig) -> None:
     # preparation
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(cfg.data, _recursive_=False)
     model: pl.LightningModule = hydra.utils.instantiate(cfg.model, _recursive_=False)
+    
+    wandb_cfg = OmegaConf.to_container(cfg, resolve=True)
     if cfg.ckpt_path is not None:
-        load_pretrained_model(model, cfg.ckpt_path)
-
+        ckpt = load_pretrained_model(model, cfg.ckpt_path)
+        if ckpt is not None:
+            wandb_cfg['ckpt_info'] = {
+                'global_step': ckpt['global_step'],
+                'epoch': ckpt['epoch'],
+            }
+    
     # PL callbacks and logger
     global_rank = rank_zero_only.rank if rank_zero_only.rank is not None else 0
     if cfg.task == "fit":
@@ -124,7 +131,8 @@ def train(cfg: DictConfig) -> None:
     if AutoResume is not None:
         callbacks.append(AutoResumeCallback(version))
 
-    logger = hydra.utils.instantiate(cfg.logger, _recursive_=False)
+    cfg.logger.config = wandb_cfg
+    logger = hydra.utils.instantiate(cfg.logger, _recursive_=False, _convert_="partial")
     if cfg.task == 'fit' and global_rank == 0:
         # wandb.config.update({"cfg": OmegaConf.to_container(cfg)}, allow_val_change=True)
         assert cfg.logger.id is not None

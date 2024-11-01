@@ -472,7 +472,8 @@ class MV2D(pl.LightningModule):
         """Load pretrained checkpoint, and assign each weight to the corresponding part."""
         Log.info(f"[PL-Trainer] Loading ckpt: {ckpt_path}")
 
-        state_dict = torch.load(ckpt_path, "cpu")["state_dict"]
+        ckpt = torch.load(ckpt_path, "cpu")
+        state_dict = ckpt["state_dict"]
         missing, unexpected = self.load_state_dict(state_dict, strict=False)
         real_missing = []
         for k in missing:
@@ -484,6 +485,7 @@ class MV2D(pl.LightningModule):
             Log.warn(f"Missing keys: {real_missing}")
         if len(unexpected) > 0:
             Log.warn(f"Unexpected keys: {unexpected}")
+        return ckpt
 
 
 mv2d = builds(

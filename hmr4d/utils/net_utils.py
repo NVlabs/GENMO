@@ -15,11 +15,12 @@ def load_pretrained_model(model, ckpt_path):
     assert Path(ckpt_path).exists()
     # use model's own load_pretrained_model method
     if hasattr(model, "load_pretrained_model"):
-        model.load_pretrained_model(ckpt_path)
+        ckpt = model.load_pretrained_model(ckpt_path)
     else:
         Log.info(f"Loading ckpt: {ckpt_path}")
         ckpt = torch.load(ckpt_path, "cpu")
         model.load_state_dict(ckpt, strict=True)
+    return ckpt
 
 
 def find_last_ckpt_path(dirpath):
