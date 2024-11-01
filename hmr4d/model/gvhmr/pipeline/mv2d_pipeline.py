@@ -49,6 +49,8 @@ class Pipeline(nn.Module):
             cam_angvel_stats = stats_compose.cam_angvel["manual"]
             self.register_buffer("cam_angvel_mean", torch.tensor(cam_angvel_stats["mean"]), persistent=False)
             self.register_buffer("cam_angvel_std", torch.tensor(cam_angvel_stats["std"]), persistent=False)
+            
+        self.denoiser3d.endecoder = [self.endecoder]
 
     # ========== Training ========== #
 
@@ -162,7 +164,10 @@ class Pipeline(nn.Module):
             f_condition = randomly_set_null_condition(f_condition, 0.1)
         f_condition["obs"] = inputs["obs"]  # (B, L, J, 3)
         model_output = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
-        decode_dict = self.endecoder.decode(model_output["pred_x"])  # (B, L, C) -> dict
+        if 'decode_dict' in model_output:
+            decode_dict = model_output.pop("decode_dict")
+        else:
+            decode_dict = self.endecoder.decode(model_output["pred_x"])  # (B, L, C) -> dict
         outputs.update({"2d_model_output": model_output, "2d_decode_dict": decode_dict})
         
         # second view generation
@@ -181,7 +186,10 @@ class Pipeline(nn.Module):
             "f_imgseq": torch.zeros(B, L, 1024).to(device)
         }
         model_output_sv = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
-        decode_dict_sv = self.endecoder.decode(model_output_sv["pred_x"])  # (B, L, C) -> dict
+        if 'decode_dict' in model_output_sv:
+            decode_dict_sv = model_output_sv.pop("decode_dict")
+        else:
+            decode_dict_sv = self.endecoder.decode(model_output_sv["pred_x"])  # (B, L, C) -> dict
         outputs.update({"2d_model_output_sv": model_output_sv, "2d_decode_dict_sv": decode_dict_sv})
 
         # ========== Compute Loss ========== #
