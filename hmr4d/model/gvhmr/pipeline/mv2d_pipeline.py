@@ -69,8 +69,8 @@ class Pipeline(nn.Module):
             "f_cliffcam": cliff_cam,  # (B, L, 3)
             "f_cam_angvel": f_cam_angvel,  # (B, L, C=6)
             "f_imgseq": inputs["f_imgseq"],  # (B, L, C=1024)
-            "detach_j3d_for_mv2d": self.args.train3d_detach_j3d_for_mv2d,
-            "detach_cam_for_mv2d": self.args.train3d_detach_cam_for_mv2d
+            "detach_j3d_for_mv2d": self.args.get('train3d_detach_j3d_for_mv2d', True),
+            "detach_cam_for_mv2d": self.args.get('train3d_detach_cam_for_mv2d', False)
         }
         if train:
             f_condition = randomly_set_null_condition(f_condition, 0.1)
@@ -118,13 +118,14 @@ class Pipeline(nn.Module):
         mask = inputs["mask"]["valid"]  # (B, L)
         
         # 0. MV2D loss
-        mv2d = model_output["mv2d"]
-        target_mv2d = inputs["mv2d_norm"]
-        mv2d_loss = F.mse_loss(mv2d, target_mv2d[..., :2], reduction="none")
-        mv2d_loss *= target_mv2d[..., [2]]  # weight by confidence
-        mv2d_loss = (mv2d_loss * mask[..., None, None, None]).mean()
-        total_loss += self.weights.mv2d * mv2d_loss
-        outputs["mv2d_loss"] = mv2d_loss
+        if self.weights.mv2d > 0.0:
+            mv2d = model_output["mv2d"]
+            target_mv2d = inputs["mv2d_norm"]
+            mv2d_loss = F.mse_loss(mv2d, target_mv2d[..., :2], reduction="none")
+            mv2d_loss *= target_mv2d[..., [2]]  # weight by confidence
+            mv2d_loss = (mv2d_loss * mask[..., None, None, None]).mean()
+            total_loss += self.weights.mv2d * mv2d_loss
+            outputs["mv2d_loss"] = mv2d_loss
         # vis_ind = 0
         # mv2d_norm = mv2d.detach()
         # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
@@ -169,8 +170,8 @@ class Pipeline(nn.Module):
             "f_cliffcam": torch.zeros(B, L, 3).to(device),  # (B, L, 3)
             "f_cam_angvel": torch.zeros(B, L, 6).to(device),  # (B, L, C=6)
             "f_imgseq": inputs.get("f_imgseq", torch.zeros(B, L, 1024).to(device)),
-            "detach_j3d_for_mv2d": self.args.train2d_detach_j3d_for_mv2d,
-            "detach_cam_for_mv2d": self.args.train2d_detach_cam_for_mv2d
+            "detach_j3d_for_mv2d": self.args.get('train2d_detach_j3d_for_mv2d', False),
+            "detach_cam_for_mv2d": self.args.get('train2d_detach_cam_for_mv2d', False)
         }
         if train:
             f_condition = randomly_set_null_condition(f_condition, 0.1)
@@ -196,8 +197,8 @@ class Pipeline(nn.Module):
             "f_cliffcam": torch.zeros(B, L, 3).to(device),  # (B, L, 3)
             "f_cam_angvel": torch.zeros(B, L, 6).to(device),  # (B, L, C=6)
             "f_imgseq": torch.zeros(B, L, 1024).to(device),
-            "detach_j3d_for_mv2d": self.args.train2d_detach_j3d_for_mv2d,
-            "detach_cam_for_mv2d": self.args.train2d_detach_cam_for_mv2d
+            "detach_j3d_for_mv2d": self.args.get('train2d_detach_j3d_for_mv2d', False),
+            "detach_cam_for_mv2d": self.args.get('train2d_detach_cam_for_mv2d', False)
         }
         model_output_sv = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
         if 'decode_dict' in model_output_sv:
