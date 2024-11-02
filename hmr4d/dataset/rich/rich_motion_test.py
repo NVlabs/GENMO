@@ -15,6 +15,7 @@ from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
 from hmr4d.utils.smplx_utils import make_smplx
 from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix, matrix_to_axis_angle
 from hmr4d.utils.geo.hmr_cam import resize_K
+from hmr4d.utils.geo_transform import normalize_T_w2c
 
 
 from hmr4d.configs import MainStore, builds
@@ -139,8 +140,9 @@ class RichSmplFullSeqDataset(data.Dataset):
         # process img feature with xys
         length = data["length"]
         f_imgseq = data["f_imgseq"]  # (F, 1024)
-        R_w2c = data["T_w2c"][:3, :3].repeat(length, 1, 1)  # (L, 4, 4)
-        t_w2c = data["T_w2c"][:3, 3].repeat(length, 1)  # (L, 3)
+        norm_T_w2c = normalize_T_w2c(data["T_w2c"])
+        R_w2c = norm_T_w2c[:, :3, :3].repeat(length, 1, 1)  # (L, 4, 4)
+        t_w2c = norm_T_w2c[:, :3, 3].repeat(length, 1)  # (L, 3)
         cam_angvel = compute_cam_angvel(R_w2c)  # (L, 6)
         cam_tvel = compute_cam_tvel(t_w2c)  # (L, 3)
 
@@ -155,6 +157,7 @@ class RichSmplFullSeqDataset(data.Dataset):
             "f_imgseq": f_imgseq,
             "cam_angvel": cam_angvel,
             "cam_tvel": cam_tvel,
+            "R_w2c": R_w2c,
             "bbx_xys": data["bbx_xys"],  # (F, 3)
             "K_fullimg": data["K"][None].expand(length, -1, -1),  # (F, 3, 3)
             "kp2d": data["kp2d"],  # (F, 17, 3)

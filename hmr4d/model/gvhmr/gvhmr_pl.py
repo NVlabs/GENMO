@@ -185,7 +185,10 @@ class GvhmrPL(pl.LightningModule):
             "bbx_xys": batch["bbx_xys"],
             "K_fullimg": batch["K_fullimg"],
             "cam_angvel": batch["cam_angvel"],
+            "cam_tvel": batch["cam_tvel"],
+            "R_w2c": batch['R_w2c'],
             "f_imgseq": batch["f_imgseq"],
+            "meta": batch['meta']
         }
         outputs = self.pipeline.forward(batch_, train=False, postproc=do_postproc_not_flip_test)
         outputs["pred_smpl_params_global"] = {k: v[0] for k, v in outputs["pred_smpl_params_global"].items()}
@@ -203,8 +206,12 @@ class GvhmrPL(pl.LightningModule):
                 "bbx_xys": flip_test["bbx_xys"],
                 "K_fullimg": batch["K_fullimg"],
                 "cam_angvel": flip_test["cam_angvel"],
+                "cam_tvel": flip_test["cam_tvel"],
+                "R_w2c": flip_test["R_w2c"],
                 "f_imgseq": flip_test["f_imgseq"],
+                "meta": batch["meta"],
             }
+            batch_["meta"][0]["flip"] = True
             flipped_outputs = self.pipeline.forward(batch_, train=False)
 
             # First update incam results
