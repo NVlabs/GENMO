@@ -1,6 +1,8 @@
 import hydra
 import pytorch_lightning as pl
 import os
+import torch.distributed as dist
+from datetime import datetime
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks.checkpoint import Checkpoint
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -10,7 +12,7 @@ from hmr4d.utils.pylogger import Log
 from hmr4d.configs import register_store_gvhmr
 from hmr4d.utils.vis.rich_logger import print_cfg
 from hmr4d.utils.net_utils import load_pretrained_model, get_resume_ckpt_path
-from motiondiff.utils.tools import find_last_version
+from motiondiff.utils.tools import find_last_version, get_checkpoint_path
 from pytorch_lightning.utilities import rank_zero_only
 from hmr4d.utils.callbacks.autoresume_callback import AutoResumeCallback, AutoResume
 import yaml
@@ -44,12 +46,17 @@ def train(cfg: DictConfig) -> None:
     """Train/Test"""
     Log.info(f"[Exp Name]: {cfg.exp_name}")
     # use total batch size
-    cfg.data.loader_opts.train.batch_size = cfg.data.loader_opts.train.batch_size // cfg.pl_trainer.devices
+    # cfg.data.loader_opts.train.batch_size = cfg.data.loader_opts.train.batch_size // cfg.pl_trainer.devices   # don't use total batch size
     if cfg.task == "fit":
         Log.info(f"[GPU x Batch] = {cfg.pl_trainer.devices} x {cfg.data.loader_opts.train.batch_size}")
+    if 'bones_2d' in cfg.test_datasets:
+        cfg.test_datasets.bones_2d.num_data *= cfg.pl_trainer.devices
     pl.seed_everything(cfg.seed)
     wandb_run = None
     version = None
+    
+    if cfg.get('timing', False):
+        os.environ["DEBUG_TIMING"] = "TRUE"
 
     if AutoResume is not None:
         details = AutoResume.get_resume_details()
@@ -57,65 +64,81 @@ def train(cfg: DictConfig) -> None:
             cfg.resume_mode = 'last'
             if 'wandb_id' in details:
                 wandb_run = details['wandb_id']
-                cfg.logger.version = details['version']
                 version = int(details['version'])
             print(f"[Auto Resume] Loading. checkpoint: {details['checkpoint']} wandb_id: {details.get('wandb_id', None)}")
     
-    if version is None:
-        version = find_last_version(cfg.logger.save_dir + '/checkpoints_resume', cp=None)
+    if cfg.task == 'test':
+        test_cp = cfg.get('test_checkpoint', 'last')
+        remote_run_dir = cfg.output_dir.replace('outputs', cfg.remote_results_path)
+        version = find_last_version(remote_run_dir, cp=test_cp)
+        checkpoint_dir = f'{remote_run_dir}/version_{version}/checkpoints'
+        cfg.ckpt_path = get_checkpoint_path(checkpoint_dir, test_cp)
+        cfg.logger.name = f"{cfg.exp_name}_v{version}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    else:    
+        run_root_dir = cfg.output_dir
+        if version is None:
+            version = find_last_version(run_root_dir, cp='last')
 
     # preparation
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(cfg.data, _recursive_=False)
     model: pl.LightningModule = hydra.utils.instantiate(cfg.model, _recursive_=False)
+    
+    wandb_cfg = OmegaConf.to_container(cfg, resolve=True)
     if cfg.ckpt_path is not None:
-        load_pretrained_model(model, cfg.ckpt_path)
-
+        ckpt = load_pretrained_model(model, cfg.ckpt_path)
+        if ckpt is not None:
+            wandb_cfg['ckpt_info'] = {
+                'global_step': ckpt['global_step'],
+                'epoch': ckpt['epoch'],
+            }
+    
     # PL callbacks and logger
-
     global_rank = rank_zero_only.rank if rank_zero_only.rank is not None else 0
-    if global_rank == 0:
+    if cfg.task == "fit":
+        if global_rank == 0:
+            tb_logger = TensorBoardLogger(run_root_dir, version=version, name='')
+            version = tb_logger.version
+            os.makedirs(tb_logger.log_dir, exist_ok=True)
+            cfg.output_dir = tb_logger.log_dir
+            
+            slurm_job_id = int(os.environ.get("SLURM_JOB_ID", "-1"))
+            run_name = f'{cfg.exp_name}_v{version}_{slurm_job_id}' if slurm_job_id > 0 else f'{cfg.exp_name}_v{version}'
+            cfg.logger.name = run_name
+            # cfg.logger.version = version  # shouldn't set version for Wandb
 
-        tb_logger = TensorBoardLogger(f'{cfg.logger.save_dir}', version=version, name='')
-        version = tb_logger.version
-
-        slurm_job_id = int(os.environ.get("SLURM_JOB_ID", "-1"))
-        run_name = f'{cfg.exp_name}_v{version}_{slurm_job_id}' if slurm_job_id > 0 else f'{cfg.exp_name}'
-        cfg.logger.name = run_name
-
-        os.makedirs(tb_logger.log_dir, exist_ok=True)
-        cfg.logger.save_dir = tb_logger.log_dir
-        cfg.output_dir = tb_logger.log_dir
-        cfg.logger.version = version
-
-        if cfg.resume_mode == 'last' and os.path.exists(f'{tb_logger.log_dir}/meta.yaml'):
-            meta = yaml.safe_load(open(f'{tb_logger.log_dir}/meta.yaml', 'r'))
+            if cfg.resume_mode == 'last' and os.path.exists(f'{tb_logger.log_dir}/meta.yaml'):
+                meta = yaml.safe_load(open(f'{tb_logger.log_dir}/meta.yaml', 'r'))
+                if wandb_run is None:
+                    wandb_run = meta['wandb_run']
             if wandb_run is None:
-                wandb_run = meta['wandb_run']
-        cfg.logger.id = wandb_run
+                wandb_run = f"{cfg.exp_name.replace('/', '_')}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            cfg.logger.id = wandb_run
+        
+        if cfg.pl_trainer.devices > 1 and "RANK" in os.environ:
+            dist.init_process_group('nccl')
+            dist.barrier()
 
+        if global_rank != 0:
+            if version is None:
+                version = find_last_version(run_root_dir, cp='last')
+            cfg.output_dir = f'{run_root_dir}/version_{version}'
+        
     callbacks = get_callbacks(cfg)
     has_ckpt_cb = any([isinstance(cb, Checkpoint) for cb in callbacks])
     if not has_ckpt_cb and cfg.pl_trainer.get("enable_checkpointing", True):
         Log.warning("No checkpoint-callback found. Disabling PL auto checkpointing.")
         cfg.pl_trainer = {**cfg.pl_trainer, "enable_checkpointing": False}
-    checkpoint_epoch_cb = ModelCheckpoint(
-        monitor=None,
-        dirpath=tb_logger.log_dir + "/checkpoints_resume",
-        filename="model-{epoch:02d}",
-        save_last=True,
-        save_top_k=-1,
-        mode="min",
-        every_n_epochs=1,
-    )
-    callbacks.append(checkpoint_epoch_cb)
     if AutoResume is not None:
-        callbacks.append(AutoResumeCallback(cfg.logger.version))
+        callbacks.append(AutoResumeCallback(version))
 
-    logger = hydra.utils.instantiate(cfg.logger, _recursive_=False)
-    if global_rank == 0:
+    cfg.logger.config = wandb_cfg
+    logger = hydra.utils.instantiate(cfg.logger, _recursive_=False, _convert_="partial")
+    if cfg.task == 'fit' and global_rank == 0:
         # wandb.config.update({"cfg": OmegaConf.to_container(cfg)}, allow_val_change=True)
-        meta = {"wandb_run": wandb.run.id if wandb_run_exists() else None}
+        assert cfg.logger.id is not None
+        meta = {"wandb_run": cfg.logger.id}
         yaml.safe_dump(meta, open(f"{tb_logger.log_dir}/meta.yaml", "w"))
+        print("saved meta:", meta)
 
     # PL-Trainer
     if cfg.task == "test":
@@ -134,10 +157,9 @@ def train(cfg: DictConfig) -> None:
     if cfg.task == "fit":
         resume_path = None
         if cfg.resume_mode is not None:
-            save_dir = cfg.logger.save_dir + "/checkpoints_resume"
+            save_dir = cfg.output_dir + "/checkpoints"
             print('='*20)
-            print('save dir')
-            print(save_dir)
+            print('save dir', save_dir)
             resume_path = get_resume_ckpt_path(cfg.resume_mode, ckpt_dir=save_dir)
             Log.info(f"Resume training from {resume_path}")
         Log.info("Start Fitiing...")

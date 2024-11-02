@@ -121,13 +121,13 @@ class GvhmrPL(pl.LightningModule):
         batch["j2d_visible_mask"] = j2d_visible_mask
 
         # obtain clean obs
-        clean_j3d = gt_j3d.clone()
-        clean_obs_i_j2d = perspective_projection(clean_j3d, batch["K_fullimg"])  # (B, L, J, 2)
-        clean_j2d_visible_mask = torch.ones_like(j2d_visible_mask)
-        clean_j2d_visible_mask[clean_j3d[..., 2] < 0.3] = False  # Set close-to-image-plane points as invisible
-        clean_obs_kp2d = torch.cat([clean_obs_i_j2d, clean_j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
-        batch["clean_obs"] = normalize_kp2d(clean_obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
-        batch["clean_j2d_visible_mask"] = clean_j2d_visible_mask
+        # clean_j3d = gt_j3d.clone()
+        # clean_obs_i_j2d = perspective_projection(clean_j3d, batch["K_fullimg"])  # (B, L, J, 2)
+        # clean_j2d_visible_mask = torch.ones_like(j2d_visible_mask)
+        # clean_j2d_visible_mask[clean_j3d[..., 2] < 0.3] = False  # Set close-to-image-plane points as invisible
+        # clean_obs_kp2d = torch.cat([clean_obs_i_j2d, clean_j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
+        # batch["clean_obs"] = normalize_kp2d(clean_obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
+        # batch["clean_j2d_visible_mask"] = clean_j2d_visible_mask
 
         if True:  # Use some detected vitpose (presave data)
             prob = 0.5
@@ -136,8 +136,8 @@ class GvhmrPL(pl.LightningModule):
 
         # Set untrusted frames to False
         batch["obs"][~batch["mask"]["valid"]] = 0
-        batch["clean_obs"][~batch["mask"]["valid"]] = 0
-        assert batch["clean_obs"].shape == batch["obs"].shape, f"{batch['clean_obs'].shape} != {batch['obs'].shape}"
+        # batch["clean_obs"][~batch["mask"]["valid"]] = 0
+        # assert batch["clean_obs"].shape == batch["obs"].shape, f"{batch['clean_obs'].shape} != {batch['obs'].shape}"
 
         if False:  # wis3d
             wis3d = make_wis3d(name="debug-aug-kp3d")

@@ -1,0 +1,32 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"workbench.colorCustomizations": {
+			"commandCenter.border": "#15202b99",
+			"sash.hoverBorder": "#e2e1f8",
+			"statusBar.background": "#bab8ee",
+			"statusBar.foreground": "#15202b",
+			"statusBarItem.hoverBackground": "#928fe4",
+			"statusBarItem.remoteBackground": "#bab8ee",
+			"statusBarItem.remoteForeground": "#15202b",
+			"titleBar.activeBackground": "#bab8ee",
+			"titleBar.activeForeground": "#15202b",
+			"titleBar.inactiveBackground": "#bab8ee99",
+			"titleBar.inactiveForeground": "#15202b99"
+		},
+		"peacock.remoteColor": "#bab8ee",
+		"python.analysis.extraPaths": [
+		],
+		"files.watcherExclude": {
+			"**/assets/**": true,
+			"**/data/**": true,
+			"**/dataset/**": true,
+			"**/out/**": true
+		}
+		
+	}
+}

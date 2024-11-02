@@ -7,6 +7,7 @@ import itertools
 import subprocess
 import importlib
 import wandb
+import time
 from torch.utils.data import DataLoader, Dataset, Sampler
 
 
@@ -64,7 +65,7 @@ def find_last_version(folder, prefix='version_', cp='last'):
         elif cp.isdigit():
             suffix = f'*{int(cp):07d}.ckpt'
         else:
-            raise ValueError(f'invalid cp: {cp}')
+            suffix = f'{cp}.ckpt'
         version_folders = [x for x in version_folders if len(glob.glob(f'{x}/**/{suffix}')) > 0]
     version_numbers = sorted([int(osp.basename(x)[len(prefix):]) for x in version_folders])
     if len(version_numbers) == 0:
@@ -125,7 +126,7 @@ def get_checkpoint_path(checkpoint_dir, cp, return_name=False):
     elif cp == 'best': # use best epoch
         cp_name = osp.basename(sorted(glob.glob(f'{checkpoint_dir}/*best*.ckpt'))[-1])
     else:
-        cp_name = f'model-step={int(cp):07d}.ckpt'
+        cp_name = osp.basename(sorted(glob.glob(f'{checkpoint_dir}/{cp}.ckpt'))[-1])
     cp_path = f'{checkpoint_dir}/{cp_name}'
     if return_name:
         return cp_path, cp_name
@@ -189,3 +190,41 @@ def load_ema_weights_from_checkpoint(model, checkpoint):
     for param, ema_param in zip(model.parameters(), ema_params):
         param.data.copy_(ema_param.data)
     return
+
+
+# Global variable for timing indentation level
+timer_indent_level = 0
+
+# Context manager for timing
+class Timer:
+    def __init__(self, name="", enabled=True, show_rank=False, rank_zero_only=True):
+        self.name = name
+        self.start_time = None
+        self.enabled = enabled
+        if 'LOCAL_RANK' in os.environ:
+            self.rank = int(os.environ['LOCAL_RANK'])
+        else:
+            self.rank = 0
+        self.show_rank = show_rank
+        self.rank_zero_only = rank_zero_only
+
+    def __enter__(self):
+        if (not self.enabled) or (self.rank_zero_only and self.rank != 0):
+            return self
+        global timer_indent_level
+        self.start_time = time.perf_counter()
+        self.current_indent = timer_indent_level  # Capture current indent level
+        timer_indent_level += 1  # Increment global indent level for next call
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type:
+            return False  # Re-raise the exception
+        if (not self.enabled) or (self.rank_zero_only and self.rank != 0):
+            return self
+        global timer_indent_level
+        elapsed_time = time.perf_counter() - self.start_time
+        indent = '    ' * self.current_indent  # 4 spaces per indent level
+        rank_str = f"[rank{self.rank}] " if self.show_rank else ""
+        print(f"{indent}{rank_str}[{self.name}] time: {elapsed_time:.4f} seconds")
+        timer_indent_level -= 1  # Decrement global indent level after finishing

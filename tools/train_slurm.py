@@ -18,7 +18,7 @@ parser.add_argument("-c", "--cfg", type=str, required=True, help="config file")
 parser.add_argument("-v", "--cfg_var", type=str, default='', help="exp name var")
 parser.add_argument("-g", "--gpus", type=int, default=1, help="gpus used per node")
 parser.add_argument("-n", "--nodes", type=int, default=1, help="number of nodes")
-parser.add_argument('-ar_bt', '--autoresume_before_timelimit', type=int, default=30)
+parser.add_argument('-ar_bt', '--autoresume_before_timelimit', type=int, default=20)
 parser.add_argument('-pt', '--partition', default='polar,polar2,polar3,polar4,grizzly', help='slurm partition')
 parser.add_argument('-t', '--time', type=int, default=4, help='single slurm job time duration in hours')
 parser.add_argument('-db', '--debug', action="store_true")
@@ -37,15 +37,16 @@ parser.add_argument('-si', '--start_ind', type=int, default=0, help='start index
 parser.add_argument('-ei', '--end_ind', type=int, default=None, help='end index of cfgs')
 parser.add_argument('-nc', '--num_cfg', type=int, default=None, help='number of cfgs to run')
 parser.add_argument('-gm', '--git_message', default=None, help='git commit message')
-parser.add_argument('-slack', '--slack_mode', default='fail', help='slack mode for ADLR script')
+parser.add_argument('-slack', '--slack_mode', default='never', help='slack mode for ADLR script')
 parser.add_argument('-test_ar', '--test_autoresume_timer', help='in minutes', type=int, default=-1)
 parser.add_argument('-r', '--resume', action="store_true")
 parser.add_argument('-rcp', '--resume_cp', default="last")
+parser.add_argument('-ag', '--additional_args', default="")
 args = parser.parse_args()
 
 
 if not args.debug:
-    cmd = f"tools/train_v2.py exp={args.cfg} exp_name_var={args.cfg_var} pl_trainer.devices={args.gpus}"
+    cmd = f"tools/train_v2.py exp={args.cfg} exp_name_var={args.cfg_var} pl_trainer.devices={args.gpus} {args.additional_args}"
     if args.resume:
         cmd += " resume_mode=last"
 else:
@@ -99,9 +100,6 @@ rsync_cmd = f'rsync -az --partial -m --chmod=775 {exclude_str} {include_str} --e
 print(rsync_cmd)
 subprocess_run(rsync_cmd, shell=True)
 
-link_dataset_cmd = f'ln -s /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR {exp_folder}/inputs'
-subprocess_run(f"ssh {args.user}@cs-oci-ord-login-02 '{link_dataset_cmd}'", shell=True)
-
 for cmd, tag in slurm_cmds:
     job_cmd = f"cd {exp_folder}; tools/slurm_job.sh {args.user} {args.branch} {cmd}"
     print('job_cmd:', job_cmd)
@@ -117,9 +115,4 @@ for cmd, tag in slurm_cmds:
     if not args.debug:
         subprocess_run(f"ssh {args.user}@cs-oci-ord-login-02 '{ssh_cmd}'", shell=True)
     else:
-        ssh_cmd = (
-            f"submit_job --partition {args.partition} {account_str} --duration {args.time} --gpu {args.gpus} --nodes {args.nodes} --tasks_per_node {args.gpus} {autoresume_str} --email_mode {args.slack_mode} --image /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/docker/gvhmr+v1.sqsh"
-            + f' --name {tag} --command "{job_cmd}"'
-        )
-
         print(ssh_cmd)

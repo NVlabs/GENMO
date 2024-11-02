@@ -31,6 +31,9 @@ fi
 if [ ! -d "outputs" ]; then
     ln -s $results_dir outputs
 fi
+if [ ! -d "./inputs" ]; then
+    ln -s /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR ./inputs
+fi
 
 if [[ -n "$LOCAL_RANK" && "$LOCAL_RANK" -ne 0 ]]; then
     # Place the commands you want to run here
