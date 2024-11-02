@@ -105,7 +105,7 @@ def draw_motion_2d(motion_2d, fname, joint_parents, img_w, img_h, fps=30, show_j
     os.makedirs(frame_dir, exist_ok=True)
     # create blank image
     for t in range(motion_2d.shape[0]):
-        mv_imgs = draw_mv_imgs(motion_2d[t], joint_parents, img_w, img_h, show_joints=show_joints, mask=mask[t])
+        mv_imgs = draw_mv_imgs(motion_2d[t], joint_parents, img_w, img_h, show_joints=show_joints, mask=mask[t] if mask is not None else None)
         cv2.imwrite(f'{frame_dir}/{t:06d}.jpg', mv_imgs[..., ::-1])
 
     images_to_video(frame_dir, fname, fps=fps)

@@ -60,6 +60,8 @@ class Vis2D(pl.Callback):
                 mv_imgs = []
                 obs_img = draw_mv_imgs(results['obs'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True, highlight_view=input_view_id)
                 mv_imgs.append(obs_img)
+                # mv2d_proj = draw_mv_imgs(results['mv2d_proj'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True)
+                # mv_imgs.append(mv2d_proj)
                 mv2d_img = draw_mv_imgs(mv2d[ind, t].cpu(), coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True)
                 mv_imgs.append(mv2d_img)
                 mv2d_shuffle_img = draw_mv_imgs(results['mv2d_shuffle'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True, highlight_view=input_view_id)
@@ -97,6 +99,7 @@ class Vis2D(pl.Callback):
             'mv2d_shuffle': outputs['2d_model_output']['mv2d_shuffle'],
             'mv2d_sv': outputs['2d_model_output_sv']['mv2d'],
             'input_view_id': input_view_id,
+            # 'mv2d_proj': outputs['2d_model_output']['mv2d_proj'],
         }
         self.log_2d(trainer, pl_module, batch_idx, results)
         

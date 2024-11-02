@@ -30,6 +30,7 @@ from hmr4d.utils.geo.hmr_global import (
 )
 from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
 from hmr4d.utils.smplx_utils import make_smplx
+from hmr4d.model.gvhmr.utils.mv2d_utils import draw_motion_2d, coco_joint_parents
 
 
 class Pipeline(nn.Module):
@@ -68,6 +69,8 @@ class Pipeline(nn.Module):
             "f_cliffcam": cliff_cam,  # (B, L, 3)
             "f_cam_angvel": f_cam_angvel,  # (B, L, C=6)
             "f_imgseq": inputs["f_imgseq"],  # (B, L, C=1024)
+            "detach_j3d_for_mv2d": self.args.train3d_detach_j3d_for_mv2d,
+            "detach_cam_for_mv2d": self.args.train3d_detach_cam_for_mv2d
         }
         if train:
             f_condition = randomly_set_null_condition(f_condition, 0.1)
@@ -122,6 +125,13 @@ class Pipeline(nn.Module):
         mv2d_loss = (mv2d_loss * mask[..., None, None, None]).mean()
         total_loss += self.weights.mv2d * mv2d_loss
         outputs["mv2d_loss"] = mv2d_loss
+        # vis_ind = 0
+        # mv2d_norm = mv2d.detach()
+        # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
+        # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 128, f"out/debug_vis/loss_mv2d.mp4", coco_joint_parents, 256, 256, fps=30)
+        # mv2d_norm = target_mv2d.detach()
+        # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
+        # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 128, f"out/debug_vis/loss_mv2d_target.mp4", coco_joint_parents, 256, 256, fps=30)
 
         # 1. Simple loss: MSE
         pred_x = model_output["pred_x"]  # (B, L, C)
@@ -158,7 +168,9 @@ class Pipeline(nn.Module):
         f_condition = {
             "f_cliffcam": torch.zeros(B, L, 3).to(device),  # (B, L, 3)
             "f_cam_angvel": torch.zeros(B, L, 6).to(device),  # (B, L, C=6)
-            "f_imgseq": inputs.get("f_imgseq", torch.zeros(B, L, 1024).to(device))
+            "f_imgseq": inputs.get("f_imgseq", torch.zeros(B, L, 1024).to(device)),
+            "detach_j3d_for_mv2d": self.args.train2d_detach_j3d_for_mv2d,
+            "detach_cam_for_mv2d": self.args.train2d_detach_cam_for_mv2d
         }
         if train:
             f_condition = randomly_set_null_condition(f_condition, 0.1)
@@ -183,7 +195,9 @@ class Pipeline(nn.Module):
             "obs": obs_sv,  # (B, L, J, 3)
             "f_cliffcam": torch.zeros(B, L, 3).to(device),  # (B, L, 3)
             "f_cam_angvel": torch.zeros(B, L, 6).to(device),  # (B, L, C=6)
-            "f_imgseq": torch.zeros(B, L, 1024).to(device)
+            "f_imgseq": torch.zeros(B, L, 1024).to(device),
+            "detach_j3d_for_mv2d": self.args.train2d_detach_j3d_for_mv2d,
+            "detach_cam_for_mv2d": self.args.train2d_detach_cam_for_mv2d
         }
         model_output_sv = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
         if 'decode_dict' in model_output_sv:
@@ -245,7 +259,7 @@ def randomly_set_null_condition(f_condition, uncond_prob=0.1):
     """Conditions are in shape (B, L, *)"""
     keys = list(f_condition.keys())
     for k in keys:
-        if f_condition[k] is None:
+        if f_condition[k] is None or type(f_condition[k]) == bool:
             continue
         f_condition[k] = f_condition[k].clone()
         mask = torch.rand(f_condition[k].shape[:2]) < uncond_prob
