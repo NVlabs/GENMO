@@ -343,3 +343,83 @@ def get_static_joint_mask(w_j3d, vel_thr=0.25, smooth=False, repeat_last=False):
         static_joint_mask = torch.cat([static_joint_mask, static_joint_mask[..., [-1], :]], dim=-2)
 
     return static_joint_mask
+
+
+def estimate_camscale(smpl_param_c, smpl_param_w, T_w2c, offset):
+    bs = T_w2c.shape[0]
+    device = T_w2c.device
+    # 1. align the camera view direction
+    # R_w2c = R_c @ R_w.mT
+    R_c = smpl_param_c["global_orient"]
+    t_c = smpl_param_c["transl"]
+    R_w = smpl_param_w["global_orient"]
+    t_w = smpl_param_w["transl"]
+
+    est_R_w2c = R_c @ R_w.mT  # estiamte from motion
+    slam_R_w2c = T_w2c[:, :3, :3]
+    slam_t_w2c = T_w2c[:, :3, 3]
+    # Find optimal R0 using SVD (Kabsch algorithm)
+    H = (slam_R_w2c.mT @ est_R_w2c).sum(dim=0)
+    U, _, Vt = torch.linalg.svd(H)
+    R0 = Vt.mT @ U.mT
+
+    # Verify the result
+    aligned_R_w2c = slam_R_w2c @ R0.mT
+    # error = torch.norm(aligned_R_w2c - est_R_w2c, dim=(1, 2))
+    # print(f"Alignment R_w2c error: {error.mean().item():.6f}")
+
+    # 2. compute the cam_traj estiamted from motion
+    est_t_w2c = t_c + offset - torch.einsum("fij,fj->fi", est_R_w2c, t_w + offset)
+
+    # 3. align the slam cam_traj
+    est_t_c2w = (-est_R_w2c.mT @ est_t_w2c[..., None])[..., 0]
+    slam_t_c2w = (-aligned_R_w2c.mT @ slam_t_w2c[..., None])[..., 0]
+
+    mu_est = est_t_c2w.mean(dim=0, keepdim=True)
+    mu_slam = slam_t_c2w.mean(dim=0, keepdim=True)
+    X1 = est_t_c2w - mu_est
+    X2 = slam_t_c2w - mu_slam
+    var1 = torch.sum(X1**2, dim=1).sum()
+    K = X1.mT @ X2
+    scale = torch.trace(K) / var1
+
+    scale[scale < 0] = 1.0
+
+    if False:
+        vel_est = est_t_c2w[1:] - est_t_c2w[:-1]
+        vel_slam = slam_t_c2w[1:] - slam_t_c2w[:-1]
+        scale_c2w = vel_est / vel_slam
+
+        invalid_mask = vel_slam.abs() < 1e-5
+        valid_mask = vel_slam.abs() > 1e-4
+        scale_c2w[invalid_mask] = 0
+        if valid_mask[..., 0].sum() > 0:
+            scale_c2w_x = scale_c2w[..., 0][valid_mask[..., 0]].mean()
+            # scale_c2w_x = scale_c2w[..., 0][valid_mask[..., 0]].median(0).values
+        else:
+            scale_c2w_x = torch.zeros([]).to(T_w2c)
+        if valid_mask[..., 1].sum() > 0:
+            scale_c2w_y = scale_c2w[..., 1][valid_mask[..., 1]].mean()
+            # scale_c2w_y = scale_c2w[..., 1][valid_mask[..., 1]].median(0).values
+        else:
+            scale_c2w_y = torch.zeros([]).to(T_w2c)
+        if valid_mask[..., 2].sum() > 0:
+            scale_c2w_z = scale_c2w[..., 2][valid_mask[..., 2]].mean()
+            # scale_c2w_z = scale_c2w[..., 2][valid_mask[..., 2]].median(0).values
+        else:
+            scale_c2w_z = torch.zeros([]).to(T_w2c)
+
+        scale_c2w = torch.stack((scale_c2w_x, scale_c2w_y, scale_c2w_z), dim=-1)
+        scale = scale_c2w_y
+    aligned_t_c2w = slam_t_c2w * scale
+    delta_t = (aligned_t_c2w - est_t_c2w).mean(0)
+    aligned_t_c2w = aligned_t_c2w - delta_t
+
+    aligned_t_w2c = (-aligned_R_w2c @ aligned_t_c2w[..., None])[..., 0]
+    # error = torch.norm(aligned_t_w2c - est_t_w2c, dim=1)
+    # print(f"Alignment t_w2c error: {error.mean().item():.6f}")
+
+    res_T_w2c = torch.eye(4)[None].repeat(bs, 1, 1).to(device)
+    res_T_w2c[:, :3, :3] = aligned_R_w2c
+    res_T_w2c[:, :3, 3] = aligned_t_w2c
+    return res_T_w2c

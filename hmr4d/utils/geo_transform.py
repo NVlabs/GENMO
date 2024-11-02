@@ -586,6 +586,19 @@ def compute_cam_tvel(t_w2c, padding_last=True):
     return cam_tvel.float()
 
 
+def compute_cam_tcw2_vel(T_w2c, padding_last=True):
+    """
+    T_w2c : (F, 4, 4)
+    """
+    T_c2w = T_w2c.inverse()
+    t_c2w = T_c2w[:, :3, 3]
+    cam_tvel = t_c2w[1:] - t_c2w[:-1]
+    assert padding_last
+    cam_tvel = torch.cat([cam_tvel, cam_tvel[-1:]], dim=0)  # (F, 3)
+    return cam_tvel.float()
+
+
+
 def ransac_gravity_vec(xyz, num_iterations=100, threshold=0.05, verbose=False):
     # xyz: (L, 3)
     N = xyz.shape[0]
@@ -681,3 +694,34 @@ def ransac_vec(vel, min_multiply=20, verbose=False):
         print(inner_mask[ind].sum().item())
 
     return result, inner_mask[ind]
+
+
+def as_identity(R):
+    is_I = matrix_to_axis_angle(R).norm(dim=-1) < 1e-5
+    R[is_I] = torch.eye(3)[None].expand(is_I.sum(), -1, -1).to(R)
+    return R
+
+
+def normalize_T_w2c(T_w2c):
+    if T_w2c.ndim == 2:
+        T_w2c = T_w2c[None]
+    L = T_w2c.shape[0]
+    device = T_w2c.device
+    norm_T_c2w = torch.eye(4)[None].repeat(L, 1, 1).to(device)
+
+    T_c2w = T_w2c.inverse()
+    R_c2w = as_identity(T_c2w[:, :3, :3])
+    t_c2w = T_c2w[:, :3, 3]
+
+    # align the first frame
+    R0_c2w = R_c2w[:1]
+    t0_c2w = t_c2w[:1]
+    norm_R_c2w = R0_c2w.mT @ R_c2w
+    norm_t_c2w = (R0_c2w.mT @ (t_c2w - t0_c2w)[..., None])[..., 0]
+    norm_T_c2w[:, :3, :3] = norm_R_c2w
+    norm_T_c2w[:, :3, 3] = norm_t_c2w
+    norm_T_w2c = norm_T_c2w.inverse()
+    norm_T_w2c[:, :3, :3] = as_identity(norm_T_w2c[:, :3, :3])
+    norm_T_w2c[:, 3, :3] = 0
+
+    return norm_T_w2c

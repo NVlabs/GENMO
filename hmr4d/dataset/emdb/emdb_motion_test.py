@@ -9,6 +9,13 @@ from hmr4d.utils.geo_transform import compute_cam_angvel, compute_cam_tvel
 from motiondiff.models.mdm.rotation_conversions import quaternion_to_matrix
 from hmr4d.utils.geo.hmr_cam import estimate_K, resize_K
 from hmr4d.utils.geo.flip_utils import flip_kp2d_coco17
+from motiondiff.models.mdm.rotation_conversions import (
+    axis_angle_to_matrix,
+    matrix_to_axis_angle,
+    matrix_to_quaternion,
+    quaternion_to_matrix,
+)
+from hmr4d.utils.geo_transform import normalize_T_w2c
 
 from .utils import EMDB1_NAMES, EMDB2_NAMES
 
@@ -16,6 +23,11 @@ VID_PRESETS = {1: EMDB1_NAMES, 2: EMDB2_NAMES}
 
 
 from hmr4d.configs import MainStore, builds
+
+def as_identity(R):
+    is_I = matrix_to_axis_angle(R).norm(dim=-1) < 1e-5
+    R[is_I] = torch.eye(3)[None].expand(is_I.sum(), -1, -1).to(R)
+    return R
 
 
 class EmdbSmplFullSeqDataset(data.Dataset):
@@ -83,10 +95,15 @@ class EmdbSmplFullSeqDataset(data.Dataset):
             R_w2c = quaternion_to_matrix(traj[:, [6, 3, 4, 5]]).mT  # (L, 3, 3)
             assert NotImplementedError
         else:  # GT
-            R_w2c = data["T_w2c"][:, :3, :3]  # (L, 3, 3)
-            t_w2c = data["T_w2c"][:, :3, 3]  # (L, 3)
-        data["cam_angvel"] = compute_cam_angvel(R_w2c)  # (L, 6)
-        data["cam_tvel"] = compute_cam_tvel(t_w2c)  # (L, 3)
+            L = data["T_w2c"].shape[0]
+            norm_T_w2c = normalize_T_w2c(data["T_w2c"])
+
+            R_w2c = norm_T_w2c[:, :3, :3]
+            t_w2c = norm_T_w2c[:, :3, 3]
+
+            data["cam_angvel"] = compute_cam_angvel(R_w2c)  # (L, 6)
+            data["cam_tvel"] = compute_cam_tvel(t_w2c)  # (L, 3)
+            data["R_w2c"] = R_w2c
 
         # image bbx, features
         bbx_xys = label["bbx_xys"]
@@ -133,6 +150,7 @@ class EmdbSmplFullSeqDataset(data.Dataset):
                 "kp2d": flipped_kp2d,
                 "cam_angvel": compute_cam_angvel(flipped_R_w2c),
                 "cam_tvel": compute_cam_tvel(flipped_t_w2c),
+                "R_w2c": flipped_R_w2c,
             }
             data["flip_test"] = data_flip
 

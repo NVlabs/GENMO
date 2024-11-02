@@ -7,6 +7,7 @@ from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
 from hmr4d.utils.geo_transform import compute_cam_angvel, compute_cam_tvel
 from hmr4d.utils.geo.hmr_cam import estimate_K, resize_K
 from hmr4d.utils.geo.flip_utils import flip_kp2d_coco17
+from hmr4d.utils.geo_transform import normalize_T_w2c
 
 from hmr4d.configs import MainStore, builds
 
@@ -69,9 +70,11 @@ class ThreedpwSmplFullSeqDataset(data.Dataset):
         # Preprocessed:  bbx, kp2d, image as feature
         bbx_xys = self.vid2bbx[vid]["bbx_xys"]  # (F, 3)
         kp2d = self.vid2kp2d[vid]  # (F, 17, 3)
-        cam_angvel = compute_cam_angvel(data["T_w2c"][:, :3, :3])  # (L, 6)
-        cam_tvel = compute_cam_tvel(data["T_w2c"][:, :3, 3])  # (L, 3)
+        norm_T_w2c = normalize_T_w2c(data["T_w2c"])
+        cam_angvel = compute_cam_angvel(norm_T_w2c[:, :3, :3])  # (L, 6)
+        cam_tvel = compute_cam_tvel(norm_T_w2c[:, :3, 3])  # (L, 3)
         data.update({"bbx_xys": bbx_xys, "kp2d": kp2d, "cam_angvel": cam_angvel, "cam_tvel": cam_tvel})
+        data["R_w2c"] = norm_T_w2c[:, :3, :3]
 
         imgfeat_dir = self.threedpw_dir / "imgfeats/3dpw_test"
         f_img_dict = torch.load(imgfeat_dir / f"{vid}.pt")
@@ -105,8 +108,8 @@ class ThreedpwSmplFullSeqDataset(data.Dataset):
             flipped_kp2d = flip_kp2d_coco17(kp2d, width_height[0])  # (L, 17, 3)
 
             R_flip_x = torch.tensor([[-1, 0, 0], [0, 1, 0], [0, 0, 1]]).float()
-            flipped_R_w2c = R_flip_x @ data["T_w2c"][:, :3, :3].clone()
-            flipped_t_w2c = (R_flip_x @ data["T_w2c"][:, :3, 3:].clone())[..., 0]
+            flipped_R_w2c = R_flip_x @ norm_T_w2c[:, :3, :3].clone()
+            flipped_t_w2c = (R_flip_x @ norm_T_w2c[:, :3, 3:].clone())[..., 0]
 
             data_flip = {
                 "bbx_xys": flipped_bbx_xys,
@@ -114,6 +117,7 @@ class ThreedpwSmplFullSeqDataset(data.Dataset):
                 "kp2d": flipped_kp2d,
                 "cam_angvel": compute_cam_angvel(flipped_R_w2c),
                 "cam_tvel": compute_cam_tvel(flipped_t_w2c),
+                "R_w2c": flipped_R_w2c,
             }
             data["flip_test"] = data_flip
         return data

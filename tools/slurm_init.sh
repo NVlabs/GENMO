@@ -7,7 +7,7 @@ declare -A wandb_keys=(
     ["haotianz"]="a8222cccae5b1338d8afe0a35cc18c4a1c0ae3d3"
     ["jiefengl"]="7ecf9f6fe9e8b7263e6141fb8fc69158c2bd7fa0"
 )
- 
+
 # wandb login ${wandb_keys[${user}]}
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/nvidia

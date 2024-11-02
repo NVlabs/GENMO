@@ -176,6 +176,7 @@ def load_data_dict(cfg):
         "K_fullimg": K_fullimg,
         "cam_angvel": compute_cam_angvel(R_w2c),
         "cam_tvel": compute_cam_tvel(t_w2c),
+        "R_w2c": R_w2c,
         "f_imgseq": torch.load(paths.vit_features),
     }
     return data

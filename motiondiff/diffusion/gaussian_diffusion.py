@@ -948,9 +948,10 @@ class GaussianDiffusion:
                     )
                     out = out_orig
                     pred_xstart = out_orig["pred_xstart"]
-                    samples = pred_xstart.squeeze(2).permute(0, 2, 1).contiguous()
-                    pred_cam = samples[:, :, 17 * 2 + 3 + 6:17 * 2 + 3 + 6 + 3]
-                    static_conf_logits = samples[:, :, 17 * 2 + 3 + 6 + 3:17 * 2 + 3 + 6 + 3 + 6]
+                    samples = pred_xstart
+                    pred_cam = samples[:, :, model.s_pred_ind:model.s_pred_ind + 3]
+                    static_conf_logits = samples[:, :, model.s_pred_ind + 3:model.s_pred_ind + 3 + 6]
+                    assert samples.shape[-1] == model.s_pred_ind + 3 + 6 + 151
                     sample = samples[:, :, -151:]
                     decode_dict = endecoder.decode(sample)
 
