@@ -174,12 +174,14 @@ class EnDecoder(nn.Module):
         global_orient_c = matrix_to_axis_angle(rotation_6d_to_matrix(global_orient_r6d))
         global_orient_gv = matrix_to_axis_angle(rotation_6d_to_matrix(global_orient_gv_r6d))
 
+        offset = self.smplx_model.get_skeleton(betas)[:, :, 0]
         output = {
             "body_pose": body_pose,
             "betas": betas,
             "global_orient": global_orient_c,
             "global_orient_gv": global_orient_gv,
             "local_transl_vel": local_transl_vel,
+            "offset": offset
         }
 
         return output

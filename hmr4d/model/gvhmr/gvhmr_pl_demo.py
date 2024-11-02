@@ -32,9 +32,12 @@ class DemoPL(pl.LightningModule):
             "bbx_xys": data["bbx_xys"][None],
             "K_fullimg": data["K_fullimg"][None],
             "cam_angvel": data["cam_angvel"][None],
+            "cam_tvel": data["cam_tvel"][None],
+            "R_w2c": data["R_w2c"][None],
             "f_imgseq": data["f_imgseq"][None],
         }
         batch = {k: v.cuda() for k, v in batch.items()}
+        batch['meta'] = None
         outputs = self.pipeline.forward(batch, train=False, postproc=True, static_cam=static_cam)
 
         pred = {

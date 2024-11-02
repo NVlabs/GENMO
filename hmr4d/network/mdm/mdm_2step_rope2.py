@@ -473,7 +473,7 @@ class MDMBase(nn.Module):
             samples = pred_x_start
             pred_cam = samples[:, :, self.s_pred_ind:self.s_pred_ind + 3]
             static_conf_logits = samples[:, :, self.s_pred_ind + 3:self.s_pred_ind + 3 + 6]
-            sample = samples[:, :, self.s_pred_ind + 3 + 6:]
+            sample = samples[:, :, -151:]
 
         else:
             cond = {

@@ -49,7 +49,7 @@ class AutoResumeCallback(Callback):
         monitor_candidates = cp._monitor_candidates(trainer)
 
         # Save last epoch. This is the one we will use for the autoresume
-        filepath_epoch = cp.output_dir / 'last.ckpt'
+        filepath_epoch = cp.output_dir / "last.ckpt"
         if self.last_epoch_checkpoint is not None:
             self._save_checkpoint(trainer, self.last_epoch_checkpoint, filepath_epoch)
         else:

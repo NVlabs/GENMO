@@ -8,6 +8,7 @@ from motiondiff.models.common.smpl import SMPL
 from motiondiff.utils.torch_transform import quat_apply, quat_between_two_vec, quaternion_to_angle_axis, angle_axis_to_quaternion
 from motiondiff.utils.vis import make_checker_board_texture
 import scenepic as sp
+from matplotlib import cm
 import wandb
 
 
@@ -166,11 +167,17 @@ class ScenepicVisualizer:
             main.set_layer_settings({f'{skel_name}_jpos': {'filled': False} for skel_name, pose_dict in smpl_seq.items() if 'skeleton_jpos' in pose_dict})
 
 
+        frame_list = []
+        cam_list = {}
         for fr in range(num_fr):
             main_frame = main.create_frame()
+            frame_list.append(main_frame)
             main_frame.camera = self.load_default_camera()
 
-            for skel_name, pose_dict in smpl_seq.items():
+            for i, (skel_name, pose_dict) in enumerate(smpl_seq.items()):
+                colors = self.color_sequences[i % len(self.color_sequences)]
+                color_i = getattr(sp.Colors, colors[1], sp.Colors.Green)
+                
                 if 'skeleton_fk' in pose_dict:
                     ind = min(fr, pose_dict['joints_fk'].shape[0] - 1)
                     pose_dict['skeleton_fk'].add_mesh_to_frames(main_frame, pose_dict['joints_fk'][ind].cpu().numpy())
@@ -210,12 +217,95 @@ class ScenepicVisualizer:
                         joint_mask = joint_mask.view(-1, 3)
                         if joint_mask.any():
                             pose_dict['skeleton_jpos'].add_joint_constr_meshes_to_frames(main_frame, joint_constr.cpu().numpy(), joint_mask.cpu().numpy())
-        
+
+                    if "T_w2c" in pose_dict:
+                        if skel_name not in cam_list:
+                            cam_list[skel_name] = []
+                        color = cm.jet(int((fr / num_fr) * 255))[:3]
+
+                        ind = min(fr, pose_dict["T_w2c"].shape[0] - 1)
+                        T_w2c = pose_dict["T_w2c"][ind].detach().cpu().numpy()
+                        cam_intrinsics = None
+                        cam_R = T_w2c[:3, :3]
+                        cam_t = T_w2c[:3, 3]
+                        cam_pos = -(cam_R.T @ cam_t[..., None])[..., 0]
+                        cam_mesh = scene.create_mesh(shared_color=sp.Color(1.0, 0.0, 0.0), layer_id=f"cam_pos_{skel_name}")
+                        cam_mesh.add_sphere(transform=sp.Transforms.Scale(0.1), color=color)
+                        cam_mesh.enable_instancing(positions=cam_pos, colors=color)
+                        main_frame.add_mesh(cam_mesh)
+
+                        cam_ext = T_w2c.copy()
+                        cam_ext[1:3, :] *= -1
+                        cam = self.load_camera_from_ext_int(cam_ext, cam_intrinsics)
+                        main_frame.camera = cam
+                        cam_frustum = scene.create_mesh(layer_id=f"camera_{skel_name}")
+                        cam_frustum_fr = scene.create_mesh(layer_id=f"camera_{skel_name}_fr")
+                        cam_frustum.add_camera_frustum(cam, color=color)
+                        cam_frustum_fr.add_camera_frustum(cam, color=color_i)
+                        # cam_list[skel_name].append(cam_mesh)
+                        if fr % 10 == 0:
+                            if 'vis_all_cam' in pose_dict and pose_dict['vis_all_cam']:
+                                cam_list[skel_name].append(cam_frustum)
+
+                        main_frame.add_mesh(cam_frustum_fr)
             # if 'text' in smpl_seq:
             #     label = scene.create_label(text=smpl_seq['text'], color=sp.Colors.White, size_in_pixels=60, offset_distance=0.0, horizontal_align='center', camera_space=True)
             #     main_frame.add_label(label=label, position=[0.0, 1.5, -5.0])
+            if len(cam_list) > 0:
+                for frame in frame_list:
+                    for skel_name in cam_list:
+                        for cam in cam_list[skel_name]:
+                            frame.add_mesh(cam)
+
 
         return scene
+
+    def load_camera_from_ext_int(self, cam_ext, cam_intrinsics=None):
+        if cam_intrinsics is None:
+            vfovy = 50
+            aspect_ratio = 1
+
+            img_width = 1000
+            img_height = 1000
+            f_fullframe = 43.3
+            diag_fullframe = (24**2 + 36**2) ** 0.5
+            diag_img = (img_width**2 + img_height**2) ** 0.5
+            fy = diag_img / diag_fullframe * f_fullframe
+            vfovy = 2.0 * np.arctan(img_height / (2.0 * fy))
+            aspect_ratio = img_width / img_height
+        else:
+            img_width = cam_intrinsics[0, 2] * 2
+            img_height = cam_intrinsics[1, 2] * 2
+            fy = cam_intrinsics[1, 1]
+            # vfov = 2. * np.arctan(np.sqrt(img_height ** 2 + img_width ** 2) / (2. * fy))
+            vfovy = 2. * np.arctan(img_height / (2. * fy))
+            # vfov = 55.0 * math.pi / 180.0
+            aspect_ratio = img_width / img_height
+
+        # c2w = np.eye(4)
+        # R_c2w[:3, :3] = cam_ext[:3, :3]
+        # t_c2w = cam_ext[:3, 3]
+
+        # cam = sp.Camera(
+        #     center=translation[None],
+        #     rotation=rotation,
+        #     fov_y_degrees=float(np.degrees(vfovy)),
+        #     aspect_ratio=aspect_ratio,
+        #     far_crop_distance=200.0
+        # )
+        # world_to_camera = np.eye(4)
+        # world_to_camera[:3, :3] = R_c2w[:3, :3].T
+        # world_to_camera[:3, 3] = -np.dot(R_c2w[:3, :3].T, t_c2w)
+
+        
+        cam = sp.Camera(
+            world_to_camera=cam_ext,
+            fov_y_degrees=float(np.degrees(vfovy)),
+            aspect_ratio=aspect_ratio,
+            far_crop_distance=200.0,
+        )
+
+        return cam
 
 
 if __name__ == '__main__':
