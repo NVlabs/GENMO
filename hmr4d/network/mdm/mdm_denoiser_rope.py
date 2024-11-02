@@ -388,9 +388,10 @@ class MDMDenoiserROPE(nn.Module):
         length = y['length']
         L = output.shape[1]
         if True:
-            betas = (output[..., 126:136] * (~pmask[..., None])).sum(1) / length[:, None]  # (B, C)
+            s_ind = self.s_pred_ind + 9
+            betas = (output[..., s_ind + 126:s_ind + 136] * (~pmask[..., None])).sum(1) / length[:, None]  # (B, C)
             betas = repeat(betas, "b c -> b l c", l=L)
-            output = torch.cat([output[..., :126], betas, output[..., 136:]], dim=-1)
+            output = torch.cat([output[..., :s_ind + 126], betas, output[..., s_ind + 136:]], dim=-1)
 
         # predict camera
         pred_cam = self.pred_cam_head(xseq)
