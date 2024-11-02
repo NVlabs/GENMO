@@ -41,11 +41,12 @@ parser.add_argument('-slack', '--slack_mode', default='never', help='slack mode 
 parser.add_argument('-test_ar', '--test_autoresume_timer', help='in minutes', type=int, default=-1)
 parser.add_argument('-r', '--resume', action="store_true")
 parser.add_argument('-rcp', '--resume_cp', default="last")
+parser.add_argument('-ag', '--additional_args', default="")
 args = parser.parse_args()
 
 
 if not args.debug:
-    cmd = f"tools/train_v2.py exp={args.cfg} exp_name_var={args.cfg_var} pl_trainer.devices={args.gpus}"
+    cmd = f"tools/train_v2.py exp={args.cfg} exp_name_var={args.cfg_var} pl_trainer.devices={args.gpus} {args.additional_args}"
     if args.resume:
         cmd += " resume_mode=last"
 else:

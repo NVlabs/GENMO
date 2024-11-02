@@ -2,6 +2,7 @@
 .hydra
 inputs
 outputs
+outputs2
 
 # All file or folders start with tmp will be ignored
 tmp*  

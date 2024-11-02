@@ -50,34 +50,87 @@ class SimpleCkptSaver(Checkpoint):
         monitor_candidates["step"] = step.int() if isinstance(step, Tensor) else torch.tensor(trainer.global_step)
         return monitor_candidates
 
+    # def _save_last_checkpoint(self, trainer, pl_module, monitor_candidates) -> None:
+    #     lastpath = self.output_dir / 'last.ckpt'
+    #     checkpoint = {
+    #         "epoch": trainer.current_epoch,
+    #         "global_step": trainer.global_step,
+    #         "pytorch-lightning_version": pl.__version__,
+    #         "state_dict": pl_module.state_dict(),
+    #     }
+    #     pl_module.on_save_checkpoint(checkpoint)
+
+    #     if not self.save_weights_only:
+    #         # optimizer
+    #         optimizer_states = []
+    #         for i, optimizer in enumerate(trainer.optimizers):
+    #             # Rely on accelerator to dump optimizer state
+    #             optimizer_state = trainer.strategy.optimizer_state(optimizer)
+    #             optimizer_states.append(optimizer_state)
+    #         checkpoint["optimizer_states"] = optimizer_states
+
+    #         # lr_scheduler
+    #         lr_schedulers = []
+    #         for config in trainer.lr_scheduler_configs:
+    #             lr_schedulers.append(config.scheduler.state_dict())
+    #         checkpoint["lr_schedulers"] = lr_schedulers
+
+    #     # trainer.strategy.checkpoint_io.save_checkpoint(checkpoint, filepath)
+    #     torch.save(checkpoint, lastpath)
+
+    # @rank_zero_only
+    # def on_train_epoch_end(self, trainer, pl_module):
+    #     """Save a checkpoint at the end of the training epoch."""
+    #     if self.every_n_epochs >= 1 and (trainer.current_epoch + 1) % self.every_n_epochs == 0:
+    #         if self.save_top_k == 0:
+    #             return
+
+    #         # Current saved ckpts in the output_dir
+    #         model_paths = []
+    #         for p in sorted(list(self.output_dir.glob("*.ckpt"))):
+    #             model_paths.append(p)
+    #         model_to_remove = model_paths[0] if len(model_paths) >= self.save_top_k else None
+
+    #         # Save cureent checkpoint
+    #         filepath = self.output_dir / self.filename.format(epoch=trainer.current_epoch, step=trainer.global_step)
+    #         lastpath = self.output_dir / 'last_epoch.ckpt'
+    #         checkpoint = {
+    #             "epoch": trainer.current_epoch,
+    #             "global_step": trainer.global_step,
+    #             "pytorch-lightning_version": pl.__version__,
+    #             "state_dict": pl_module.state_dict(),
+    #         }
+    #         pl_module.on_save_checkpoint(checkpoint)
+
+    #         if not self.save_weights_only:
+    #             # optimizer
+    #             optimizer_states = []
+    #             for i, optimizer in enumerate(trainer.optimizers):
+    #                 # Rely on accelerator to dump optimizer state
+    #                 optimizer_state = trainer.strategy.optimizer_state(optimizer)
+    #                 optimizer_states.append(optimizer_state)
+    #             checkpoint["optimizer_states"] = optimizer_states
+
+    #             # lr_scheduler
+    #             lr_schedulers = []
+    #             for config in trainer.lr_scheduler_configs:
+    #                 lr_schedulers.append(config.scheduler.state_dict())
+    #             checkpoint["lr_schedulers"] = lr_schedulers
+
+    #         # trainer.strategy.checkpoint_io.save_checkpoint(checkpoint, filepath)
+    #         torch.save(checkpoint, filepath)
+    #         # torch.save(checkpoint, lastpath)
+
+    #         # Remove the earliest checkpoint
+    #         if model_to_remove:
+    #             trainer.strategy.remove_checkpoint(model_paths[0])
+    
+        
     def _save_last_checkpoint(self, trainer, pl_module, monitor_candidates) -> None:
         lastpath = self.output_dir / 'last.ckpt'
-        checkpoint = {
-            "epoch": trainer.current_epoch,
-            "global_step": trainer.global_step,
-            "pytorch-lightning_version": pl.__version__,
-            "state_dict": pl_module.state_dict(),
-        }
-        pl_module.on_save_checkpoint(checkpoint)
-
-        if not self.save_weights_only:
-            # optimizer
-            optimizer_states = []
-            for i, optimizer in enumerate(trainer.optimizers):
-                # Rely on accelerator to dump optimizer state
-                optimizer_state = trainer.strategy.optimizer_state(optimizer)
-                optimizer_states.append(optimizer_state)
-            checkpoint["optimizer_states"] = optimizer_states
-
-            # lr_scheduler
-            lr_schedulers = []
-            for config in trainer.lr_scheduler_configs:
-                lr_schedulers.append(config.scheduler.state_dict())
-            checkpoint["lr_schedulers"] = lr_schedulers
-
-        # trainer.strategy.checkpoint_io.save_checkpoint(checkpoint, filepath)
-        torch.save(checkpoint, lastpath)
-
+        checkpoint = trainer._checkpoint_connector.dump_checkpoint()
+        trainer.strategy.save_checkpoint(checkpoint, lastpath)
+        
     @rank_zero_only
     def on_train_epoch_end(self, trainer, pl_module):
         """Save a checkpoint at the end of the training epoch."""
@@ -85,45 +138,13 @@ class SimpleCkptSaver(Checkpoint):
             if self.save_top_k == 0:
                 return
 
-            # Current saved ckpts in the output_dir
-            model_paths = []
-            for p in sorted(list(self.output_dir.glob("*.ckpt"))):
-                model_paths.append(p)
-            model_to_remove = model_paths[0] if len(model_paths) >= self.save_top_k else None
-
             # Save cureent checkpoint
             filepath = self.output_dir / self.filename.format(epoch=trainer.current_epoch, step=trainer.global_step)
             lastpath = self.output_dir / 'last.ckpt'
-            checkpoint = {
-                "epoch": trainer.current_epoch,
-                "global_step": trainer.global_step,
-                "pytorch-lightning_version": pl.__version__,
-                "state_dict": pl_module.state_dict(),
-            }
-            pl_module.on_save_checkpoint(checkpoint)
+            checkpoint = trainer._checkpoint_connector.dump_checkpoint()
+            trainer.strategy.save_checkpoint(checkpoint, filepath)
+            trainer.strategy.save_checkpoint(checkpoint, lastpath)
 
-            if not self.save_weights_only:
-                # optimizer
-                optimizer_states = []
-                for i, optimizer in enumerate(trainer.optimizers):
-                    # Rely on accelerator to dump optimizer state
-                    optimizer_state = trainer.strategy.optimizer_state(optimizer)
-                    optimizer_states.append(optimizer_state)
-                checkpoint["optimizer_states"] = optimizer_states
-
-                # lr_scheduler
-                lr_schedulers = []
-                for config in trainer.lr_scheduler_configs:
-                    lr_schedulers.append(config.scheduler.state_dict())
-                checkpoint["lr_schedulers"] = lr_schedulers
-
-            # trainer.strategy.checkpoint_io.save_checkpoint(checkpoint, filepath)
-            torch.save(checkpoint, filepath)
-            torch.save(checkpoint, lastpath)
-
-            # Remove the earliest checkpoint
-            if model_to_remove:
-                trainer.strategy.remove_checkpoint(model_paths[0])
 
     # def on_train_batch_end(
     #     self,
@@ -145,3 +166,4 @@ MainStore.store(name="every5e", node=base(every_n_epochs=5), group=group_name)
 MainStore.store(name="every5e_top100", node=base(every_n_epochs=5, save_top_k=100), group=group_name)
 MainStore.store(name="every10e", node=base(every_n_epochs=10), group=group_name)
 MainStore.store(name="every10e_top100", node=base(every_n_epochs=10, save_top_k=100), group=group_name)
+MainStore.store(name="every100e_top100", node=base(every_n_epochs=100, save_top_k=100), group=group_name)
