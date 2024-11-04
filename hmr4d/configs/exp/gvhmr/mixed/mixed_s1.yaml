@@ -16,7 +16,7 @@ defaults:
           - rich/all
           - 3dpw/fliptest
     - override /callbacks:
-          - simple_ckpt_saver/every100e_top100
+          - simple_ckpt_saver/every1000e_top100
           - prog_bar/prog_reporter_every0.1
           - train_speed_timer/base
           - lr_monitor/pl
@@ -55,13 +55,14 @@ data:
         train:
             batch_size: 256
             num_workers: 12
+    train_subset_ratio: 0.01
 
 pl_trainer:
     precision: 16-mixed
     log_every_n_steps: 10
     gradient_clip_val: 0.5
-    max_epochs: 1500
-    check_val_every_n_epoch: 10
+    max_epochs: 50000
+    check_val_every_n_epoch: 300
     devices: 1
 
 logger:

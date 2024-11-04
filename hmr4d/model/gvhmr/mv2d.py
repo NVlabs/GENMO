@@ -232,7 +232,7 @@ class MV2D(pl.LightningModule):
         # batch["f_imgseq"] = f_imgseq.clone()
 
         # Forward and get loss
-        outputs = self.pipeline.forward(batch, train=True)
+        outputs = self.pipeline.forward(batch, train=True, global_step=self.trainer.global_step)
         outputs['batch_size'] = B
 
         return outputs
@@ -275,7 +275,7 @@ class MV2D(pl.LightningModule):
         # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/2d_test_obs.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
 
         # Forward and get loss
-        outputs = self.pipeline.forward_2d(batch, train=True)
+        outputs = self.pipeline.forward_2d(batch, train=True, global_step=self.trainer.global_step)
 
         return outputs
 
@@ -323,7 +323,7 @@ class MV2D(pl.LightningModule):
         # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/2d_test_obs.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
 
         # Forward and get loss
-        outputs = self.pipeline.forward_2d(batch, train=False)
+        outputs = self.pipeline.forward_2d(batch, train=False, global_step=self.trainer.global_step)
         outputs["batch"] = batch
         return outputs
         
@@ -347,7 +347,7 @@ class MV2D(pl.LightningModule):
             "cam_angvel": batch["cam_angvel"],
             "f_imgseq": batch["f_imgseq"],
         }
-        outputs = self.pipeline.forward(batch_, train=False, postproc=do_postproc_not_flip_test)
+        outputs = self.pipeline.forward(batch_, train=False, postproc=do_postproc_not_flip_test, global_step=self.trainer.global_step)
         outputs["pred_smpl_params_global"] = {k: v[0] for k, v in outputs["pred_smpl_params_global"].items()}
         outputs["pred_smpl_params_incam"] = {k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()}
 
@@ -365,7 +365,7 @@ class MV2D(pl.LightningModule):
                 "cam_angvel": flip_test["cam_angvel"],
                 "f_imgseq": flip_test["f_imgseq"],
             }
-            flipped_outputs = self.pipeline.forward(batch_, train=False)
+            flipped_outputs = self.pipeline.forward(batch_, train=False, global_step=self.trainer.global_step)
 
             # First update incam results
             flipped_outputs["pred_smpl_params_incam"] = {

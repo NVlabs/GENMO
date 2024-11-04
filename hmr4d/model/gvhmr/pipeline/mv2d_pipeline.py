@@ -55,7 +55,7 @@ class Pipeline(nn.Module):
 
     # ========== Training ========== #
 
-    def forward(self, inputs, train=False, postproc=False, static_cam=False):
+    def forward(self, inputs, train=False, postproc=False, static_cam=False, global_step=0):
         outputs = dict()
         length = inputs["length"]  # (B,) effective length of each sample
 
@@ -118,7 +118,7 @@ class Pipeline(nn.Module):
         mask = inputs["mask"]["valid"]  # (B, L)
         
         # 0. MV2D loss
-        if self.weights.mv2d > 0.0:
+        if self.weights.mv2d > 0.0 and global_step >= self.weights.get("mv2d_start_step", 0):
             mv2d = model_output["mv2d"]
             target_mv2d = inputs["mv2d_norm"]
             mv2d_loss = F.mse_loss(mv2d, target_mv2d[..., :2], reduction="none")
@@ -159,7 +159,7 @@ class Pipeline(nn.Module):
         outputs["loss"] = total_loss
         return outputs
     
-    def forward_2d(self, inputs, train=False):
+    def forward_2d(self, inputs, train=False, global_step=0):
         outputs = dict()
         length = inputs["length"]  # (B,) effective length of each sample
         device = inputs["obs"].device
@@ -200,6 +200,8 @@ class Pipeline(nn.Module):
             "detach_j3d_for_mv2d": self.args.get('train2d_detach_j3d_for_mv2d', False),
             "detach_cam_for_mv2d": self.args.get('train2d_detach_cam_for_mv2d', False)
         }
+        if self.args.get('use_firstview_proj_cam_for_sideview', False):
+            f_condition["proj_2d_cam"] = model_output["proj_2d_cam"]
         model_output_sv = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
         if 'decode_dict' in model_output_sv:
             decode_dict_sv = model_output_sv.pop("decode_dict")

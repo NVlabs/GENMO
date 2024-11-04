@@ -40,6 +40,10 @@ class NetworkEncoderRoPE(nn.Module):
         num_views=4,
         default_radius=8.0,
         use_gv_for_mv2d=True,
+        use_fp32_for_cam=False,
+        use_elevation=None,
+        use_radius=None,
+        use_tilt=None,
     ):
         super().__init__()
 
@@ -100,6 +104,10 @@ class NetworkEncoderRoPE(nn.Module):
         self.get_naive_intrinsics((self.img_w, self.img_h), focal_scale=2.0)
         self.default_radius = default_radius
         self.use_gv_for_mv2d = use_gv_for_mv2d
+        self.use_fp32_for_cam = use_fp32_for_cam
+        self.use_elevation = use_elevation
+        self.use_radius = use_radius
+        self.use_tilt = use_tilt
 
     def _build_condition_embedder(self):
         latent_dim = self.latent_dim
@@ -123,7 +131,7 @@ class NetworkEncoderRoPE(nn.Module):
                 zero_module(nn.Linear(self.imgseq_dim, latent_dim)),
             )
 
-    def forward(self, length, obs=None, f_cliffcam=None, f_cam_angvel=None, f_imgseq=None, detach_j3d_for_mv2d=False, detach_cam_for_mv2d=False):
+    def forward(self, length, obs=None, f_cliffcam=None, f_cam_angvel=None, f_imgseq=None, detach_j3d_for_mv2d=False, detach_cam_for_mv2d=False, proj_2d_cam=None):
         """
         Args:
             x: None we do not use it
@@ -197,7 +205,8 @@ class NetworkEncoderRoPE(nn.Module):
         if self.static_conf_head:
             static_conf_logits = self.static_conf_head(x)  # (B, L, C')
             
-        proj_2d_cam = self.proj_2d_cam_head(x)
+        if proj_2d_cam is None:
+            proj_2d_cam = self.proj_2d_cam_head(x)
 
         output = {
             "pred_context": x,
@@ -227,7 +236,8 @@ class NetworkEncoderRoPE(nn.Module):
         
         if detach_cam_for_mv2d:
             proj_2d_cam = proj_2d_cam.detach()
-        cam_dict = self.generate_cam(proj_2d_cam)
+        with torch.autocast(device_type='cuda', enabled=not self.use_fp32_for_cam):
+            cam_dict = self.generate_cam(proj_2d_cam)
         kp2d = self.project_keypoints(j3d, cam_dict)
         bbx_xys = get_bbx_xys(kp2d, do_augment=False)
         kp2d_norm = normalize_kp2d(torch.cat([kp2d, torch.ones_like(kp2d[..., :1])], dim=-1), bbx_xys)[..., :2]
@@ -252,6 +262,12 @@ class NetworkEncoderRoPE(nn.Module):
         radius += self.default_radius
         elevations *= 10.0
         tilt *= 10.0
+        if self.use_elevation is not None:
+            elevations = torch.ones_like(elevations) * self.use_elevation
+        if self.use_radius is not None:
+            radius = torch.ones_like(elevations) * self.use_radius
+        if self.use_tilt is not None:
+            tilt = torch.ones_like(elevations) * self.use_tilt
         
         def lookat_correct(eye, at, up):
             zaxis = (at - eye) / torch.norm(at - eye, dim=-1, keepdim=True)
@@ -288,8 +304,9 @@ class NetworkEncoderRoPE(nn.Module):
         at = torch.zeros((eyes_flat.shape[0], 3), device=device)
         up = torch.tensor([0., 0., 1.], device=device)[None, :].expand(eyes_flat.shape[0], -1)
         c2w = lookat_correct(eyes_flat, at, up).reshape(eyes.shape[0], self.num_views, 4, 4)
-        tilt_rot = angle_axis_to_rotation_matrix(torch.stack([torch.zeros_like(tilt), torch.zeros_like(tilt), torch.deg2rad(tilt)], dim=-1))
-        c2w = c2w @ make_transform(tilt_rot, torch.zeros(3).to(tilt_rot))
+        if torch.norm(tilt) > 0:
+            tilt_rot = angle_axis_to_rotation_matrix(torch.stack([torch.zeros_like(tilt), torch.zeros_like(tilt), torch.deg2rad(tilt)], dim=-1))
+            c2w = c2w @ make_transform(tilt_rot, torch.zeros(3).to(tilt_rot))
         w2c = inverse_transform(c2w)
         intrinsics = self.cam_intrinsics.to(device).unsqueeze(0).repeat(eyes.shape[0], self.num_views, 1, 1)
         P = torch.matmul(intrinsics, w2c[..., :3, :])

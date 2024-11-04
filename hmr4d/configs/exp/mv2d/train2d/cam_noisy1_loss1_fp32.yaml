@@ -1,7 +1,7 @@
 # @package _global_
 defaults:
-    - override /data: mocap/trainX_testY
-    - override /model: gvhmr/gvhmr_pl
+    - override /data: mocap/trainX_testY_with2D
+    - override /model: gvhmr/mv2d
     - override /endecoder: gvhmr/v1_amass_local_bedlam_cam
     - override /optimizer: adamw_2e-4
     - override /scheduler_cfg: epoch_half_200_350
@@ -10,13 +10,16 @@ defaults:
           - imgfeat_bedlam/v2
           - imgfeat_h36m/v1
           - imgfeat_3dpw/v1
+    - override /train_2d_datasets:
+          - bones_2d
     - override /test_datasets:
           - emdb1/v1_fliptest
           - emdb2/v1_fliptest
           - rich/all
           - 3dpw/fliptest
+          - bones_2d_test
     - override /callbacks:
-          - simple_ckpt_saver/every100e_top100
+          - simple_ckpt_saver/every10e_top100
           - prog_bar/prog_reporter_every0.1
           - train_speed_timer/base
           - lr_monitor/pl
@@ -24,37 +27,68 @@ defaults:
           - metric_emdb2
           - metric_rich
           - metric_3dpw
-    - override /network: gvhmr/relative_transformer
+          - vis_2d
 
 exp_name_base: ${hydra:runtime.choices.exp}
 exp_name_var: ""
 exp_name: ${exp_name_base}_${exp_name_var}
 data_name: mocap_mixed_v1
 
+model_cfg:
+    num_views: 4
+    start_2d_training_steps: 10000
+    noisy_2d_obs: true
+    kp2d_noise_scale: 0.5
+
 pipeline:
-    _target_: hmr4d.model.gvhmr.pipeline.gvhmr_pipeline.Pipeline
+    _target_: hmr4d.model.gvhmr.pipeline.mv2d_pipeline.Pipeline
     args_denoiser3d: ${network}
     args:
         endecoder_opt: ${endecoder}
         normalize_cam_angvel: True
+        num_views: ${model_cfg.num_views}
+        train3d_detach_j3d_for_mv2d: true
+        train3d_detach_cam_for_mv2d: false
+        train2d_detach_j3d_for_mv2d: false
+        train2d_detach_cam_for_mv2d: false
+
         weights:
             cr_j3d: 500.
             transl_c: 1.
             cr_verts: 500.
             j2d: 1000.
             verts2d: 1000.
+            mv2d: 0.01
 
             transl_w: 1.
             static_conf_bce: 1.
 
+            cycle_in2d: 1000.0
+            cycle_mv2d: 1.
+            cycle_pose: 1.
+            cycle_betas: 1.
+            cycle_detach_mv2d_target: false
+            cycle_detach_body_pose_target: false
+            cycle_detach_beta_target: false
+
+
         static_conf:
             vel_thr: 0.15
+
+network:
+    _target_: hmr4d.network.mv2d.relative_transformer_cam.NetworkEncoderRoPE
+    num_views: ${model_cfg.num_views}
+    use_gv_for_mv2d: true
+    use_fp32_for_cam: true
 
 data:
     loader_opts:
         train:
             batch_size: 256
-            num_workers: 12
+            num_workers: 6
+        train_2d:
+            batch_size: 128
+            num_workers: 6
 
 pl_trainer:
     precision: 16-mixed
