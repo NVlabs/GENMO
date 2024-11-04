@@ -38,10 +38,15 @@ class Pipeline(nn.Module):
         super().__init__()
         self.args = args
         self.weights = args.weights  # loss weights
+        self.fix_network_for_mv2d_second_view = args.get('fix_network_for_mv2d_second_view', False)
 
         # Networks
         self.num_views = args.num_views
         self.denoiser3d = instantiate(args_denoiser3d, _recursive_=False)
+        if self.fix_network_for_mv2d_second_view:
+            self.denoiser3d_copy = [instantiate(args_denoiser3d, _recursive_=False)]
+            for parameter in self.denoiser3d_copy[0].parameters():
+                parameter.requires_grad = False
         # Log.info(self.denoiser3d)
 
         # Normalizer
@@ -202,7 +207,15 @@ class Pipeline(nn.Module):
         }
         if self.args.get('use_firstview_proj_cam_for_sideview', False):
             f_condition["proj_2d_cam"] = model_output["proj_2d_cam"]
-        model_output_sv = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
+        if self.fix_network_for_mv2d_second_view:
+            self.transfer_network_weights_to_copy()    
+            denoiser3d = self.denoiser3d_copy[0]
+        else:
+            denoiser3d = self.denoiser3d
+        model_output_sv = denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
+        # model_output_sv2 = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
+        # diff = (model_output_sv["pred_x"] - model_output_sv2["pred_x"]).abs()
+        # grad = torch.autograd.grad(model_output_sv["pred_x"].sum(), obs_sv, create_graph=True)[0]
         if 'decode_dict' in model_output_sv:
             decode_dict_sv = model_output_sv.pop("decode_dict")
         else:
@@ -256,6 +269,13 @@ class Pipeline(nn.Module):
 
         outputs["loss_2d"] = total_loss
         return outputs
+    
+    def transfer_network_weights_to_copy(self):
+        device = next(self.denoiser3d.parameters()).device
+        if next(self.denoiser3d_copy[0].parameters()).device != device:
+            self.denoiser3d_copy[0].to(device)
+        for parameter, parameter_copy in zip(self.denoiser3d.parameters(), self.denoiser3d_copy[0].parameters()):
+            parameter_copy.data.copy_(parameter.data)
 
 
 def randomly_set_null_condition(f_condition, uncond_prob=0.1):

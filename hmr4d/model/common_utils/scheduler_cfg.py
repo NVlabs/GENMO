@@ -25,6 +25,7 @@ MainStore.store(name="epoch_half_100_200_300", node=epoch_half_by([100, 200, 300
 MainStore.store(name="epoch_half_100_200", node=epoch_half_by([100, 200]), group=f"scheduler_cfg")
 MainStore.store(name="epoch_half_200_350", node=epoch_half_by([200, 350]), group=f"scheduler_cfg")
 MainStore.store(name="epoch_half_300", node=epoch_half_by([300]), group=f"scheduler_cfg")
+MainStore.store(name="no_schedule", node=DictConfig({'scheduler': None}), group=f"scheduler_cfg")
 
 
 # epoch-based
