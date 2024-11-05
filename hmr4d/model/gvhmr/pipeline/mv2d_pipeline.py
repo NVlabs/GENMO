@@ -245,6 +245,16 @@ class Pipeline(nn.Module):
         total_loss = 0
         mask = inputs["mask"]
         
+        if self.weights.get("recon2d", 0.0) > 0.0:
+            input_target = inputs["orig_obs"]
+            mv2d_fv = model_output["mv2d"][:, :, 0]
+            recon2d_loss = F.mse_loss(mv2d_fv, input_target[..., :2], reduction="none")
+            recon2d_loss *= input_target[..., [2]]
+            recon2d_loss = (recon2d_loss * mask[..., None, None]).mean()
+            total_loss += self.weights.recon2d * recon2d_loss
+            outputs["recon2d_loss"] = recon2d_loss
+        
+        
         # 0. cycle input 2d loss
         if self.weights.cycle_in2d > 0.0:
             input_target = inputs["orig_obs"]

@@ -25,7 +25,7 @@ from hmr4d.utils.video_io_utils import save_video
 from hmr4d.utils.vis.cv2_utils import draw_bbx_xys_on_image_batch
 from hmr4d.utils.geo.flip_utils import flip_smplx_params, avg_smplx_aa
 from hmr4d.model.gvhmr.utils.postprocess import pp_static_joint, pp_static_joint_cam, process_ik
-from motiondiff.utils.torch_transform import angle_axis_to_rotation_matrix, make_transform, transform_trans
+from motiondiff.utils.torch_transform import angle_axis_to_rotation_matrix, make_transform, transform_trans, inverse_transform
 from motiondiff.utils.tools import Timer
 from .utils.mv2d_utils import draw_motion_2d, coco_joint_parents
 
@@ -65,26 +65,25 @@ class MV2D(pl.LightningModule):
         rot_angle_base[h36m_index, 2] = 0.5 * np.pi
         rot_angle_base[~h36m_index, 1] = 0.5 * np.pi
         
-        with torch.autocast(device_type='cuda', enabled=False):
-            mv2d = []
-            T_c2w = batch["T_w2c"].float().inverse()
-            gt_j3d_world = apply_T_on_points(gt_j3d, T_c2w)
-            gt_root_world = gt_j3d_world[:, :, 0]
-            T_c2w[..., :3, -1] -= gt_root_world
-            for i in range(self.num_views):
-                y_rot = angle_axis_to_rotation_matrix(rot_angle_base * i).unsqueeze(1)
-                T_y_rot = make_transform(y_rot, torch.zeros(3).to(T_c2w))
-                T_c2w_new = T_y_rot @ T_c2w
-                T_c2w_new[..., :3, -1] += gt_root_world
-                T_w2c_new = T_c2w_new.inverse()
-                gt_j3d_local = apply_T_on_points(gt_j3d_world, T_w2c_new) 
-                new_j2d = perspective_projection(gt_j3d_local, batch["K_fullimg"])
-                mv2d.append(new_j2d)
+        mv2d = []
+        T_c2w = inverse_transform(batch["T_w2c"])
+        gt_j3d_world = apply_T_on_points(gt_j3d, T_c2w)
+        gt_root_world = gt_j3d_world[:, :, 0]
+        T_c2w[..., :3, -1] -= gt_root_world
+        for i in range(self.num_views):
+            y_rot = angle_axis_to_rotation_matrix(rot_angle_base * i).unsqueeze(1)
+            T_y_rot = make_transform(y_rot, torch.zeros(3).to(T_c2w))
+            T_c2w_new = T_y_rot @ T_c2w
+            T_c2w_new[..., :3, -1] += gt_root_world
+            T_w2c_new = inverse_transform(T_c2w_new)
+            gt_j3d_local = apply_T_on_points(gt_j3d_world, T_w2c_new) 
+            new_j2d = perspective_projection(gt_j3d_local, batch["K_fullimg"])
+            mv2d.append(new_j2d)
         mv2d = torch.stack(mv2d, dim=2)
         # mv2d = torch.cat([mv2d, (mv2d[..., [11], :] + mv2d[..., [12], :]) * 0.5], dim=-2)
         # vis_id = 0
         # draw_motion_2d(mv2d[vis_id].cpu(), f"out/debug_vis/{batch['meta'][vis_id]['data_name']}.mp4", coco_joint_parents, 1000, 1000, fps=30)
-        return mv2d, T_c2w
+        return mv2d
     
     def training_step(self, batch, batch_idx):
         if not ('3d' in batch or '2d' in batch):
@@ -194,7 +193,8 @@ class MV2D(pl.LightningModule):
         batch["obs"] = obs
         batch["j2d_visible_mask"] = j2d_visible_mask
 
-        mv2d, T_c2w = self.obtain_mv2d(batch, gt_j3d)
+        mv2d = self.obtain_mv2d(batch, gt_j3d)
+        T_w2c = batch["T_w2c"]
         mv2d = torch.cat([mv2d, torch.ones_like(mv2d[..., :1])], dim=-1)
         mv2d_bbox = []
         mv2d_norm = []
@@ -205,8 +205,8 @@ class MV2D(pl.LightningModule):
         batch['mv2d_bbox'] = mv2d_bbox = torch.stack(mv2d_bbox, dim=2)
         batch['mv2d_norm'] = mv2d_norm = torch.stack(mv2d_norm, dim=2)
         # cam parameters
-        batch['cam_elevations'] = torch.arcsin(-T_c2w[:, :, 1, 2])
-        cam_tilt = np.pi - torch.atan2(T_c2w[:, :, 1, 0], T_c2w[:, :, 1, 1])
+        batch['cam_elevations'] = torch.arcsin(-T_w2c[:, :, 2, 1])
+        cam_tilt = np.pi - torch.atan2(T_w2c[:, :, 0, 1], T_w2c[:, :, 1, 1])
         cam_tilt[cam_tilt > np.pi] -= 2 * np.pi
         cam_tilt[cam_tilt < -np.pi] += 2 * np.pi
         batch['cam_tilt'] = cam_tilt
