@@ -84,7 +84,7 @@ class MV2D(pl.LightningModule):
         # mv2d = torch.cat([mv2d, (mv2d[..., [11], :] + mv2d[..., [12], :]) * 0.5], dim=-2)
         # vis_id = 0
         # draw_motion_2d(mv2d[vis_id].cpu(), f"out/debug_vis/{batch['meta'][vis_id]['data_name']}.mp4", coco_joint_parents, 1000, 1000, fps=30)
-        return mv2d
+        return mv2d, T_c2w
     
     def training_step(self, batch, batch_idx):
         if not ('3d' in batch or '2d' in batch):
@@ -194,7 +194,7 @@ class MV2D(pl.LightningModule):
         batch["obs"] = obs
         batch["j2d_visible_mask"] = j2d_visible_mask
 
-        mv2d = self.obtain_mv2d(batch, gt_j3d)
+        mv2d, T_c2w = self.obtain_mv2d(batch, gt_j3d)
         mv2d = torch.cat([mv2d, torch.ones_like(mv2d[..., :1])], dim=-1)
         mv2d_bbox = []
         mv2d_norm = []
@@ -204,12 +204,18 @@ class MV2D(pl.LightningModule):
             mv2d_norm.append(normalize_kp2d(mv2d[:, :, i], bbox))
         batch['mv2d_bbox'] = mv2d_bbox = torch.stack(mv2d_bbox, dim=2)
         batch['mv2d_norm'] = mv2d_norm = torch.stack(mv2d_norm, dim=2)
+        batch['cam_elevation'] = torch.arcsin(-T_c2w[:, :, 1, 2])
+        cam_tilt = np.pi - torch.atan2(T_c2w[:, :, 1, 0], T_c2w[:, :, 1, 1])
+        cam_tilt[cam_tilt > np.pi] -= 2 * np.pi
+        cam_tilt[cam_tilt < -np.pi] += 2 * np.pi
+        batch['cam_tilt'] = cam_tilt
         
+        # vis_ind = 0
         # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
-        # draw_motion_2d((mv2d_norm[1, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/{batch['meta'][1]['data_name']}_new.mp4", coco_joint_parents, 1000, 1000, fps=30)
+        # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/{batch['meta'][vis_ind]['data_name']}_new.mp4", coco_joint_parents, 1000, 1000, fps=30)
         # mv2d_norm[:, :, 0, :17] = obs
         # mv2d_norm[:, :, :, [17]] = (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5
-        # draw_motion_2d((mv2d_norm[1, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/{batch['meta'][1]['data_name']}_obs.mp4", coco_joint_parents, 1000, 1000, fps=30)
+        # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/{batch['meta'][vis_ind]['data_name']}_obs.mp4", coco_joint_parents, 1000, 1000, fps=30)
         
         if True:  # Use some detected vitpose (presave data)
             prob = 0.5

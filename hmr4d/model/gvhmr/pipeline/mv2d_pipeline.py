@@ -57,6 +57,8 @@ class Pipeline(nn.Module):
             self.register_buffer("cam_angvel_std", torch.tensor(cam_angvel_stats["std"]), persistent=False)
             
         self.denoiser3d.endecoder = [self.endecoder]
+        if self.fix_network_for_mv2d_second_view:
+            self.denoiser3d_copy[0].endecoder = [self.endecoder]
 
     # ========== Training ========== #
 
