@@ -41,6 +41,7 @@ class NetworkEncoderRoPE(nn.Module):
         default_radius=8.0,
         use_gv_for_mv2d=True,
         use_fp32_for_cam=False,
+        cam_gen_nograd=False,
         use_elevation=None,
         use_radius=None,
         use_tilt=None,
@@ -105,6 +106,7 @@ class NetworkEncoderRoPE(nn.Module):
         self.default_radius = default_radius
         self.use_gv_for_mv2d = use_gv_for_mv2d
         self.use_fp32_for_cam = use_fp32_for_cam
+        self.cam_gen_nograd = cam_gen_nograd
         self.use_elevation = use_elevation
         self.use_radius = use_radius
         self.use_tilt = use_tilt
@@ -236,12 +238,15 @@ class NetworkEncoderRoPE(nn.Module):
         
         if detach_cam_for_mv2d:
             proj_2d_cam = proj_2d_cam.detach()
+        mv2d_cam_params = self.obtain_mv2d_cam_params(proj_2d_cam)
         with torch.autocast(device_type='cuda', enabled=not self.use_fp32_for_cam):
-            cam_dict = self.generate_cam(proj_2d_cam)
+            with torch.set_grad_enabled(not self.cam_gen_nograd):
+                cam_dict = self.generate_cam(mv2d_cam_params)
         kp2d = self.project_keypoints(j3d, cam_dict)
         bbx_xys = get_bbx_xys(kp2d, do_augment=False)
         kp2d_norm = normalize_kp2d(torch.cat([kp2d, torch.ones_like(kp2d[..., :1])], dim=-1), bbx_xys)[..., :2]
         output['mv2d'] = kp2d_norm
+        output['mv2d_cam_params'] = mv2d_cam_params
         output['decode_dict'] = decode_dict
         return output
     
@@ -254,11 +259,9 @@ class NetworkEncoderRoPE(nn.Module):
         self.cam_intrinsics[:, 1, 1] = self.focal_length
         self.cam_intrinsics[:, 0, 2] = img_w/2.
         self.cam_intrinsics[:, 1, 2] = img_h/2.
-
-    def generate_cam(self, proj_2d_cam):
-        device = proj_2d_cam.device
-        proj_2d_cam_flat = proj_2d_cam.view(-1, 3)
-        elevations, radius, tilt = proj_2d_cam_flat[..., [0]], proj_2d_cam_flat[..., [1]], proj_2d_cam_flat[..., [2]]
+        
+    def obtain_mv2d_cam_params(self, proj_2d_cam):
+        elevations, radius, tilt = proj_2d_cam[..., 0], proj_2d_cam[..., 1], proj_2d_cam[..., 2]
         radius += self.default_radius
         elevations *= 10.0
         tilt *= 10.0
@@ -268,6 +271,18 @@ class NetworkEncoderRoPE(nn.Module):
             radius = torch.ones_like(elevations) * self.use_radius
         if self.use_tilt is not None:
             tilt = torch.ones_like(elevations) * self.use_tilt
+        return {
+            'elevations': elevations,
+            'radius': radius,
+            'tilt': tilt,
+        }
+
+    def generate_cam(self, mv2d_cam_params):
+        device = mv2d_cam_params['elevations'].device
+        orig_shape = mv2d_cam_params['elevations'].shape[:2]
+        elevations = mv2d_cam_params['elevations'].view(-1, 1)
+        radius = mv2d_cam_params['radius'].view(-1, 1)
+        tilt = mv2d_cam_params['tilt'].view(-1, 1)
         
         def lookat_correct(eye, at, up):
             zaxis = (at - eye) / torch.norm(at - eye, dim=-1, keepdim=True)
@@ -312,13 +327,13 @@ class NetworkEncoderRoPE(nn.Module):
         P = torch.matmul(intrinsics, w2c[..., :3, :])
         
         cam_dict = {
-            'c2w': c2w.reshape(proj_2d_cam.shape[:2] + c2w.shape[1:]),
-            'w2c': w2c.reshape(proj_2d_cam.shape[:2] + w2c.shape[1:]),
-            'intrinsics': intrinsics.reshape(proj_2d_cam.shape[:2] + intrinsics.shape[1:]),
-            'P': P.reshape(proj_2d_cam.shape[:2] + P.shape[1:]),
-            'azimuths': azimuths.reshape(proj_2d_cam.shape[:2] + azimuths.shape[1:]),
-            'elevations': elevations.reshape(proj_2d_cam.shape[:2] + elevations.shape[1:]),
-            'radius': radius.reshape(proj_2d_cam.shape[:2] + radius.shape[1:]),
+            'c2w': c2w.reshape(orig_shape + c2w.shape[1:]),
+            'w2c': w2c.reshape(orig_shape + w2c.shape[1:]),
+            'intrinsics': intrinsics.reshape(orig_shape + intrinsics.shape[1:]),
+            'P': P.reshape(orig_shape + P.shape[1:]),
+            'azimuths': azimuths.reshape(orig_shape + azimuths.shape[1:]),
+            'elevations': elevations.reshape(orig_shape + elevations.shape[1:]),
+            'radius': radius.reshape(orig_shape + radius.shape[1:]),
         }
         
         return cam_dict

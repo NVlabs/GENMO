@@ -204,11 +204,13 @@ class MV2D(pl.LightningModule):
             mv2d_norm.append(normalize_kp2d(mv2d[:, :, i], bbox))
         batch['mv2d_bbox'] = mv2d_bbox = torch.stack(mv2d_bbox, dim=2)
         batch['mv2d_norm'] = mv2d_norm = torch.stack(mv2d_norm, dim=2)
-        batch['cam_elevation'] = torch.arcsin(-T_c2w[:, :, 1, 2])
+        # cam parameters
+        batch['cam_elevations'] = torch.arcsin(-T_c2w[:, :, 1, 2])
         cam_tilt = np.pi - torch.atan2(T_c2w[:, :, 1, 0], T_c2w[:, :, 1, 1])
         cam_tilt[cam_tilt > np.pi] -= 2 * np.pi
         cam_tilt[cam_tilt < -np.pi] += 2 * np.pi
         batch['cam_tilt'] = cam_tilt
+        batch['cam_param_valid'] = torch.tensor([meta["data_name"] != "h36m" for meta in batch["meta"]])
         
         # vis_ind = 0
         # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
