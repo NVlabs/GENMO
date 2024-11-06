@@ -336,6 +336,7 @@ class MV2D(pl.LightningModule):
         # Forward and get loss
         outputs = self.pipeline.forward_2d(batch, train=False, global_step=self.trainer.global_step)
         outputs["batch"] = batch
+        outputs['vis_2d'] = self.model_cfg.get("vis_2d", False)
         return outputs
         
     def validation_3d(self, batch, batch_idx, dataloader_idx=0):
@@ -373,7 +374,6 @@ class MV2D(pl.LightningModule):
                 self.eval()
             else:
                 outputs_2d = self.validation_2d(batch_2d, batch_idx, dataloader_idx)
-            outputs_2d['vis_2d'] = self.model_cfg.get("vis_2d", False)
             
         batch_ = {
             "length": batch["length"],

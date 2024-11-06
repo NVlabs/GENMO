@@ -168,6 +168,54 @@ class GvhmrPL(pl.LightningModule):
         return outputs
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
+        if 'is_2d' in batch and batch['is_2d'][0]:
+            return self.validation_2d(batch, batch_idx, dataloader_idx)
+        else:
+            return self.validation_3d(batch, batch_idx, dataloader_idx)
+        
+    def validation_2d(self, batch, batch_idx, dataloader_idx=0):
+        B = batch["obs_kp2d"].shape[0]
+        obs_kp2d = batch['obs_kp2d'].squeeze(2)
+        conf = batch['conf']
+        batch["bbx_xys"] = get_bbx_xys(obs_kp2d, do_augment=False)
+        
+        orig_obs_kp2d = obs_kp2d.clone()
+        orig_obs_kp2d = torch.cat([orig_obs_kp2d, conf[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
+        batch["orig_obs"] = normalize_kp2d(orig_obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
+        batch["orig_obs"][~batch["mask"]] = 0
+        
+        noisy_2d_obs = False # self.model_cfg.get("test_with_noisy_2d_obs", False)
+        if noisy_2d_obs:
+            aug = get_wham_aug_kp3d(obs_kp2d.shape[:2])[..., :2]
+            f = torch.tensor([1024., 1024.]).to(aug) / 4.
+            aug *= f * self.model_cfg.kp2d_noise_scale
+            obs_kp2d += aug
+            obs_kp2d = randomly_modify_hands_legs(obs_kp2d)
+            j2d_visible_mask = get_visible_mask(obs_kp2d.shape[:2]).cuda()  # (B, L, J)
+            legs_invisible_mask = get_invisible_legs_mask(obs_kp2d.shape[:2]).cuda()  # (B, L, J)
+            j2d_visible_mask[legs_invisible_mask] = False
+            j2d_visible_mask *= (conf > 0.5)
+        else:
+            j2d_visible_mask = conf > 0.5
+        obs_kp2d = torch.cat([obs_kp2d, j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
+        obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
+        obs[~batch["mask"]] = 0
+        batch["obs"] = obs
+        
+        # vis_ind = 0
+        # mv2d_norm = obs.unsqueeze(2)
+        # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
+        # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/2d_test_noisy.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
+        # mv2d_norm = batch["orig_obs"].unsqueeze(2)
+        # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
+        # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/2d_test_obs.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
+
+        # Forward and get loss
+        outputs = self.pipeline.forward_2d(batch, train=False, global_step=self.trainer.global_step)
+        outputs["batch"] = batch
+        return outputs
+        
+    def validation_3d(self, batch, batch_idx, dataloader_idx=0):
         # Options & Check
         do_postproc = self.trainer.state.stage == "test"  # Only apply postproc in test
         do_flip_test = "flip_test" in batch

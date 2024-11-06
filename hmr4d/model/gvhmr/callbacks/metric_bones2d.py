@@ -32,12 +32,10 @@ class MetricMocap(pl.Callback):
 
         # SMPLX and SMPL
         self.smplx = make_smplx("supermotion_EVAL3DPW")
-        self.smpl = {"male": make_smplx("smpl", gender="male"), "female": make_smplx("smpl", gender="female")}
+        self.smpl = make_smplx("smpl")
         self.J_regressor = torch.load("hmr4d/utils/body_model/smpl_3dpw14_J_regressor_sparse.pt").to_dense()
         self.J_regressor24 = torch.load("hmr4d/utils/body_model/smpl_neutral_J_regressor.pt")
         self.smplx2smpl = torch.load("hmr4d/utils/body_model/smplx2smpl_sparse.pt")
-        self.faces_smplx = self.smplx.faces
-        self.faces_smpl = self.smpl["male"].faces
         self.img_h = self.img_w = 256
 
         # The metrics are calculated similarly for val/test/predict
@@ -51,7 +49,7 @@ class MetricMocap(pl.Callback):
         mv2d = results['mv2d']
         input_view_id = results['input_view_id']
         for ind in range(mv2d.shape[0]):
-            vid_file = f'out/video/vis_2d_3dpw/b{batch_idx:03d}_i{ind:02d}.mp4'
+            vid_file = f'out/video/vis_2d_bones2d/b{batch_idx:03d}_i{ind:02d}.mp4'
             os.makedirs(os.path.dirname(vid_file), exist_ok=True)
             frame_dir = os.path.splitext(vid_file)[0] + '_frames'
             os.makedirs(frame_dir, exist_ok=True)
@@ -78,7 +76,7 @@ class MetricMocap(pl.Callback):
                 shutil.rmtree(frame_dir, ignore_errors=True)
             
                 if isinstance(wandb.run, wandb.sdk.wandb_run.Run):
-                    pl_module.logger.log_metrics({f'3dpw/b{batch_idx:03d}_i{ind:02d}': wandb.Video(vid_file)})
+                    pl_module.logger.log_metrics({f'bones2d/b{batch_idx:03d}_i{ind:02d}': wandb.Video(vid_file)})
                     # wandb.log({f'vis_2d/{ind:04d}': wandb.Video(vid_file)}, step=trainer.global_step if trainer is not None else 0)
         return
     
@@ -104,35 +102,42 @@ class MetricMocap(pl.Callback):
         """The behaviour is the same for val/test/predict"""
         assert batch["B"] == 1
         dataset_id = batch["meta"][0]["dataset_id"]
-        if dataset_id != "3DPW":
+        if dataset_id != "bones2d_v2":
             return
         
-        if 'outputs_2d' in outputs and outputs['outputs_2d']['vis_2d']:
-            self.vis_2d(outputs['outputs_2d'], trainer, pl_module, batch_idx)
+        if 'vis_2d' in outputs:
+            self.vis_2d(outputs, trainer, pl_module, batch_idx)
 
         # Move to cuda if not
-        self.smplx = self.smplx.cuda()
-        for g in ["male", "female"]:
-            self.smpl[g] = self.smpl[g].cuda()
         self.J_regressor = self.J_regressor.cuda()
-        self.J_regressor24 = self.J_regressor24.cuda()
-        self.smplx2smpl = self.smplx2smpl.cuda()
 
-        vid = batch["meta"][0]["vid"]
+        # vid = batch["meta"][0]["vid"]
+        self.smpl = self.smpl.cuda()
+        self.smplx = self.smplx.cuda()
+        self.smplx2smpl = self.smplx2smpl.cuda()
         seq_length = batch["length"][0].item()
-        gender = batch["gender"][0]
-        T_w2c = batch["T_w2c"][0]
+        # T_w2c = batch["T_w2c"][0]
         mask = batch["mask"][0]
 
         # Groundtruth (cam)
-        target_w_params = {k: v[0] for k, v in batch["smpl_params"].items()}
-        target_w_output = self.smpl[gender](**target_w_params)
+        target_w_params = {
+            'body_pose': batch["pose"][0, ..., 3:72],
+            'betas': batch["betas"][0],
+            'global_orient': batch["pose"][0, ..., :3],
+        }
+        target_w_output = self.smpl(**target_w_params)
         target_w_verts = target_w_output.vertices
-        target_c_verts = apply_T_on_points(target_w_verts, T_w2c)
-        target_c_j3d = torch.matmul(self.J_regressor, target_c_verts)
+        target_c_verts = target_w_verts
+        # target_c_verts = apply_T_on_points(target_w_verts, T_w2c)
+        target_c_j3d = einsum(self.J_regressor, target_c_verts, "j v, l v i -> l j i")
 
         # + Prediction -> Metric
-        smpl_out = self.smplx(**outputs["pred_smpl_params_incam"])
+        pred_c_params = {
+            'body_pose': outputs["2d_decode_dict"]["body_pose"][0],
+            'betas': outputs["2d_decode_dict"]["betas"][0],
+            'global_orient': outputs["2d_decode_dict"]["global_orient"][0],
+        }
+        smpl_out = self.smplx(**pred_c_params)
         pred_c_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in smpl_out.vertices])
         pred_c_j3d = einsum(self.J_regressor, pred_c_verts, "j v, l v i -> l j i")
         del smpl_out  # Prevent OOM
@@ -145,54 +150,12 @@ class MetricMocap(pl.Callback):
             "target_verts": target_c_verts,
         }
         camcoord_metrics = compute_camcoord_metrics(batch_eval, mask=mask, pelvis_idxs=[2, 3])
+        vid = str(batch_idx)
         for k in camcoord_metrics:
             self.metric_aggregator[k][vid] = as_np_array(camcoord_metrics[k])
-            # print(f"{vid} {k}: {camcoord_metrics[k].mean()}")
+            print(f"{vid} {k}: {camcoord_metrics[k].mean()}")
 
-        if False:  # Render incam (simple)
-            from hmr4d.utils.vis.renderer_utils import simple_render_mesh_background
-            meta_render = batch["meta_render"][0]
-            images = read_video_np(meta_render["video_path"], scale=meta_render["ds"])
-            render_dict = {
-                "K": meta_render["K"][None],  # only support batch size 1
-                "faces": self.smpl["male"].faces,
-                "verts": pred_c_verts,
-                "background": images,
-            }
-            img_overlay = simple_render_mesh_background(render_dict)
-            output_fn = Path("outputs/3DPW_render_pred_flip") / f"{vid}.mp4"
-            save_video(img_overlay, output_fn, crf=28)
-
-        if False:  # Render incam (with details)
-            meta_render = batch["meta_render"][0]
-            images = read_video_np(meta_render["video_path"], scale=meta_render["ds"])
-            render_dict = {
-                "K": meta_render["K"][None],  # only support batch size 1
-                "faces": self.smpl["male"].faces,
-                "verts": pred_c_verts,
-                "background": images,
-            }
-            img_overlay = simple_render_mesh_background(render_dict)
-
-            # Add COCO17 and bbx to image
-            bbx_xys_render = meta_render["bbx_xys"]
-            kp2d_render = meta_render["kp2d"]
-            img_overlay = draw_coco17_skeleton_batch(img_overlay, kp2d_render, conf_thr=0.5)
-            img_overlay = draw_bbx_xys_on_image_batch(bbx_xys_render, img_overlay, mask)
-
-            # Add metric
-            metric_all = rearrange_by_mask(torch.tensor(camcoord_metrics["pa_mpjpe"]), mask)
-            for i in range(len(img_overlay)):
-                m = metric_all[i]
-                if m == 0:  # a not evaluated frame
-                    continue
-                text = f"PA-MPJPE: {m:.1f}"
-                color = (244, 10, 20) if m > 45 else (0, 205, 0)  # red or green
-                cv2.putText(img_overlay[i], text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-
-            output_dir = Path("tmp_pred_details")
-            output_dir.mkdir(exist_ok=True, parents=True)
-            save_video(img_overlay, output_dir / f"{vid}.mp4", crf=24)
+        print('done')
 
     # ================== Epoch Summary  ================== #
     def on_predict_epoch_end(self, trainer, pl_module):
@@ -237,7 +200,7 @@ class MetricMocap(pl.Callback):
         if pl_module.logger is not None:
             cur_epoch = pl_module.current_epoch
             for k, v in metrics_avg.items():
-                pl_module.logger.log_metrics({f"val_metric_3DPW/{k}": v}, step=cur_epoch)
+                pl_module.logger.log_metrics({f"val_metric_BONES/{k}": v}, step=cur_epoch)
 
         # reset
         for k in self.metric_aggregator:

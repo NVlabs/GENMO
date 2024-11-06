@@ -133,6 +133,42 @@ class Pipeline(nn.Module):
 
         outputs["loss"] = total_loss
         return outputs
+    
+    def forward_2d(self, inputs, train=False, global_step=0):
+        outputs = dict()
+        length = inputs["length"]  # (B,) effective length of each sample
+        device = inputs["obs"].device
+        B, L = inputs["obs"].shape[:2]
+
+        # input view generation
+        f_condition = {
+            "f_cliffcam": torch.zeros(B, L, 3).to(device),  # (B, L, 3)
+            "f_cam_angvel": torch.zeros(B, L, 6).to(device),  # (B, L, C=6)
+            "f_imgseq": inputs.get("f_imgseq", torch.zeros(B, L, 1024).to(device)),
+        }
+        if train:
+            f_condition = randomly_set_null_condition(f_condition, 0.1)
+        f_condition["obs"] = inputs["obs"]  # (B, L, J, 3)
+        model_output = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
+        if 'decode_dict' in model_output:
+            decode_dict = model_output.pop("decode_dict")
+        else:
+            decode_dict = self.endecoder.decode(model_output["pred_x"])  # (B, L, C) -> dict
+        outputs.update({"2d_model_output": model_output, "2d_decode_dict": decode_dict})
+        
+
+        # ========== Compute Loss ========== #
+        total_loss = 0
+
+        outputs["loss_2d"] = total_loss
+        return outputs
+    
+    def transfer_network_weights_to_copy(self):
+        device = next(self.denoiser3d.parameters()).device
+        if next(self.denoiser3d_copy[0].parameters()).device != device:
+            self.denoiser3d_copy[0].to(device)
+        for parameter, parameter_copy in zip(self.denoiser3d.parameters(), self.denoiser3d_copy[0].parameters()):
+            parameter_copy.data.copy_(parameter.data)
 
 
 def randomly_set_null_condition(f_condition, uncond_prob=0.1):
