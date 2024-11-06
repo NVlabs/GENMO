@@ -1,0 +1,118 @@
+# @package _global_
+defaults:
+    - override /data: mocap/trainX_testY_with2D
+    - override /model: gvhmr/mv2d
+    - override /endecoder: gvhmr/v1_amass_local_bedlam_cam
+    - override /optimizer: adamw_2e-4
+    - override /scheduler_cfg: epoch_half_200_350
+    - override /train_datasets:
+          - pure_motion_amass/v11
+          - imgfeat_bedlam/v2
+          - imgfeat_h36m/v1
+          - imgfeat_3dpw/v1
+    - override /train_2d_datasets:
+          - bones_2d
+    - override /test_datasets:
+          - emdb1/v1_fliptest
+          - emdb2/v1_fliptest
+          - rich/all
+          - 3dpw/fliptest
+          - bones_2d_test
+    - override /callbacks:
+          - simple_ckpt_saver/every10e_top100
+          - prog_bar/prog_reporter_every0.1
+          - train_speed_timer/base
+          - lr_monitor/pl
+          - metric_emdb1
+          - metric_emdb2
+          - metric_rich
+          - metric_3dpw
+          - vis_2d
+
+exp_name_base: ${hydra:runtime.choices.exp}
+exp_name_var: ""
+exp_name: ${exp_name_base}_${exp_name_var}
+data_name: mocap_mixed_v1
+
+model_cfg:
+    num_views: 4
+    start_2d_training_steps: 10000
+    noisy_2d_obs: true
+    kp2d_noise_scale: 0.5
+
+pipeline:
+    _target_: hmr4d.model.gvhmr.pipeline.mv2d_pipeline.Pipeline
+    args_denoiser3d: ${network}
+    args:
+        endecoder_opt: ${endecoder}
+        normalize_cam_angvel: True
+        num_views: ${model_cfg.num_views}
+        train3d_detach_j3d_for_mv2d: true
+        train3d_detach_cam_for_mv2d: false
+        train2d_detach_j3d_for_mv2d: false
+        train2d_detach_cam_for_mv2d: false
+
+        weights:
+            cr_j3d: 500.
+            transl_c: 1.
+            cr_verts: 500.
+            j2d: 1000.
+            verts2d: 1000.
+            mv2d: 0
+            cam_elevation_loss: 1.
+            cam_tilt_loss: 1.
+
+            transl_w: 1.
+            static_conf_bce: 1.
+
+            cycle_in2d: 100
+            cycle_mv2d: 10
+            cycle_pose: 10
+            cycle_betas: 10
+            cycle_detach_mv2d_target: false
+            cycle_detach_body_pose_target: false
+            cycle_detach_beta_target: false
+            recon2d: 10
+
+
+        static_conf:
+            vel_thr: 0.15
+
+network:
+    _target_: hmr4d.network.mv2d.relative_transformer_cam.NetworkEncoderRoPE
+    num_views: ${model_cfg.num_views}
+    use_gv_for_mv2d: true
+    use_fp32_for_cam: true
+    cam_gen_nograd: true
+    use_radius: 8.0
+    # use_elevation: 0.0
+    # use_tilt: 0.0
+
+data:
+    loader_opts:
+        train:
+            batch_size: 256
+            num_workers: 6
+        train_2d:
+            batch_size: 128
+            num_workers: 6
+
+pl_trainer:
+    precision: 16-mixed
+    log_every_n_steps: 10
+    gradient_clip_val: 0.5
+    max_epochs: 1500
+    check_val_every_n_epoch: 10
+    devices: 1
+    strategy: ddp_find_unused_parameters_true
+
+logger:
+    _target_: pytorch_lightning.loggers.WandbLogger
+    project: 'mfm-hmr'
+    entity: 'nvr-lpr'
+    save_dir: "/tmp" # /save_dir/name/version/sub_dir
+    name: ""
+    version: ""
+    resume: 'allow'
+    dir: "/tmp"
+    id: null

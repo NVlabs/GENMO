@@ -47,6 +47,8 @@ class MV2D(pl.LightningModule):
         self.model_cfg = model_cfg
         self.num_views = model_cfg.num_views
         self.scheduler_cfg = scheduler_cfg
+        self.validate_2d_in_3d = model_cfg.get("validate_2d_in_3d", False)
+        self.enable_test_time_opt = model_cfg.get("enable_test_time_opt", False)
 
         # Options
         self.ignored_weights_prefix = ignored_weights_prefix
@@ -65,20 +67,21 @@ class MV2D(pl.LightningModule):
         rot_angle_base[h36m_index, 2] = 0.5 * np.pi
         rot_angle_base[~h36m_index, 1] = 0.5 * np.pi
         
-        mv2d = []
-        T_c2w = inverse_transform(batch["T_w2c"])
-        gt_j3d_world = apply_T_on_points(gt_j3d, T_c2w)
-        gt_root_world = gt_j3d_world[:, :, 0]
-        T_c2w[..., :3, -1] -= gt_root_world
-        for i in range(self.num_views):
-            y_rot = angle_axis_to_rotation_matrix(rot_angle_base * i).unsqueeze(1)
-            T_y_rot = make_transform(y_rot, torch.zeros(3).to(T_c2w))
-            T_c2w_new = T_y_rot @ T_c2w
-            T_c2w_new[..., :3, -1] += gt_root_world
-            T_w2c_new = inverse_transform(T_c2w_new)
-            gt_j3d_local = apply_T_on_points(gt_j3d_world, T_w2c_new) 
-            new_j2d = perspective_projection(gt_j3d_local, batch["K_fullimg"])
-            mv2d.append(new_j2d)
+        with torch.autocast(device_type='cuda', enabled=False):
+            mv2d = []
+            T_c2w = inverse_transform(batch["T_w2c"])
+            gt_j3d_world = apply_T_on_points(gt_j3d, T_c2w)
+            gt_root_world = gt_j3d_world[:, :, 0]
+            T_c2w[..., :3, -1] -= gt_root_world
+            for i in range(self.num_views):
+                y_rot = angle_axis_to_rotation_matrix(rot_angle_base * i).unsqueeze(1)
+                T_y_rot = make_transform(y_rot, torch.zeros(3).to(T_c2w))
+                T_c2w_new = T_y_rot @ T_c2w
+                T_c2w_new[..., :3, -1] += gt_root_world
+                T_w2c_new = inverse_transform(T_c2w_new)
+                gt_j3d_local = apply_T_on_points(gt_j3d_world, T_w2c_new) 
+                new_j2d = perspective_projection(gt_j3d_local, batch["K_fullimg"])
+                mv2d.append(new_j2d)
         mv2d = torch.stack(mv2d, dim=2)
         # mv2d = torch.cat([mv2d, (mv2d[..., [11], :] + mv2d[..., [12], :]) * 0.5], dim=-2)
         # vis_id = 0
@@ -347,6 +350,31 @@ class MV2D(pl.LightningModule):
         if "mask" in batch:
             obs[0, ~batch["mask"][0]] = 0
 
+        if self.validate_2d_in_3d:
+            batch_2d = {
+                'obs_kp2d': batch['kp2d'][..., :2],
+                'conf': batch['kp2d'][..., 2],
+                'mask': batch['mask'],
+                'length': batch['length']
+            }
+            
+            if self.enable_test_time_opt:
+                init_state_dict = {k: v.detach().clone() for k, v in self.pipeline.state_dict().items()}
+                with torch.enable_grad():
+                    self.train()
+                    optimizer = torch.optim.AdamW(params=self.pipeline.parameters(), lr=1e-5)
+                    for _ in range(50):
+                        outputs_2d = self.validation_2d(batch_2d, batch_idx, dataloader_idx)
+                        loss = outputs_2d['loss_2d']
+                        optimizer.zero_grad()
+                        loss.backward()
+                        optimizer.step()
+                        print(loss)
+                self.eval()
+            else:
+                outputs_2d = self.validation_2d(batch_2d, batch_idx, dataloader_idx)
+            outputs_2d['vis_2d'] = self.model_cfg.get("vis_2d", False)
+            
         batch_ = {
             "length": batch["length"],
             "obs": obs,
@@ -404,6 +432,11 @@ class MV2D(pl.LightningModule):
 
                 outputs["pred_smpl_params_global"]["body_pose"] = body_pose[0]
                 # outputs["pred_smpl_params_incam"]["body_pose"] = body_pose[0]
+        
+        if self.validate_2d_in_3d:
+            outputs["outputs_2d"] = outputs_2d
+            if self.enable_test_time_opt:
+                self.pipeline.load_state_dict(init_state_dict)
 
         if False:  # wis3d
             wis3d = make_wis3d(name="debug-rich-cap")
