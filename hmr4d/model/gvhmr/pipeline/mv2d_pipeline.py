@@ -157,6 +157,20 @@ class Pipeline(nn.Module):
             tilt_loss = (tilt_loss * mask)[inputs['cam_param_valid']].mean()
             total_loss += self.weights.cam_tilt_loss * tilt_loss
             outputs["cam_tilt_loss"] = tilt_loss
+            
+        if self.weights.get("cam_elevation_reg", 0.0) > 0.0:
+            elevations = torch.deg2rad(model_output["mv2d_cam_params"]["elevations"])
+            elevation_reg = elevations ** 2
+            elevation_reg = (elevation_reg * mask)[inputs['cam_param_valid']].mean()
+            total_loss += self.weights.cam_elevation_reg * elevation_reg
+            outputs["cam_elevation_reg_loss"] = elevation_reg
+            
+        if self.weights.get("cam_tilt_reg", 0.0) > 0.0:
+            tilt = torch.deg2rad(model_output["mv2d_cam_params"]["tilt"])
+            tilt_reg = tilt ** 2
+            tilt_reg = (tilt_reg * mask)[inputs['cam_param_valid']].mean()
+            total_loss += self.weights.cam_tilt_reg * tilt_reg
+            outputs["cam_tilt_reg_loss"] = tilt_reg
 
         # 1. Simple loss: MSE
         pred_x = model_output["pred_x"]  # (B, L, C)

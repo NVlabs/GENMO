@@ -45,6 +45,7 @@ class NetworkEncoderRoPE(nn.Module):
         use_elevation=None,
         use_radius=None,
         use_tilt=None,
+        average_cam_across_frames=False,
     ):
         super().__init__()
 
@@ -110,6 +111,7 @@ class NetworkEncoderRoPE(nn.Module):
         self.use_elevation = use_elevation
         self.use_radius = use_radius
         self.use_tilt = use_tilt
+        self.average_cam_across_frames = average_cam_across_frames
 
     def _build_condition_embedder(self):
         latent_dim = self.latent_dim
@@ -265,6 +267,11 @@ class NetworkEncoderRoPE(nn.Module):
         radius += self.default_radius
         elevations *= 10.0
         tilt *= 10.0
+        if self.average_cam_across_frames:
+            num_frames = proj_2d_cam.shape[1]
+            elevations = elevations.mean(dim=1, keepdim=True).repeat(1, num_frames)
+            radius = radius.mean(dim=1, keepdim=True).repeat(1, num_frames)
+            tilt = tilt.mean(dim=1, keepdim=True).repeat(1, num_frames)
         if self.use_elevation is not None:
             elevations = torch.ones_like(elevations) * self.use_elevation
         if self.use_radius is not None:
