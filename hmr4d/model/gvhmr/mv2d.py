@@ -310,7 +310,7 @@ class MV2D(pl.LightningModule):
                     drop_len = np.random.randint(min_drop_nframes, min(max_drop_nframes, mlen) + 1)
                     drop_start = np.random.randint(0, max(mlen - drop_len, 1))
                     mask[i, drop_start:drop_start+drop_len] = False
-                    print(f"Drop {i} {drop_start} {drop_len}")
+                    # print(f"Drop {i} {drop_start} {drop_len}")
         return mask
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
@@ -331,6 +331,7 @@ class MV2D(pl.LightningModule):
         batch["orig_obs"][~batch["mask"]] = 0
         
         noisy_2d_obs = self.model_cfg.get("test_with_noisy_2d_obs", False)
+        test_2d_with_mask = self.model_cfg.get("test_2d_with_mask", True)
         if noisy_2d_obs:
             aug = get_wham_aug_kp3d(obs_kp2d.shape[:2])[..., :2]
             f = torch.tensor([1024., 1024.]).to(aug) / 4.
@@ -343,6 +344,9 @@ class MV2D(pl.LightningModule):
             j2d_visible_mask *= (conf > 0.5)
         else:
             j2d_visible_mask = conf > 0.5
+        if test_2d_with_mask and 'mask_cfg' in self.model_cfg:
+            mask = self.generate_mask(self.model_cfg.mask_cfg, j2d_visible_mask, batch["length"])
+            j2d_visible_mask = j2d_visible_mask & mask
         obs_kp2d = torch.cat([obs_kp2d, j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
         obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
         obs[~batch["mask"]] = 0
