@@ -39,6 +39,12 @@ model_cfg:
     start_2d_training_steps: 3000
     noisy_2d_obs: true
     kp2d_noise_scale: 0.5
+    mask_cfg:
+        drop_prob: 0.75
+        max_num_drops: 3
+        min_drop_nframes: 1
+        max_drop_nframes: 30
+
 
 pipeline:
     _target_: hmr4d.model.gvhmr.pipeline.mv2d_pipeline.Pipeline
@@ -47,51 +53,67 @@ pipeline:
         endecoder_opt: ${endecoder}
         normalize_cam_angvel: True
         num_views: ${model_cfg.num_views}
+        train3d_detach_j3d_for_mv2d: true
+        train3d_detach_cam_for_mv2d: false
+        train2d_detach_j3d_for_mv2d: false
+        train2d_detach_cam_for_mv2d: false
+
         weights:
-            simple: 10.
             cr_j3d: 500.
             transl_c: 1.
             cr_verts: 500.
             j2d: 1000.
             verts2d: 1000.
-            mv2d: 30.
+            mv2d: 0
+            cam_elevation_loss: 1.
+            cam_tilt_loss: 1.
+            cam_elevation_reg: 0.1
+            cam_tilt_reg: 0.3
 
             transl_w: 1.
             static_conf_bce: 1.
 
-            cycle_in2d: 1000.0
-            cycle_mv2d: 1.
-            cycle_pose: 1.
-            cycle_betas: 1.
+            cycle_in2d: 10
+            cycle_mv2d: 10
+            cycle_pose: 10
+            cycle_betas: 10
             cycle_detach_mv2d_target: false
             cycle_detach_body_pose_target: false
             cycle_detach_beta_target: false
+            recon2d: 10
 
 
         static_conf:
             vel_thr: 0.15
 
 network:
-    _target_: hmr4d.network.mv2d.factorized_transformer.NetworkEncoderRoPE
+    _target_: hmr4d.network.mv2d.relative_transformer_cam.NetworkEncoderRoPE
     num_views: ${model_cfg.num_views}
-    num_layers: 6
+    use_gv_for_mv2d: true
+    use_fp32_for_cam: true
+    cam_gen_nograd: true
+    average_cam_across_frames: true
+    use_radius: 8.0
+    # use_elevation: 0.0
+    # use_tilt: 0.0
 
 data:
     loader_opts:
         train:
-            batch_size: 128
+            batch_size: 256
             num_workers: 6
         train_2d:
-            batch_size: 64
+            batch_size: 128
             num_workers: 6
 
 pl_trainer:
     precision: 16-mixed
     log_every_n_steps: 10
     gradient_clip_val: 0.5
-    max_epochs: 500
+    max_epochs: 1500
     check_val_every_n_epoch: 10
     devices: 1
+    strategy: ddp_find_unused_parameters_true
 
 logger:
     _target_: pytorch_lightning.loggers.WandbLogger

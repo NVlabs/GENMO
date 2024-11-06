@@ -162,6 +162,7 @@ class Bones2DDatasetV2SingleView(Bones2DDatasetV2):
             end = start + self.num_frames
             for key in {'obs_kp2d', 'mask', 'conf'}:
                 data[key] = data[key][start:end]
+            data['length'] = self.num_frames
         elif length < self.num_frames:
             for key in {'obs_kp2d', 'mask', 'conf'}:
                 val = data[key]

@@ -272,6 +272,9 @@ class MV2D(pl.LightningModule):
             j2d_visible_mask *= (conf > 0.5)
         else:
             j2d_visible_mask = conf > 0.5
+        if 'mask_cfg' in self.model_cfg:
+            mask = self.generate_mask(self.model_cfg.mask_cfg, j2d_visible_mask, batch["length"])
+            j2d_visible_mask = j2d_visible_mask & mask
         obs_kp2d = torch.cat([obs_kp2d, j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
         obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
         obs[~batch["mask"]] = 0
@@ -289,6 +292,26 @@ class MV2D(pl.LightningModule):
         outputs = self.pipeline.forward_2d(batch, train=True, global_step=self.trainer.global_step)
 
         return outputs
+    
+    def generate_mask(self, mask_cfg, orig_mask, length):
+        _cfg = mask_cfg
+        mask = torch.ones_like(orig_mask)
+        drop_prob = _cfg.get('drop_prob', 0.0)
+        if drop_prob <= 0:
+            return mask
+        max_num_drops = _cfg.get('max_num_drops', 1)
+        min_drop_nframes = _cfg.get('min_drop_nframes', 1)
+        max_drop_nframes = _cfg.get('max_drop_nframes', 30)
+        for i in range(orig_mask.shape[0]):
+            mlen = length[i].item()
+            if np.random.rand() < drop_prob:
+                num_drops = np.random.randint(1, max_num_drops + 1)
+                for _ in range(num_drops):
+                    drop_len = np.random.randint(min_drop_nframes, min(max_drop_nframes, mlen) + 1)
+                    drop_start = np.random.randint(0, max(mlen - drop_len, 1))
+                    mask[i, drop_start:drop_start+drop_len] = False
+                    print(f"Drop {i} {drop_start} {drop_len}")
+        return mask
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         if 'is_2d' in batch and batch['is_2d'][0]:

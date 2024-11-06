@@ -36,7 +36,7 @@ data_name: mocap_mixed_v1
 
 model_cfg:
     num_views: 4
-    start_2d_training_steps: 10000
+    start_2d_training_steps: 3000
     noisy_2d_obs: true
     kp2d_noise_scale: 0.5
 
@@ -79,10 +79,10 @@ network:
 data:
     loader_opts:
         train:
-            batch_size: 256
+            batch_size: 128
             num_workers: 6
         train_2d:
-            batch_size: 128
+            batch_size: 64
             num_workers: 6
 
 pl_trainer:
