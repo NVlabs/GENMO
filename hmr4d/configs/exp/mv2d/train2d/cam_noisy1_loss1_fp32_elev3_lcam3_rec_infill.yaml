@@ -96,6 +96,8 @@ network:
     use_radius: 8.0
     # use_elevation: 0.0
     # use_tilt: 0.0
+    clamp_elevation: 45
+    clamp_tilt: 45
 
 data:
     loader_opts:

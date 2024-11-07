@@ -73,13 +73,13 @@ pipeline:
             transl_w: 1.
             static_conf_bce: 1.
 
-            cycle_in2d: 10
-            cycle_mv2d: 10
-            cycle_pose: 10
-            cycle_betas: 10
-            cycle_detach_mv2d_target: true
-            cycle_detach_body_pose_target: true
-            cycle_detach_beta_target: true
+            cycle_in2d: 0
+            cycle_mv2d: 0
+            cycle_pose: 0
+            cycle_betas: 0
+            cycle_detach_mv2d_target: false
+            cycle_detach_body_pose_target: false
+            cycle_detach_beta_target: false
             recon2d: 10
 
 
