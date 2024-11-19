@@ -27,6 +27,9 @@ from hmr4d.utils.geo.flip_utils import flip_smplx_params, avg_smplx_aa
 from hmr4d.model.gvhmr.utils.postprocess import pp_static_joint, pp_static_joint_cam, process_ik
 from motiondiff.utils.torch_transform import angle_axis_to_rotation_matrix, make_transform, transform_trans, inverse_transform
 from motiondiff.utils.tools import Timer
+from motiondiff.models.model_util import create_gaussian_diffusion
+from motiondiff.models.common.cfg_sampler import ClassifierFreeSampleModel
+from motiondiff.diffusion.resample import create_named_schedule_sampler
 from .utils.mv2d_utils import draw_motion_2d, coco_joint_parents
 
 
@@ -49,6 +52,12 @@ class MV2D(pl.LightningModule):
         self.scheduler_cfg = scheduler_cfg
         self.validate_2d_in_3d = model_cfg.get("validate_2d_in_3d", False)
         self.enable_test_time_opt = model_cfg.get("enable_test_time_opt", False)
+        self.train_3d_modes = model_cfg.get("train_3d_modes", ["regression"])
+        self.train_2d_modes = model_cfg.get("train_2d_modes", ["regression"])
+        if isinstance(self.train_3d_modes, str):
+            self.train_3d_modes = [self.train_3d_modes]
+        if isinstance(self.train_2d_modes, str):
+            self.train_2d_modes = [self.train_2d_modes]
 
         # Options
         self.ignored_weights_prefix = ignored_weights_prefix
@@ -59,6 +68,13 @@ class MV2D(pl.LightningModule):
 
         # SMPLX
         self.smplx = make_smplx("supermotion_v437coco17")
+        self.init_diffusion()
+        
+    def init_diffusion(self):
+        self.train_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=True)
+        self.test_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=False)
+        self.schedule_sampler = create_named_schedule_sampler(self.model_cfg.diffusion.schedule_sampler_type, self.train_diffusion)
+        return
         
     def obtain_mv2d(self, batch, gt_j3d):
         gt_j3d = gt_j3d.float()
@@ -90,23 +106,35 @@ class MV2D(pl.LightningModule):
     
     def training_step(self, batch, batch_idx):
         if not ('3d' in batch or '2d' in batch):
-            batch = {'3d': batch}
+            if 'is_2d' in batch and batch['is_2d'][0]:
+                batch = {'2d': batch}
+            else:
+                batch = {'3d': batch}
+                
+        def append_mode_to_loss(outputs, mode):
+            for k in list(outputs.keys()):
+                if "_loss" in k or k in {"loss", "loss_2d"}:
+                    outputs[f'Loss_{mode}/{k}'] = outputs.pop(k)
+            return outputs
             
-        outputs = {}
+        outputs = {'loss': 0}
         if '3d' in batch:
             with Timer("train_3d_step", enabled=self.timing):
-                outputs_3d = self.train_3d_step(batch['3d'], batch_idx)
-                outputs.update(outputs_3d)
+                for mode in self.train_3d_modes:
+                    outputs_3d = self.train_3d_step(batch['3d'], batch_idx, mode=mode)
+                    outputs['loss'] += outputs_3d['loss']
+                    append_mode_to_loss(outputs_3d, mode)
+                    outputs.update(outputs_3d)
+                    
         
         start_2d_training_steps = self.model_cfg.get("start_2d_training_steps", 0)
         if '2d' in batch and self.trainer.global_step >= start_2d_training_steps:
             with Timer("train_2d_step", enabled=self.timing):
-                outputs_2d = self.train_2d_step(batch['2d'], batch_idx)
-                if 'loss_2d' in outputs_2d:
+                for mode in self.train_2d_modes:
+                    outputs_2d = self.train_2d_step(batch['2d'], batch_idx, mode=mode)
                     outputs['loss'] += outputs_2d['loss_2d']
-                else:
-                    outputs['loss'] = outputs_2d['loss']
-                outputs.update(outputs_2d)
+                    append_mode_to_loss(outputs_2d, mode)
+                    outputs.update(outputs_2d)
 
         # Log
         log_kwargs = {
@@ -119,11 +147,11 @@ class MV2D(pl.LightningModule):
         self.log("train/loss", outputs["loss"], **log_kwargs)
         for k, v in outputs.items():
             if "_loss" in k:
-                self.log(f"train/{k}", v, **log_kwargs)
+                self.log(f"{k}", v, **log_kwargs)
                 
         return outputs
 
-    def train_3d_step(self, batch, batch_idx):
+    def train_3d_step(self, batch, batch_idx, mode):
         B, F = batch["smpl_params_c"]["body_pose"].shape[:2]
 
         # Create augmented noisy-obs : gt_j3d(coco17)
@@ -248,7 +276,7 @@ class MV2D(pl.LightningModule):
 
         return outputs
     
-    def train_2d_step(self, batch, batch_idx):
+    def train_2d_step(self, batch, batch_idx, mode):
         B = batch["obs_kp2d"].shape[0]
         obs_kp2d = batch['obs_kp2d'].squeeze(2)
         conf = batch['conf']
@@ -275,21 +303,35 @@ class MV2D(pl.LightningModule):
         if 'mask_cfg' in self.model_cfg:
             mask = self.generate_mask(self.model_cfg.mask_cfg, j2d_visible_mask, batch["length"])
             j2d_visible_mask = j2d_visible_mask & mask
-        obs_kp2d = torch.cat([obs_kp2d, j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
-        obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
-        obs[~batch["mask"]] = 0
-        batch["obs"] = obs
         
-        # vis_ind = 0
-        # mv2d_norm = obs.unsqueeze(2)
-        # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
-        # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/2d_test_noisy.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
-        # mv2d_norm = batch["orig_obs"].unsqueeze(2)
-        # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
-        # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/2d_test_obs.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
+        if mode == 'sv-diffusion':  #single view diffusion
+            diffusion = self.train_diffusion
+            t, t_weights = self.schedule_sampler.sample(B, obs_kp2d.device)
+            scaled_t = diffusion._scale_timesteps(t)
+            x_start = batch["orig_obs"][..., :2]
+            noise = torch.randn_like(x_start)
+            x_t = diffusion.q_sample(x_start, t, noise=noise)
+            x_t = torch.cat([x_t, batch["orig_obs"][..., [-1]]], dim=-1)
+            batch['obs_x_t'] = x_t
+            batch["obs_x_t"][~batch["mask"]] = 0
+            batch['scaled_t'] = scaled_t
+            outputs = self.pipeline.forward_singleview_diffusion(batch, train=True, global_step=self.trainer.global_step)
+        elif mode in {'regression'}:
+            obs_kp2d = torch.cat([obs_kp2d, j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
+            obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
+            obs[~batch["mask"]] = 0
+            batch["obs"] = obs
+            
+            # vis_ind = 0
+            # mv2d_norm = obs.unsqueeze(2)
+            # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
+            # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/2d_test_noisy.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
+            # mv2d_norm = batch["orig_obs"].unsqueeze(2)
+            # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
+            # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/2d_test_obs.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
 
-        # Forward and get loss
-        outputs = self.pipeline.forward_2d(batch, train=True, global_step=self.trainer.global_step)
+            # Forward and get loss
+            outputs = self.pipeline.forward_2d(batch, train=True, global_step=self.trainer.global_step)
 
         return outputs
     

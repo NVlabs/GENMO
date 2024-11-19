@@ -313,6 +313,39 @@ class Pipeline(nn.Module):
         outputs["loss_2d"] = total_loss
         return outputs
     
+    def forward_singleview_diffusion(self, inputs, train=False, global_step=0):
+        length = inputs["length"]  # (B,) effective length of each sample
+        device = inputs["obs_x_t"].device
+        B, L = inputs["obs_x_t"].shape[:2]
+        outputs = {'batch_size': B}
+
+        # input view generation
+        f_condition = {
+            "f_imgseq": inputs.get("f_imgseq", torch.zeros(B, L, 1024).to(device)),
+        }
+        if train:
+            f_condition = randomly_set_null_condition(f_condition, 0.1)
+        f_condition["obs_x_t"] = inputs["obs_x_t"]  # (B, L, J, 3)
+        f_condition["t"] = inputs["scaled_t"]  # (B, L, J, 3)
+        model_output = self.denoiser3d.forward_singleview(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
+        outputs.update({"2d_model_output": model_output})
+
+        # ========== Compute Loss ========== #
+        total_loss = 0
+        mask = inputs["mask"]
+        
+        if self.weights.singleview_2d > 0.0:
+            singleview_target = inputs["orig_obs"]
+            singleview_pred = model_output["singleview_2d"]
+            singleview_2d_loss = F.mse_loss(singleview_pred, singleview_target[..., :2], reduction="none")
+            singleview_2d_loss *= singleview_target[..., [2]]
+            singleview_2d_loss = (singleview_2d_loss * mask[..., None, None]).mean()
+            total_loss += self.weights.singleview_2d * singleview_2d_loss
+            outputs["singleview_2d_loss"] = singleview_2d_loss
+        
+        outputs["loss_2d"] = total_loss
+        return outputs
+    
     def transfer_network_weights_to_copy(self):
         device = next(self.denoiser3d.parameters()).device
         if next(self.denoiser3d_copy[0].parameters()).device != device:
