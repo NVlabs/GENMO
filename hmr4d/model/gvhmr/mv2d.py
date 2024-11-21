@@ -172,41 +172,6 @@ class MV2D(pl.LightningModule):
         else:
             mask_bbx_xys = batch["mask"]["bbx_xys"]
             batch["bbx_xys"][~mask_bbx_xys] = bbx_xys[~mask_bbx_xys]
-        if False:  # visualize bbx_xys from an iPhone view
-            render_w, render_h = 120, 160  # iphone main-lens 24mm 3:4
-            ratio = render_w / 1528
-            offset = torch.tensor([764 - 500, 1019 - 500]).to(i_x2d)
-            i_x2d_render = (i_x2d + offset).clone()
-            i_x2d_render = (i_x2d_render * ratio).long().clone()
-            torch.clamp_(i_x2d_render[..., 0], 0, render_w - 1)
-            torch.clamp_(i_x2d_render[..., 1], 0, render_h - 1)
-            bbx_xys_render = bbx_xys.clone()
-            bbx_xys_render[..., :2] += offset
-            bbx_xys_render *= ratio
-
-            output_dir = Path("outputs/simulated_bbx_xys")
-            output_dir.mkdir(parents=True, exist_ok=True)
-            video_list = []
-            for bid in range(B):
-                images = torch.zeros(F, render_h, render_w, 3, device=i_x2d.device)
-                for fid in range(F):
-                    images[fid, i_x2d_render[bid, fid, :, 1], i_x2d_render[bid, fid, :, 0]] = 255
-
-                images = draw_bbx_xys_on_image_batch(bbx_xys_render[bid].cpu().numpy(), images.cpu().numpy())
-                images = np.stack(images).astype("uint8")  # (L, H, W, 3)
-                images[:, 0, :] = np.array([255, 255, 255])
-                images[:, -1, :] = np.array([255, 255, 255])
-                images[:, :, 0] = np.array([255, 255, 255])
-                images[:, :, -1] = np.array([255, 255, 255])
-                video_list.append(images)
-
-            # stack videos
-            video_output = []
-            for i in range(0, len(video_list), 4):
-                if i + 4 <= len(video_list):
-                    video_output.append(np.concatenate(video_list[i : i + 4], axis=2))
-            video_output = np.concatenate(video_output, axis=1)
-            save_video(video_output, output_dir / f"{batch_idx}.mp4", fps=30, quality=5)
 
         # noisy_j3d -> project to i_j2d -> compute a bbx -> normalized kp2d [-1, 1]
         
@@ -317,10 +282,6 @@ class MV2D(pl.LightningModule):
             batch["obs_x_t"][~batch["mask"]] = 0
             batch['scaled_t'] = scaled_t
             outputs = self.pipeline.forward_singleview_diffusion(batch, train=True, global_step=self.trainer.global_step)
-            # vis_ind = 0
-            # mv2d_norm = batch["orig_obs"].unsqueeze(2)
-            # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
-            # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/2d_test_obs.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
         elif mode in {'regression'}:
             obs_kp2d = torch.cat([obs_kp2d, j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
             obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
@@ -361,34 +322,59 @@ class MV2D(pl.LightningModule):
         return mask
     
     def infer_diffusion(self, batch):
-        obs_shape = batch["obs"].shape
+        obs_shape = batch["obs"][..., :2].shape
         B, L = obs_shape[:2]
+        device = batch["obs"].device
         
         cond = {
             "length": batch["length"],
-            "f_imgseq": batch.get("f_imgseq", torch.zeros(B, L, 1024).to(batch["obs"].device)),
-            "reshape": True
+            "f_imgseq": batch.get("f_imgseq", torch.zeros(B, L, 1024).to(device)),
+            "reshape": False
         }
         
         diffusion = self.test_diffusion
         diff_sampler = self.model_cfg.diffusion.get("sampler", "ddim")
+        ddim_eta = self.model_cfg.diffusion.get("ddim_eta", 0.0)
         if diff_sampler == "ddim":
             sample_fn = diffusion.ddim_sample_loop
-            kwargs = {"eta": self.model_cfg.diffusion.ddim_eta}
+            kwargs = {"eta": ddim_eta}
         else:
             sample_fn = diffusion.p_sample_loop
             kwargs = {}
-        samples = sample_fn(
+        # samples = sample_fn(
+        #     self.pipeline.denoiser3d.get_denoiser(),
+        #     (obs_shape[0], obs_shape[2]*2, 1, obs_shape[1]),
+        #     clip_denoised=False,
+        #     model_kwargs=cond,
+        #     noise=None,
+        #     progress=True,
+        #     device=device,
+        #     **kwargs,
+        # )
+        # samples = samples.reshape(samples.shape[0], -1, 2, samples.shape[-1]).permute(0, 3, 1, 2)
+        x_t = torch.randn(*obs_shape, device=device)
+        samples2 = sample_fn(
             self.pipeline.denoiser3d.get_denoiser(),
-            (obs_shape[0], obs_shape[2]*2, 1, obs_shape[1]),
+            obs_shape,
             clip_denoised=False,
             model_kwargs=cond,
-            noise=None,
+            noise=x_t,
             progress=True,
-            device=batch["obs"].device,
+            device=device,
             **kwargs,
         )
-        samples = samples.reshape(samples.shape[0], -1, 2, samples.shape[-1]).permute(0, 3, 1, 2)
+        
+        """ Diffusion Loop """
+        indices = list(range(diffusion.num_timesteps))[::-1]
+        denoiser = self.pipeline.denoiser3d.get_denoiser()
+        for t in indices:
+            t = torch.tensor([t] * obs_shape[0], device=device)
+            out = diffusion.p_mean_variance(denoiser, x_t, t, model_kwargs=cond, clip_denoised=False)
+            x0 = out["pred_xstart"]
+            res = diffusion.ddim_get_xt(x_t, t=t, pred_xstart=x0, eta=ddim_eta)
+            x_t = res["x_t-1"]
+        samples = x_t
+        
         outputs = {
             'diffusion': {
                 'kp2d': samples,

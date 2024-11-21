@@ -1374,7 +1374,9 @@ class GaussianDiffusion:
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
         )  # no noise when t == 0
         std = nonzero_mask * sigma
-        return {"x_t-1_mean": mean_pred, "std": std}
+        noise = th.randn_like(x)
+        x_t_1 = mean_pred + std * noise
+        return {"x_t-1": x_t_1, "x_t-1_mean": mean_pred, "std": std}
 
     def ddim_sample_with_grad(
         self,
