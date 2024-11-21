@@ -49,7 +49,7 @@ class Vis2D(pl.Callback):
         
     def log_2d(self, trainer, pl_module, batch_idx, results):
         mv2d = results['mv2d']
-        input_view_id = results['input_view_id']
+        input_view_id = results.get('input_view_id', None)
         for ind in range(mv2d.shape[0]):
             vid_file = f'out/video/vis_2d/b{batch_idx:03d}_i{ind:02d}.mp4'
             os.makedirs(os.path.dirname(vid_file), exist_ok=True)
@@ -58,16 +58,20 @@ class Vis2D(pl.Callback):
             # create blank image
             for t in range(mv2d.shape[1]):
                 mv_imgs = []
-                obs_img = draw_mv_imgs(results['obs'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True, highlight_view=input_view_id)
-                mv_imgs.append(obs_img)
-                # mv2d_proj = draw_mv_imgs(results['mv2d_proj'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True)
-                # mv_imgs.append(mv2d_proj)
+                if 'obs' in results:
+                    obs_img = draw_mv_imgs(results['obs'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True, highlight_view=input_view_id)
+                    mv_imgs.append(obs_img)
+                if 'mv2d_proj' in results:
+                    mv2d_proj = draw_mv_imgs(results['mv2d_proj'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True)
+                    mv_imgs.append(mv2d_proj)
                 mv2d_img = draw_mv_imgs(mv2d[ind, t].cpu(), coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True)
                 mv_imgs.append(mv2d_img)
-                mv2d_shuffle_img = draw_mv_imgs(results['mv2d_shuffle'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True, highlight_view=input_view_id)
-                mv_imgs.append(mv2d_shuffle_img)
-                mv2d_sv_img = draw_mv_imgs(results['mv2d_sv'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True, highlight_view=input_view_id)
-                mv_imgs.append(mv2d_sv_img)
+                if 'mv2d_shuffle' in results:
+                    mv2d_shuffle_img = draw_mv_imgs(results['mv2d_shuffle'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True, highlight_view=input_view_id)
+                    mv_imgs.append(mv2d_shuffle_img)
+                if 'mv2d_sv' in results:
+                    mv2d_sv_img = draw_mv_imgs(results['mv2d_sv'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True, highlight_view=input_view_id)
+                    mv_imgs.append(mv2d_sv_img)
                 mv_imgs = np.concatenate(mv_imgs, axis=0)
 
                 if trainer.global_rank == 0:
@@ -88,20 +92,28 @@ class Vis2D(pl.Callback):
         dataset_id = batch["meta"][0]["dataset_id"]
         if 'is_2d' not in batch or not batch['is_2d'][0]:
             return
-        input_view_id = outputs['2d_model_output']['input_view_id']
-        obs = outputs["batch"]["obs"]
-        orig_obs = outputs["batch"]["orig_obs"]
-        obs = torch.stack([obs, torch.zeros_like(obs), torch.zeros_like(obs), torch.zeros_like(obs)], dim=2)
-        obs[:, :, input_view_id] = orig_obs
-        results = {
-            'obs': obs,
-            'mv2d': outputs['2d_model_output']['mv2d'],
-            'mv2d_shuffle': outputs['2d_model_output']['mv2d_shuffle'],
-            'mv2d_sv': outputs['2d_model_output_sv']['mv2d'],
-            'input_view_id': input_view_id,
-            # 'mv2d_proj': outputs['2d_model_output']['mv2d_proj'],
-        }
-        self.log_2d(trainer, pl_module, batch_idx, results)
+        
+        if '2d_model_output' in outputs:
+            input_view_id = outputs['2d_model_output']['input_view_id']
+            obs = outputs["batch"]["obs"]
+            orig_obs = outputs["batch"]["orig_obs"]
+            obs = torch.stack([obs, torch.zeros_like(obs), torch.zeros_like(obs), torch.zeros_like(obs)], dim=2)
+            obs[:, :, input_view_id] = orig_obs
+            results = {
+                'obs': obs,
+                'mv2d': outputs['2d_model_output']['mv2d'],
+                'mv2d_shuffle': outputs['2d_model_output']['mv2d_shuffle'],
+                'mv2d_sv': outputs['2d_model_output_sv']['mv2d'],
+                'input_view_id': input_view_id,
+                # 'mv2d_proj': outputs['2d_model_output']['mv2d_proj'],
+            }
+            self.log_2d(trainer, pl_module, batch_idx, results)
+        elif 'diffusion' in outputs:
+            results = {
+                'mv2d': outputs['diffusion']['kp2d'].unsqueeze(2).repeat(1, 1, 4, 1, 1),
+            }
+            self.log_2d(trainer, pl_module, batch_idx, results)
+            
         
         if dist.is_initialized():
             dist.barrier()

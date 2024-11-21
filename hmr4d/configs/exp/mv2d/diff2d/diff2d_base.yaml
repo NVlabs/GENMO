@@ -37,6 +37,7 @@ data_name: mocap_mixed_v1
 
 model_cfg:
     train_2d_modes: ["sv-diffusion"]
+    infer_mode: "diffusion"
     num_views: 4
     start_2d_training_steps: 0
     noisy_2d_obs: true

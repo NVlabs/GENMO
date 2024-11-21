@@ -237,14 +237,11 @@ class NetworkEncoderRoPE(nn.Module):
             f_cam_angvel: (B, L, 6), Camera angular velocity
         """
         B, L, J, C = obs_x_t.shape
-        assert J == 17 and C == 3
+        assert J == 17
 
         # Main token from observation (2D pose)
         obs = obs_x_t.clone()
-        visible_mask = obs[..., [2]] > 0.5  # (B, L, J, 1)
-        obs[~visible_mask[..., 0]] = 0  # set low-conf to all zeros
         f_obs = self.learned_pos_linear(obs[..., :2])  # (B, L, J, 32)
-        f_obs = f_obs * visible_mask + self.learned_pos_params.repeat(B, L, 1, 1) * ~visible_mask
         x = self.embed_noisyobs(f_obs.view(B, L, -1))  # (B, L, J*32) -> (B, L, C)
         
         emb = self.embed_timestep(t)  # [1, bs, d]
@@ -286,6 +283,18 @@ class NetworkEncoderRoPE(nn.Module):
             "singleview_2d": singleview_2d,
         }
         return output
+    
+    def get_denoiser(self):
+        def denoiser(x, t, reshape=False, **kwargs):
+            if reshape:
+                shape = x.shape
+                x = x.view(shape[0], -1, 2, shape[-1]).permute(0, 3, 1, 2)
+            res = self.forward_singleview(obs_x_t=x, t=t, **kwargs)
+            x0 = res["singleview_2d"]
+            if reshape:
+                x0 = x0.permute(0, 2, 3, 1).view(shape)
+            return x0
+        return denoiser
 
 
 # Add to MainStore

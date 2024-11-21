@@ -54,6 +54,7 @@ class MV2D(pl.LightningModule):
         self.enable_test_time_opt = model_cfg.get("enable_test_time_opt", False)
         self.train_3d_modes = model_cfg.get("train_3d_modes", ["regression"])
         self.train_2d_modes = model_cfg.get("train_2d_modes", ["regression"])
+        self.infer_mode = model_cfg.get("infer_mode", "regression")
         if isinstance(self.train_3d_modes, str):
             self.train_3d_modes = [self.train_3d_modes]
         if isinstance(self.train_2d_modes, str):
@@ -316,6 +317,10 @@ class MV2D(pl.LightningModule):
             batch["obs_x_t"][~batch["mask"]] = 0
             batch['scaled_t'] = scaled_t
             outputs = self.pipeline.forward_singleview_diffusion(batch, train=True, global_step=self.trainer.global_step)
+            # vis_ind = 0
+            # mv2d_norm = batch["orig_obs"].unsqueeze(2)
+            # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
+            # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/2d_test_obs.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
         elif mode in {'regression'}:
             obs_kp2d = torch.cat([obs_kp2d, j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
             obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
@@ -354,6 +359,41 @@ class MV2D(pl.LightningModule):
                     mask[i, drop_start:drop_start+drop_len] = False
                     # print(f"Drop {i} {drop_start} {drop_len}")
         return mask
+    
+    def infer_diffusion(self, batch):
+        obs_shape = batch["obs"].shape
+        
+        cond = {
+            "length": batch["length"],
+            "reshape": True
+        }
+        
+        diffusion = self.test_diffusion
+        diff_sampler = self.model_cfg.diffusion.get("sampler", "ddim")
+        if diff_sampler == "ddim":
+            sample_fn = diffusion.ddim_sample_loop
+            kwargs = {"eta": self.model_cfg.diffusion.ddim_eta}
+        else:
+            sample_fn = diffusion.p_sample_loop
+            kwargs = {}
+        samples = sample_fn(
+            self.pipeline.denoiser3d.get_denoiser(),
+            (obs_shape[0], obs_shape[2]*2, 1, obs_shape[1]),
+            clip_denoised=False,
+            model_kwargs=cond,
+            noise=None,
+            progress=True,
+            device=batch["obs"].device,
+            **kwargs,
+        )
+        samples = samples.reshape(samples.shape[0], -1, 2, samples.shape[-1]).permute(0, 3, 1, 2)
+        outputs = {
+            'diffusion': {
+                'kp2d': samples,
+            }
+        }
+        return outputs
+
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         if 'is_2d' in batch and batch['is_2d'][0]:
@@ -403,7 +443,10 @@ class MV2D(pl.LightningModule):
         # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/2d_test_obs.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
 
         # Forward and get loss
-        outputs = self.pipeline.forward_2d(batch, train=False, global_step=self.trainer.global_step)
+        if self.infer_mode == 'regression':
+            outputs = self.pipeline.forward_2d(batch, train=False, global_step=self.trainer.global_step)
+        else:
+            outputs = self.infer_diffusion(batch)
         outputs["batch"] = batch
         outputs['vis_2d'] = self.model_cfg.get("vis_2d", False)
         return outputs

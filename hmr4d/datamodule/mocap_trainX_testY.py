@@ -31,7 +31,7 @@ def collate_fn(batch):
 
 
 class DataModule(pl.LightningDataModule):
-    def __init__(self, dataset_opts: DictConfig, loader_opts: DictConfig, limit_each_trainset=None, train_subset_ratio=None):
+    def __init__(self, dataset_opts: DictConfig, loader_opts: DictConfig, limit_each_trainset=None, train_subset_ratio=None, train_2d_only=False):
         """This is a general datamodule that can be used for any dataset.
         Train uses ConcatDataset
         Val and Test use CombinedLoader, sequential, completely consumes ecah iterable sequentially, and returns a triplet (data, idx, iterable_idx)
@@ -45,6 +45,7 @@ class DataModule(pl.LightningDataModule):
         self.loader_opts = loader_opts
         self.limit_each_trainset = limit_each_trainset
         self.train_subset_ratio = train_subset_ratio
+        self.train_2d_only = train_2d_only
 
         # Train uses concat dataset
         if "train" in dataset_opts:
