@@ -362,9 +362,11 @@ class MV2D(pl.LightningModule):
     
     def infer_diffusion(self, batch):
         obs_shape = batch["obs"].shape
+        B, L = obs_shape[:2]
         
         cond = {
             "length": batch["length"],
+            "f_imgseq": batch.get("f_imgseq", torch.zeros(B, L, 1024).to(batch["obs"].device)),
             "reshape": True
         }
         
