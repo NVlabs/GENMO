@@ -327,6 +327,11 @@ class MV2D(pl.LightningModule):
         kp2d = kp2d - center
         return kp2d
     
+    def norm_kp2d(self, kp2d):
+        bbox = get_bbx_xys(kp2d, do_augment=False)
+        kp2d_norm = normalize_kp2d(kp2d, bbox)
+        return kp2d_norm
+    
     def infer_diffusion(self, batch):
         obs_shape = batch["obs"][..., :2].shape
         B, L = obs_shape[:2]
@@ -361,8 +366,7 @@ class MV2D(pl.LightningModule):
         j3d = torch.load('out/j3d.pth')[:, :120]
         cam_dict = generate_cam(cam_params, self.num_views)
         mv2d_proj = project_keypoints(j3d, cam_dict['P'], 1024)
-        bbox = get_bbx_xys(mv2d_proj, do_augment=False)
-        mv2d_norm = normalize_kp2d(mv2d_proj, bbox)  # (B, L, J, 3)
+        mv2d_norm = self.norm_kp2d(mv2d_proj)
         mv2d_norm = self.center_kp2d(mv2d_norm)
         j3d_recon, mv2d_recon = recon_from_2d(mv2d_norm, cam_dict['P'], 1024, 1024)
         # mv2d_recon2, _ = recon_from_2d(mv2d_recon, cam_dict['P'], 1024, 1024)
