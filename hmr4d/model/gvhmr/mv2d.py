@@ -30,7 +30,7 @@ from motiondiff.utils.tools import Timer
 from motiondiff.models.model_util import create_gaussian_diffusion
 from motiondiff.models.common.cfg_sampler import ClassifierFreeSampleModel
 from motiondiff.diffusion.resample import create_named_schedule_sampler
-from .utils.mv2d_utils import draw_motion_2d, coco_joint_parents
+from .utils.mv2d_utils import draw_motion_2d, coco_joint_parents, generate_cam, project_keypoints, recon_from_2d
 
 
 
@@ -69,7 +69,8 @@ class MV2D(pl.LightningModule):
 
         # SMPLX
         self.smplx = make_smplx("supermotion_v437coco17")
-        self.init_diffusion()
+        if 'diffusion' in model_cfg:
+            self.init_diffusion()
         
     def init_diffusion(self):
         self.train_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=True)
@@ -321,63 +322,70 @@ class MV2D(pl.LightningModule):
                     # print(f"Drop {i} {drop_start} {drop_len}")
         return mask
     
+    def center_kp2d(self, kp2d):
+        center = (kp2d[..., [11], :] + kp2d[..., [12], :]) / 2
+        kp2d = kp2d - center
+        return kp2d
+    
     def infer_diffusion(self, batch):
         obs_shape = batch["obs"][..., :2].shape
         B, L = obs_shape[:2]
         device = batch["obs"].device
         
-        cond = {
-            "length": batch["length"],
-            "f_imgseq": batch.get("f_imgseq", torch.zeros(B, L, 1024).to(device)),
-            "reshape": False
-        }
-        
         diffusion = self.test_diffusion
         diff_sampler = self.model_cfg.diffusion.get("sampler", "ddim")
         ddim_eta = self.model_cfg.diffusion.get("ddim_eta", 0.0)
-        if diff_sampler == "ddim":
-            sample_fn = diffusion.ddim_sample_loop
-            kwargs = {"eta": ddim_eta}
-        else:
-            sample_fn = diffusion.p_sample_loop
-            kwargs = {}
-        # samples = sample_fn(
-        #     self.pipeline.denoiser3d.get_denoiser(),
-        #     (obs_shape[0], obs_shape[2]*2, 1, obs_shape[1]),
-        #     clip_denoised=False,
-        #     model_kwargs=cond,
-        #     noise=None,
-        #     progress=True,
-        #     device=device,
-        #     **kwargs,
-        # )
-        # samples = samples.reshape(samples.shape[0], -1, 2, samples.shape[-1]).permute(0, 3, 1, 2)
-        x_t = torch.randn(*obs_shape, device=device)
-        samples2 = sample_fn(
-            self.pipeline.denoiser3d.get_denoiser(),
-            obs_shape,
-            clip_denoised=False,
-            model_kwargs=cond,
-            noise=x_t,
-            progress=True,
-            device=device,
-            **kwargs,
-        )
-        
-        """ Diffusion Loop """
         indices = list(range(diffusion.num_timesteps))[::-1]
         denoiser = self.pipeline.denoiser3d.get_denoiser()
+        
+        """ Single View Diffusion Loop """
+        cond = {
+            "length": batch["length"],
+            "f_imgseq": batch.get("f_imgseq", torch.zeros(B, L, 1024).to(device)),
+        }
+        x_t = torch.randn(*obs_shape, device=device)
         for t in indices:
-            t = torch.tensor([t] * obs_shape[0], device=device)
+            t = torch.tensor([t] * x_t.shape[0], device=device)
             out = diffusion.p_mean_variance(denoiser, x_t, t, model_kwargs=cond, clip_denoised=False)
             x0 = out["pred_xstart"]
             res = diffusion.ddim_get_xt(x_t, t=t, pred_xstart=x0, eta=ddim_eta)
             x_t = res["x_t-1"]
-        samples = x_t
+        kp2d = x_t
+        
+        """ Multi View Diffusion Loop """
+        cam_params = {
+            "elevations": torch.zeros(B, L).to(device),
+            "tilt": torch.zeros(B, L).to(device),
+            "radius": torch.ones(B, L).to(device) * 8,
+        }
+        j3d = torch.load('out/j3d.pth')[:, :120]
+        cam_dict = generate_cam(cam_params, self.num_views)
+        mv2d_proj = project_keypoints(j3d, cam_dict['P'], 1024)
+        bbox = get_bbx_xys(mv2d_proj, do_augment=False)
+        mv2d_norm = normalize_kp2d(mv2d_proj, bbox)  # (B, L, J, 3)
+        mv2d_norm = self.center_kp2d(mv2d_norm)
+        j3d_recon, mv2d_recon = recon_from_2d(mv2d_norm, cam_dict['P'], 1024, 1024)
+        # mv2d_recon2, _ = recon_from_2d(mv2d_recon, cam_dict['P'], 1024, 1024)
+        
+        cond = {
+            "length": batch["length"].repeat_interleave(self.num_views, dim=0),
+            "f_imgseq": batch.get("f_imgseq", torch.zeros(B, L, 1024).to(device)).repeat_interleave(self.num_views, dim=0),
+        }
+        x_t = torch.randn(obs_shape[0] * self.num_views, *obs_shape[1:], device=device)
+        for t in indices:
+            t = torch.tensor([t] * x_t.shape[0], device=device)
+            out = diffusion.p_mean_variance(denoiser, x_t, t, model_kwargs=cond, clip_denoised=False)
+            x0 = out["pred_xstart"]
+            res = diffusion.ddim_get_xt(x_t, t=t, pred_xstart=x0, eta=ddim_eta)
+            x_t = res["x_t-1"]
+        mv2d = x_t
         
         outputs = {
             'diffusion': {
-                'kp2d': samples,
+                'kp2d': kp2d,
+                'mv2d': mv2d.reshape(-1, self.num_views, *mv2d.shape[1:]).permute(0, 2, 1, 3, 4),
+                'mv2d_proj': mv2d_norm,
+                'mv2d_recon': mv2d_recon
             }
         }
         return outputs

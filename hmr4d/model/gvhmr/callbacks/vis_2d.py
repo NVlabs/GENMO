@@ -58,20 +58,10 @@ class Vis2D(pl.Callback):
             # create blank image
             for t in range(mv2d.shape[1]):
                 mv_imgs = []
-                if 'obs' in results:
-                    obs_img = draw_mv_imgs(results['obs'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True, highlight_view=input_view_id)
-                    mv_imgs.append(obs_img)
-                if 'mv2d_proj' in results:
-                    mv2d_proj = draw_mv_imgs(results['mv2d_proj'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True)
+                for key in results:
+                    highlight_view = input_view_id if key in {'obs', 'mv2d_shuffle', 'mv2d_sv'} else None
+                    mv2d_proj = draw_mv_imgs(results[key][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True, highlight_view=highlight_view)
                     mv_imgs.append(mv2d_proj)
-                mv2d_img = draw_mv_imgs(mv2d[ind, t].cpu(), coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True)
-                mv_imgs.append(mv2d_img)
-                if 'mv2d_shuffle' in results:
-                    mv2d_shuffle_img = draw_mv_imgs(results['mv2d_shuffle'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True, highlight_view=input_view_id)
-                    mv_imgs.append(mv2d_shuffle_img)
-                if 'mv2d_sv' in results:
-                    mv2d_sv_img = draw_mv_imgs(results['mv2d_sv'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True, highlight_view=input_view_id)
-                    mv_imgs.append(mv2d_sv_img)
                 mv_imgs = np.concatenate(mv_imgs, axis=0)
 
                 if trainer.global_rank == 0:
@@ -109,9 +99,8 @@ class Vis2D(pl.Callback):
             }
             self.log_2d(trainer, pl_module, batch_idx, results)
         elif 'diffusion' in outputs:
-            results = {
-                'mv2d': outputs['diffusion']['kp2d'].unsqueeze(2).repeat(1, 1, 4, 1, 1),
-            }
+            results = outputs['diffusion']
+            results['kp2d'] = results['kp2d'].unsqueeze(2).repeat(1, 1, 4, 1, 1)
             self.log_2d(trainer, pl_module, batch_idx, results)
             
         

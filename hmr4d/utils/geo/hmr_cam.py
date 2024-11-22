@@ -186,7 +186,6 @@ def normalize_kp2d(obs_kp2d, bbx_xys, clamp_scale_min=False):
         obs: (B, L, J, 3)  [x, y, c]
     """
     obs_xy = obs_kp2d[..., :2]  # (B, L, J, 2)
-    obs_conf = obs_kp2d[..., 2]  # (B, L, J)
     center = bbx_xys[..., :2]
     scale = bbx_xys[..., [2]]
 
@@ -199,12 +198,16 @@ def normalize_kp2d(obs_kp2d, bbx_xys, clamp_scale_min=False):
         + (obs_xy[..., 1] < xy_min[..., None, 1])
         + (obs_xy[..., 1] > xy_max[..., None, 1])
     )
-    obs_conf = obs_conf * ~invisible_mask
     if clamp_scale_min:
         scale = scale.clamp(min=1e-5)
     normalized_obs_xy = 2 * (obs_xy - center.unsqueeze(-2)) / scale.unsqueeze(-2)
 
-    return torch.cat([normalized_obs_xy, obs_conf[..., None]], dim=-1)
+    if obs_kp2d.shape[-1] > 2:
+        obs_conf = obs_kp2d[..., 2]  # (B, L, J)
+        obs_conf = obs_conf * ~invisible_mask
+        return torch.cat([normalized_obs_xy, obs_conf[..., None]], dim=-1)
+    else:
+        return normalized_obs_xy
 
 
 def unnormalize_kp2d(kp2d, bbx_xys, K_fullimg):
