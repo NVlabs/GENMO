@@ -46,7 +46,7 @@ def train(cfg: DictConfig) -> None:
     """Train/Test"""
     Log.info(f"[Exp Name]: {cfg.exp_name}")
     # use total batch size
-    # cfg.data.loader_opts.train.batch_size = cfg.data.loader_opts.train.batch_size // cfg.pl_trainer.devices   # don't use total batch size
+    cfg.data.loader_opts.train.batch_size = cfg.data.loader_opts.train.batch_size // cfg.pl_trainer.devices   # don't use total batch size
     if cfg.task == "fit":
         Log.info(f"[GPU x Batch] = {cfg.pl_trainer.devices} x {cfg.data.loader_opts.train.batch_size}")
     if 'bones_2d' in cfg.test_datasets:

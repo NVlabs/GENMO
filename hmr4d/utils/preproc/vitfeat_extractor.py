@@ -1,6 +1,6 @@
 import torch
 from hmr4d.network.hmr2 import load_hmr2, HMR2
-
+from hmr4d.network.vimo import load_vimo, HMR_VIMO
 
 from hmr4d.utils.video_io_utils import read_video_np
 import cv2
@@ -57,6 +57,21 @@ def get_batch(input_path, bbx_xys, img_ds=0.5, img_dst_size=256, path_type="vide
     return imgs, bbx_xys
 
 
+def get_batch_vimo(input_path, bbx_xys, img_ds=0.5, img_dst_size=256, path_type="video"):
+    if path_type == "video":
+        imgs = read_video_np(input_path, scale=img_ds)
+    elif path_type == "image":
+        imgs = cv2.imread(str(input_path))[..., ::-1]
+        imgs = cv2.resize(imgs, (0, 0), fx=img_ds, fy=img_ds)
+        imgs = imgs[None]
+    elif path_type == "np":
+        assert isinstance(input_path, np.ndarray)
+        assert img_ds == 1.0  # this is safe
+        imgs = input_path
+
+    return imgs
+
+
 class Extractor:
     def __init__(self, tqdm_leave=True):
         self.extractor: HMR2 = load_hmr2().cuda().eval()
@@ -87,3 +102,33 @@ class Extractor:
 
         features = torch.cat(features, dim=0).clone()  # (F, 1024)
         return features
+
+
+class ExtractorVIMO:
+    def __init__(self, tqdm_leave=True):
+        self.extractor: HMR_VIMO = load_vimo().cuda().eval()
+        self.tqdm_leave = tqdm_leave
+
+    def extract_video_features(self, video_path, bbx_xys, calib, img_ds=0.5):
+        """
+        img_ds makes the image smaller, which is useful for faster processing
+        """
+        # Get the batch, imgs (B, H, W, 3)
+        if isinstance(video_path, str):
+            imgs = get_batch_vimo(video_path, bbx_xys, img_ds=img_ds)
+        else:
+            assert isinstance(video_path, torch.Tensor)
+            imgs = video_path
+
+        fx, fy, cx, cy = calib
+        img_focal = float(fx)
+        img_center = np.array([cx, cy])
+
+        cx, cy, s = bbx_xys.unbind(dim=-1)
+        bbx_xyxy = torch.stack((cx-s/2, cy-s/2, cx+s/2, cy+s/2), dim=-1)
+
+        boxes_ck = np.concatenate((bbx_xyxy, np.ones((bbx_xyxy.shape[0], 1))), axis=1)
+
+        pred_smpl = self.extractor.inference(imgs, boxes_ck, img_focal=img_focal, img_center=img_center)
+
+        return pred_smpl

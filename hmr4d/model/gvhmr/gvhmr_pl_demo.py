@@ -37,8 +37,12 @@ class DemoPL(pl.LightningModule):
             "f_imgseq": data["f_imgseq"][None],
         }
         batch = {k: v.cuda() for k, v in batch.items()}
+        if "vimo_smpl_params" in data:
+            batch["vimo_smpl_params"] = {k: v[None].cuda() for k, v in data["vimo_smpl_params"].items()}
+            batch["scales"] = data["scales"][None].cuda()
+            batch["mean_scale"] = torch.tensor(data["mean_scale"])[None].cuda()
         batch['meta'] = None
-        outputs = self.pipeline.forward(batch, train=False, postproc=True, static_cam=static_cam)
+        outputs = self.pipeline.forward(batch, train=False, postproc=False, static_cam=static_cam)
 
         pred = {
             "smpl_params_global": {k: v[0] for k, v in outputs["pred_smpl_params_global"].items()},

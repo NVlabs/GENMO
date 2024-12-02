@@ -60,7 +60,7 @@ class MetricMocap(pl.Callback):
         vid = batch["meta"][0]["vid"]
         seq_length = batch["length"][0].item()
         gender = batch["gender"][0]
-        T_w2c = batch["T_w2c"][0]
+        T_w2c = batch["gt_T_w2c"][0]
         mask = batch["mask"][0]
 
         # Groundtruth (cam)

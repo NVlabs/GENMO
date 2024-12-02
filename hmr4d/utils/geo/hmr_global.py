@@ -4,6 +4,31 @@ import hmr4d.utils.matrix as matrix
 from hmr4d.utils.net_utils import gaussian_smooth
 
 
+class KalmanFilter:
+    def __init__(self, initial_state, process_variance, measurement_variance, device):
+        self.state_estimate = initial_state.to(device)
+        self.estimate_covariance = torch.tensor(1.0).to(device)  # Initial estimate covariance
+        self.process_variance = process_variance
+        self.measurement_variance = measurement_variance
+
+    def predict(self):
+        # Predict the next state (here, we assume a constant model)
+        self.estimate_covariance += self.process_variance
+
+    def update(self, measurement):
+        # Compute Kalman Gain
+        kalman_gain = self.estimate_covariance / (self.estimate_covariance + self.measurement_variance)
+        
+        # Update the state estimate
+        self.state_estimate += kalman_gain * (measurement - self.state_estimate)
+        
+        # Update the estimate covariance
+        self.estimate_covariance *= (1 - kalman_gain)
+
+    def get_state(self):
+        return self.state_estimate
+
+
 def get_R_c2gv(R_w2c, axis_gravity_in_w=[0, 0, -1]):
     """
     Args:
@@ -345,7 +370,7 @@ def get_static_joint_mask(w_j3d, vel_thr=0.25, smooth=False, repeat_last=False):
     return static_joint_mask
 
 
-def estimate_camscale(smpl_param_c, smpl_param_w, T_w2c, offset):
+def estimate_camscale(smpl_param_c, smpl_param_w, T_w2c, offset, slam_scale, mean_scale):
     bs = T_w2c.shape[0]
     device = T_w2c.device
     # 1. align the camera view direction
@@ -375,15 +400,27 @@ def estimate_camscale(smpl_param_c, smpl_param_w, T_w2c, offset):
     est_t_c2w = (-est_R_w2c.mT @ est_t_w2c[..., None])[..., 0]
     slam_t_c2w = (-aligned_R_w2c.mT @ slam_t_w2c[..., None])[..., 0]
 
-    mu_est = est_t_c2w.mean(dim=0, keepdim=True)
-    mu_slam = slam_t_c2w.mean(dim=0, keepdim=True)
-    X1 = est_t_c2w - mu_est
-    X2 = slam_t_c2w - mu_slam
-    var1 = torch.sum(X1**2, dim=1).sum()
-    K = X1.mT @ X2
-    scale = torch.trace(K) / var1
+    est_t_c2w[:, 0] = gaussian_smooth(est_t_c2w[None, :, 0], sigma=5, dim=-1)[0]
+    est_t_c2w[:, 1] = gaussian_smooth(est_t_c2w[None, :, 1], sigma=5, dim=-1)[0]
+    est_t_c2w[:, 2] = gaussian_smooth(est_t_c2w[None, :, 2], sigma=5, dim=-1)[0]
 
-    scale[scale < 0] = 1.0
+    vel_est = est_t_c2w[1:] - est_t_c2w[:-1]
+    vel_slam = slam_t_c2w[1:] - slam_t_c2w[:-1]
+    scale_hmr_c2w = torch.sum(vel_est * vel_slam, dim=-1) / (torch.norm(vel_slam, dim=-1) * torch.norm(vel_slam, dim=-1))
+    # norm_vel_est = torch.norm(vel_est, dim=-1)
+    # norm_vel_slam = torch.norm(vel_slam, dim=-1)
+    # scale_hmr_c2w = (norm_vel_est / norm_vel_slam) * torch.sign(torch.sum(vel_est * vel_slam, dim=-1))
+
+    # mu_est = est_t_c2w.mean(dim=0, keepdim=True)
+    # mu_slam = slam_t_c2w.mean(dim=0, keepdim=True)
+    # X1 = est_t_c2w - mu_est
+    # X2 = slam_t_c2w - mu_slam
+    # var1 = torch.sum(X1**2, dim=1).sum()
+    # K = X1.mT @ X2
+    # scale = torch.trace(K) / var1
+
+    # scale[scale < 0] = 1.0
+    scale = 1
 
     if False:
         vel_est = est_t_c2w[1:] - est_t_c2w[:-1]
@@ -421,5 +458,6 @@ def estimate_camscale(smpl_param_c, smpl_param_w, T_w2c, offset):
 
     res_T_w2c = torch.eye(4)[None].repeat(bs, 1, 1).to(device)
     res_T_w2c[:, :3, :3] = aligned_R_w2c
+    # res_T_w2c[:, :3, :3] = est_R_w2c
     res_T_w2c[:, :3, 3] = aligned_t_w2c
-    return res_T_w2c
+    return res_T_w2c, scale_hmr_c2w

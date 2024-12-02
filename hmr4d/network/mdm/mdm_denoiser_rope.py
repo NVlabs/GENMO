@@ -105,17 +105,17 @@ class MDMDenoiserROPE(nn.Module):
             print("TRANS_ROPE init")
             mlp_ratio=4.0
 
-            self.seqTransEncoder = nn.ModuleList(
-                [
-                    EncoderRoPEBlock(
-                        self.latent_dim,
-                        self.num_heads,
-                        mlp_ratio=mlp_ratio,
-                        dropout=self.dropout,
-                    )
-                    for _ in range(self.num_layers)
-                ]
-            )
+            # self.seqTransEncoder = nn.ModuleList(
+            #     [
+            #         EncoderRoPEBlock(
+            #             self.latent_dim,
+            #             self.num_heads,
+            #             mlp_ratio=mlp_ratio,
+            #             dropout=self.dropout,
+            #         )
+            #         for _ in range(self.num_layers)
+            #     ]
+            # )
             self.seqTransEncoder_old = nn.ModuleList(
                 [
                     EncoderRoPEBlock_old(
@@ -144,8 +144,8 @@ class MDMDenoiserROPE(nn.Module):
                 # encoded_text = self.encode_text(text)
             self.output_orient = None
 
-        self.output_process = OutputProcess(self.data_rep, self.input_feats, self.latent_dim, self.njoints,
-                                            self.nfeats)
+        # self.output_process = OutputProcess(self.data_rep, self.input_feats, self.latent_dim, self.njoints,
+        #                                     self.nfeats)
 
         pred_cam_dim = 3
         static_conf_dim = 6
@@ -162,12 +162,12 @@ class MDMDenoiserROPE(nn.Module):
             nn.Dropout(dropout),
             zero_module(nn.Linear(self.latent_dim, self.latent_dim)),
         )
-        self.cam_vel_embedder = nn.Sequential(
-            nn.Linear(self.cam_vel_dim, self.latent_dim),
-            nn.SiLU(),
-            nn.Dropout(dropout),
-            zero_module(nn.Linear(self.latent_dim, self.latent_dim)),
-        )
+        # self.cam_vel_embedder = nn.Sequential(
+        #     nn.Linear(self.cam_vel_dim, self.latent_dim),
+        #     nn.SiLU(),
+        #     nn.Dropout(dropout),
+        #     zero_module(nn.Linear(self.latent_dim, self.latent_dim)),
+        # )
 
         if pretrained_checkpoint is not None:
             state_dict = torch.load(pretrained_checkpoint, map_location='cpu')

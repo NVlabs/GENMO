@@ -7,6 +7,7 @@ from einops import einsum, rearrange, repeat
 from hydra.utils import instantiate
 from hmr4d.utils.pylogger import Log
 from hmr4d.utils.net_utils import gaussian_smooth
+import math
 
 from hmr4d.model.gvhmr.utils.endecoder import EnDecoder
 from hmr4d.model.gvhmr.utils.postprocess import (
@@ -116,35 +117,63 @@ class Pipeline(nn.Module):
                 "transl": compute_transl_full_cam(model_output["pred_cam_init"], inputs["bbx_xys"], inputs["K_fullimg"]),
             }
         if not train:
-            # pred_smpl_params_global = get_smpl_params_w_Rt_v2(  # This function has for-loop
-            #     global_orient_gv=decode_dict["global_orient_gv"],
-            #     local_transl_vel=decode_dict["local_transl_vel"],
-            #     global_orient_c=decode_dict["global_orient"],
-            #     cam_angvel=inputs["cam_angvel"],
-            #     betas=decode_dict['betas'],
-            #     body_pose=decode_dict['body_pose']
-            # )
-            pred_smpl_params_global = get_smpl_params_w_Rt_v3(  # This function has for-loop
-                endecoder=self.endecoder,
-                global_orient_gv=decode_dict["global_orient_gv"],
-                local_transl_vel=decode_dict["local_transl_vel"],
-                local_transl_c=outputs["pred_smpl_params_incam"]["transl"],
-                global_orient_c=decode_dict["global_orient"],
-                offset=decode_dict["offset"],
-                cam_angvel=inputs["cam_angvel"],
-                cam_tvel=inputs["cam_tvel"],
-                slam_R_w2c=inputs["R_w2c"],
-                static_conf_logits=model_output['static_conf_logits'],
-                betas=decode_dict['betas'],
-                body_pose=decode_dict['body_pose'],
-                meta=inputs['meta']
-            )
-            outputs["pred_smpl_params_global"] = {
-                "body_pose": decode_dict["body_pose"],
-                "betas": decode_dict["betas"],
-                **pred_smpl_params_global,
-            }
-            outputs["static_conf_logits"] = model_output["static_conf_logits"]
+            if self.args.infer_version == 2:
+                pred_smpl_params_global = get_smpl_params_w_Rt_v2(  # This function has for-loop
+                    global_orient_gv=decode_dict["global_orient_gv"],
+                    local_transl_vel=decode_dict["local_transl_vel"],
+                    global_orient_c=decode_dict["global_orient"],
+                    cam_angvel=inputs["cam_angvel"],
+                    betas=decode_dict['betas'],
+                    body_pose=decode_dict['body_pose']
+                )
+            elif self.args.infer_version == 3:
+                if 'vimo_smpl_params' in inputs:
+                    vimo_smpl_params = inputs['vimo_smpl_params']
+                    transl_c = vimo_smpl_params["pred_trans_c"].squeeze(2)
+                    # transl_c = outputs["pred_smpl_params_incam"]["transl"]
+                    slam_scales = inputs["scales"]
+                    mean_scale = inputs['mean_scale']
+                    std_slam_scales = slam_scales.std(dim=-1, keepdim=True)
+                    conf_scales = (slam_scales - mean_scale).abs() < std_slam_scales
+                else:
+                    transl_c = outputs["pred_smpl_params_incam"]["transl"]
+                    conf_scales = None
+
+                if 'cam_angvel' in self.args.outputs:
+                    cam_angvel = model_output['cam_angvel']
+                else:
+                    cam_angvel = inputs["cam_angvel"]
+                
+                if 'cam_t_vel' in self.args.outputs:
+                    cam_tvel = model_output['cam_t_vel']
+                else:
+                    cam_tvel = inputs["cam_tvel"]
+
+                pred_smpl_params_global, pred_T_w2c = get_smpl_params_w_Rt_v3(  # This function has for-loop
+                    endecoder=self.endecoder,
+                    global_orient_gv=decode_dict["global_orient_gv"],
+                    local_transl_vel=decode_dict["local_transl_vel"],
+                    local_transl_c=transl_c,
+                    global_orient_c=decode_dict["global_orient"],
+                    offset=decode_dict["offset"],
+                    cam_angvel=cam_angvel,
+                    cam_tvel=cam_tvel,
+                    slam_R_w2c=inputs["R_w2c"],
+                    static_conf_logits=model_output['static_conf_logits'],
+                    conf_scales=conf_scales,
+                    betas=decode_dict['betas'],
+                    body_pose=decode_dict['body_pose'],
+                    meta=inputs['meta'],
+                    slam_scales=slam_scales,
+                    mean_scale=mean_scale,
+                )
+                outputs["pred_T_w2c"] = pred_T_w2c
+                outputs["pred_smpl_params_global"] = {
+                    "body_pose": decode_dict["body_pose"],
+                    "betas": decode_dict["betas"],
+                    **pred_smpl_params_global,
+                }
+                outputs["static_conf_logits"] = model_output["static_conf_logits"]
 
             if postproc:  # apply post-processing
                 if static_cam:  # extra post-processing to utilize static camera prior
@@ -465,6 +494,12 @@ def get_smpl_params_w_Rt_v2(
     return smpl_params_w_Rt
 
 
+def gaussian_probability(x, mean, std_dev):
+    """Calculate the Gaussian probability of x given mean and standard deviation."""
+    exponent = torch.exp(-((x - mean) ** 2) / (2 * std_dev ** 2))
+    return (1 / (math.sqrt(2 * math.pi) * std_dev)) * exponent
+
+
 @autocast(enabled=False)
 def get_smpl_params_w_Rt_v3(
     endecoder,
@@ -477,6 +512,7 @@ def get_smpl_params_w_Rt_v3(
     cam_tvel,
     slam_R_w2c,
     static_conf_logits,
+    conf_scales,
     **kwargs
 ):
     """Get global R,t in GV0(ay)
@@ -540,15 +576,17 @@ def get_smpl_params_w_Rt_v3(
     global_orient, transl, _ = get_tgtcoord_rootparam(
         global_orient, transl, tsf="any->ay"
     )
-    if True:
+
+    body_pose = kwargs['body_pose'][0]
+    if body_pose.shape[1] < 69:
+        bs = body_pose.shape[0]
+        pad_size = 69 - body_pose.shape[1]
+        body_pose = torch.cat((body_pose, torch.zeros(bs, pad_size).to(body_pose)), dim=1)
+
+    if False:
         from motiondiff.utils.vis_scenepic import ScenepicVisualizer
         sp_visualizer = ScenepicVisualizer("inputs/checkpoints/body_models/smpl", device=device)
         smpl = sp_visualizer.smpl_dict['neutral']
-        body_pose = kwargs['body_pose'][0]
-        if body_pose.shape[1] < 69:
-            bs = body_pose.shape[0]
-            pad_size = 69 - body_pose.shape[1]
-            body_pose = torch.cat((body_pose, torch.zeros(bs, pad_size).to(body_pose)), dim=1)
 
         smpl_out = smpl(
             betas=kwargs["betas"][0],
@@ -577,8 +615,22 @@ def get_smpl_params_w_Rt_v3(
     offset_full = offset.clone()
     global_orient_list = []
     transl_list = []
+    scale_hmr_c2w_list = []
     R_w_hmr = axis_angle_to_matrix(global_orient).clone()
     t_w_hmr = transl.clone()
+
+    motion_f_hmr = {
+        "global_orient": matrix_to_axis_angle(R_w_hmr),
+        "body_pose": body_pose[None][..., :63],
+        "betas": kwargs["betas"],
+        "transl": t_w_hmr,
+    }
+    out_hmr = {"pred_smpl_params_global": motion_f_hmr, "static_conf_logits": static_conf_logits}
+    t_w_hmr = pp_static_joint(out_hmr, endecoder)
+    transl = t_w_hmr.clone()
+
+    slam_scales = kwargs['slam_scales']
+    mean_scale = kwargs['mean_scale']
 
     for bid in range(B):
         L = transl.shape[1]
@@ -639,7 +691,7 @@ def get_smpl_params_w_Rt_v3(
             "global_orient": R_w,
             "transl": t_w,
         }
-        est_T_w2c = estimate_camscale(smpl_param_c, smpl_param_w, norm_T_w2c, offset)
+        est_T_w2c, scale_hmr_c2w = estimate_camscale(smpl_param_c, smpl_param_w, norm_T_w2c, offset, slam_scales[bid], mean_scale[bid])
 
         est_R_w2c = est_T_w2c[:, :3, :3]
         est_t_w2c = est_T_w2c[:, :3, 3]
@@ -648,9 +700,11 @@ def get_smpl_params_w_Rt_v3(
 
         global_orient_list.append(matrix_to_axis_angle(R_w))
         transl_list.append(est_t_w)
+        scale_hmr_c2w_list.append(scale_hmr_c2w)
 
     R_w = torch.stack(global_orient_list)
     t_w = torch.stack(transl_list)
+    scale_hmr_c2w_list = torch.stack(scale_hmr_c2w_list)
 
     # update transl with contacts
     motion_f_slam = {
@@ -678,45 +732,101 @@ def get_smpl_params_w_Rt_v3(
         static_conf_logits = static_conf_logits.float() - (~static_label_ * 1e6)  # fp16 cannot go through softmax
         is_static = static_label_.sum(dim=-1) > 0  # (B, L-1)
 
-        # L = pred_w_j3d_hmr.shape[1]
-        # joint_ids = [7, 10, 8, 11, 20, 21]  # [L_Ankle, L_foot, R_Ankle, R_foot, L_wrist, R_wrist]
-        # pred_j3d_static_slam = pred_w_j3d_slam.clone()[:, :, joint_ids]  # (B, L, J, 3)
-        # pred_j3d_static_hmr = pred_w_j3d_hmr.clone()[:, :, joint_ids]  # (B, L, J, 3)
+        L = pred_w_j3d_hmr.shape[1]
+        joint_ids = [7, 10, 8, 11, 20, 21]  # [L_Ankle, L_foot, R_Ankle, R_foot, L_wrist, R_wrist]
+        pred_j3d_static_slam = pred_w_j3d_slam.clone()[:, :, joint_ids]  # (B, L, J, 3)
+        pred_j3d_static_hmr = pred_w_j3d_hmr.clone()[:, :, joint_ids]  # (B, L, J, 3)
 
-        # pred_j_disp_slam = pred_j3d_static_slam[:, 1:] - pred_j3d_static_slam[:, :-1]  # (B, L-1, J, 3)
-        # pred_j_disp_hmr = pred_j3d_static_hmr[:, 1:] - pred_j3d_static_hmr[:, :-1]  # (B, L-1, J, 3)
+        pred_j_disp_slam = pred_j3d_static_slam[:, 1:] - pred_j3d_static_slam[:, :-1]  # (B, L-1, J, 3)
+        pred_j_disp_hmr = pred_j3d_static_hmr[:, 1:] - pred_j3d_static_hmr[:, :-1]  # (B, L-1, J, 3)
 
-        # pred_disp_slam = pred_j_disp_slam * static_conf_logits[..., None].softmax(dim=-2)  # (B, L-1, J, 3)
-        # pred_disp_slam = pred_disp_slam * is_static[..., None, None]  # (B, L-1, J, 3)
-        # pred_disp_slam = pred_disp_slam.sum(-2)  # (B, L-1, 3)
+        conf_contact = static_conf_logits[..., None].softmax(dim=-2)
+        # if "skate" in kwargs["meta"][0]["vid"]:
+        if True:
+            # conf_contact = static_conf_logits[..., None].softmax(dim=-2)
+            slam_scales = kwargs['slam_scales']
+            mean_scale = kwargs['mean_scale']
+            std_slam_scales = slam_scales.std(dim=-1, keepdim=True)
+            scale_hmr_c2w = scale_hmr_c2w_list[bid]
 
-        # pred_disp_hmr = pred_j_disp_hmr * static_conf_logits[..., None].softmax(dim=-2)  # (B, L-1, J, 3)
-        # pred_disp_hmr = pred_disp_hmr * is_static[..., None, None]  # (B, L-1, J, 3)
-        # pred_disp_hmr = pred_disp_hmr.sum(-2)  # (B, L-1, 3)
+            scale_thrd = 5
+            invalid_hmr = (scale_hmr_c2w > scale_thrd) | (scale_hmr_c2w < (1 / scale_thrd))
+            invalid_hmr = torch.cat([invalid_hmr, invalid_hmr[-1:]], dim=-1)
+            # assume gaussian distribution
+            conf_scales_ = gaussian_probability(slam_scales, mean_scale, torch.ones_like(std_slam_scales))
+            conf_scales_[conf_scales_ > 1.0] = 1.0
+            conf_scales_[conf_scales_ < 0.3] = 0.
+            conf_scales_[invalid_hmr[None]] = 1.0
 
-        # pred_w_disp_slam = motion_f_slam['transl'][:, 1:] - motion_f_slam['transl'][:, :-1]  # (B, L-1, 3)
-        # pred_w_disp_slam_new = pred_w_disp_slam - pred_disp_slam
-        # post_w_transl_slam = torch.cumsum(torch.cat([motion_f_slam['transl'][:, :1], pred_w_disp_slam_new], dim=1), dim=1)
-        # post_w_transl_slam[..., 0] = gaussian_smooth(post_w_transl_slam[..., 0], dim=-1)
-        # post_w_transl_slam[..., 2] = gaussian_smooth(post_w_transl_slam[..., 2], dim=-1)
+            conf_contact = conf_contact * (1 - conf_scales_[:, :-1])[..., None, None]
+            # vid = kwargs["meta"][0]["vid"].replace('/', '_')
+            # if 'P8' in vid:
+            #     import ipdb; ipdb.set_trace()
+            # conf_contact = conf_contact * invalid_hmr.reshape(1, -1, 1, 1)[:, :-1].float()
 
-        # pred_w_disp_hmr = motion_f_hmr['transl'][:, 1:] - motion_f_hmr['transl'][:, :-1]  # (B, L-1, 3)
-        # pred_w_disp_hmr_new = pred_w_disp_hmr - pred_disp_hmr
-        # post_w_transl_hmr = torch.cumsum(torch.cat([motion_f_hmr['transl'][:, :1], pred_w_disp_hmr_new], dim=1), dim=1)
-        # post_w_transl_hmr[..., 0] = gaussian_smooth(post_w_transl_hmr[..., 0], dim=-1)
-        # post_w_transl_hmr[..., 2] = gaussian_smooth(post_w_transl_hmr[..., 2], dim=-1)
+        # conf_contact[conf_contact < 0.5] = 0.
+        # conf_contact = 0
+        pred_disp_slam = pred_j_disp_slam * conf_contact  # (B, L-1, J, 3)
+        pred_disp_slam = pred_disp_slam * is_static[..., None, None]  # (B, L-1, J, 3)
+        pred_disp_slam = pred_disp_slam.sum(-2)  # (B, L-1, 3)
 
-        # motion_f_slam["transl"] = post_w_transl_slam
-        # motion_f_hmr["transl"] = post_w_transl_hmr
+        pred_disp_hmr = pred_j_disp_hmr * static_conf_logits[..., None].softmax(dim=-2)  # (B, L-1, J, 3)
+        # pred_disp_hmr = pred_j_disp_hmr * conf_contact  # (B, L-1, J, 3)
+        pred_disp_hmr = pred_disp_hmr * is_static[..., None, None]  # (B, L-1, J, 3)
+        pred_disp_hmr = pred_disp_hmr.sum(-2)  # (B, L-1, 3)
+
+        pred_w_disp_slam = motion_f_slam['transl'][:, 1:] - motion_f_slam['transl'][:, :-1]  # (B, L-1, 3)
+        pred_w_disp_slam_new = pred_w_disp_slam - pred_disp_slam
+        post_w_transl_slam = torch.cumsum(torch.cat([motion_f_slam['transl'][:, :1], pred_w_disp_slam_new], dim=1), dim=1)
+        # post_w_transl_slam = motion_f_slam['transl'].clone()
+        post_w_transl_slam[..., 0] = gaussian_smooth(post_w_transl_slam[..., 0], dim=-1)
+        post_w_transl_slam[..., 2] = gaussian_smooth(post_w_transl_slam[..., 2], dim=-1)
+
+        pred_w_disp_hmr = motion_f_hmr['transl'][:, 1:] - motion_f_hmr['transl'][:, :-1]  # (B, L-1, 3)
+        pred_w_disp_hmr_new = pred_w_disp_hmr - pred_disp_hmr
+        post_w_transl_hmr = torch.cumsum(torch.cat([motion_f_hmr['transl'][:, :1], pred_w_disp_hmr_new], dim=1), dim=1)
+        post_w_transl_hmr[..., 0] = gaussian_smooth(post_w_transl_hmr[..., 0], dim=-1)
+        post_w_transl_hmr[..., 2] = gaussian_smooth(post_w_transl_hmr[..., 2], dim=-1)
+
+        motion_f_slam["transl"] = post_w_transl_slam
+        motion_f_hmr["transl"] = post_w_transl_hmr
+
+        # slam_out = {"pred_smpl_params_global": motion_f_slam}
+        # body_pose_slam = process_ik(slam_out, endecoder, conf_contact[..., 0].float())
+        # motion_f_slam["body_pose"] = body_pose_slam
+
+        hmr_out = {"pred_smpl_params_global": motion_f_hmr}
+        body_pose_hmr = process_ik(hmr_out, endecoder, static_conf_logits.sigmoid().float())
+        motion_f_hmr["body_pose"] = body_pose_hmr
 
         pred_w_j3d_slam = endecoder.fk_v2(**motion_f_slam)
         pred_w_j3d_hmr = endecoder.fk_v2(**motion_f_hmr)
 
-        post_w_transl_slam = merge_slam_w_hmr(pred_w_j3d_slam, pred_w_j3d_hmr, post_w_transl_slam, static_conf_logits, static_label_)
+        # Put the sequence on the ground by -min(y), this does not consider foot height, for o3d vis
+        ground_y = pred_w_j3d_slam[..., 1].flatten(-2).min(dim=-1)[0]  # (B,)  Minimum y value
+        post_w_transl_slam[..., 1] -= ground_y
+        motion_f_slam["transl"] = post_w_transl_slam
+
+        post_w_transl_slam = merge_slam_w_hmr(pred_w_j3d_slam, pred_w_j3d_hmr, post_w_transl_slam, static_conf_logits, static_label_, conf_scales)
         motion_f_slam["transl"] = post_w_transl_slam
 
     for bid in range(B):
         if False: # visualization
+            from motiondiff.utils.vis_scenepic import ScenepicVisualizer
+            sp_visualizer = ScenepicVisualizer("inputs/checkpoints/body_models/smpl", device=device)
+            smpl = sp_visualizer.smpl_dict['neutral']
+
+            # smpl_out = smpl(
+            #     betas=kwargs["betas"][0],
+            #     body_pose=body_pose,
+            #     global_orient=global_orient[0],
+            #     transl=transl[0],
+            #     orig_joints=True,
+            # )
+            # joints = smpl_out.joints
+            # ground = joints.reshape(-1, 3)[:, 1].min()
+            # transl[:, :, 1] = transl[:, :, 1] - ground.reshape(B, 1)
+
             t_w = motion_f_slam["transl"]
             t_w_hmr = motion_f_hmr["transl"]
             R_w = motion_f_slam['global_orient']
@@ -746,8 +856,8 @@ def get_smpl_params_w_Rt_v3(
                 "vis_all_cam": False
             }
             # compute gvhmr output
-            pred_R_w2c = R_c @ R_w_bak.mT
-            pred_t_w2c = t_c + offset - torch.einsum("fij,fj->fi", pred_R_w2c, t_w_bak + offset)
+            pred_R_w2c = R_c @ axis_angle_to_matrix(R_w_hmr[bid]).mT
+            pred_t_w2c = t_c + offset - torch.einsum("fij,fj->fi", pred_R_w2c, t_w_hmr[bid] + offset)
             pred_T_w2c = torch.eye(4)[None].repeat(L, 1, 1).to(device)
             pred_T_w2c[:, :3, :3] = pred_R_w2c
             pred_T_w2c[:, :3, 3] = pred_t_w2c
@@ -770,8 +880,8 @@ def get_smpl_params_w_Rt_v3(
                 "vis_all_cam": False,
             }
             res = {
+                'gvhmr': res_orig,
                 'slam': res,
-                'gvhmr': res_orig
             }
             dataset = kwargs['meta'][0]['dataset_id']
             if 'flip' in kwargs['meta'][0]:
@@ -782,11 +892,20 @@ def get_smpl_params_w_Rt_v3(
             os.makedirs(f"tmp/{dataset}", exist_ok=True)
             sp_visualizer.vis_smpl_scene(res, html_path, window_size=(600, 600))
 
+            est_t_c2w = (-pred_R_w2c.mT @ pred_t_w2c[..., None])[..., 0]
+            aligned_R_w2c = est_T_w2c[:, :3, :3]
+            slam_t_w2c = est_T_w2c[:, :3, 3]
+            slam_t_c2w = (-aligned_R_w2c.mT @ slam_t_w2c[..., None])[..., 0]
+
+    est_t_w2c_new = t_c + offset - (est_R_w2c @ (motion_f_slam["transl"].float() + offset)[..., None])[..., 0]
+    est_T_w2c[:, :3, 3] = est_t_w2c_new
+
     smpl_params_w_Rt = {"global_orient": motion_f_slam['global_orient'], "transl": motion_f_slam['transl']}
-    return smpl_params_w_Rt
+
+    return smpl_params_w_Rt, est_T_w2c
 
 
-def merge_slam_w_hmr(w_j3d_slam, w_j3d_hmr, t_w_slam, static_conf_logits, static_label_):
+def merge_slam_w_hmr(w_j3d_slam, w_j3d_hmr, t_w_slam, static_conf_logits, static_label_, conf_scales):
     is_static = static_label_.sum(dim=-1) > 0  # (B, L-1)
     joint_ids = [7, 10, 8, 11, 20, 21]  # [L_Ankle, L_foot, R_Ankle, R_foot, L_wrist, R_wrist]
 
@@ -805,7 +924,9 @@ def merge_slam_w_hmr(w_j3d_slam, w_j3d_hmr, t_w_slam, static_conf_logits, static
     norm_hmr = disp_hmr.norm(dim=-1, keepdim=True).sum(-2)  # (B, L-1, 1)
     disp_hmr = disp_hmr.sum(-2)  # (B, L-1, 3)
 
-    use_slam = (norm_slam < norm_hmr).repeat(1, 1, 3)
+    use_slam_norm = (norm_slam < norm_hmr).repeat(1, 1, 3)
+    use_slam = (conf_scales[:, :-1, None] > 0.5).repeat(1, 1, 3)
+    use_slam = use_slam_norm | use_slam
     new_disp = disp_slam.clone()
     new_disp[~use_slam] = disp_hmr[~use_slam]
 

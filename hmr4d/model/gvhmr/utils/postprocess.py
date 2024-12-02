@@ -119,8 +119,9 @@ def pp_static_joint_cam(outputs, endecoder: EnDecoder):
 
 
 @autocast(enabled=False)
-def process_ik(outputs, endecoder):
-    static_conf = outputs["static_conf_logits"].sigmoid()  # (B, L, J)
+def process_ik(outputs, endecoder, static_conf=None):
+    if static_conf is None:
+        static_conf = outputs["static_conf_logits"].sigmoid()  # (B, L, J)
     post_w_j3d, local_mat, post_w_mat = endecoder.fk_v2(**outputs["pred_smpl_params_global"], get_intermediate=True)
 
     # sebas rollout merge

@@ -117,10 +117,11 @@ pipeline:
         static_conf:
             vel_thr: 0.15
 
+        infer_version: 3
 data:
     loader_opts:
         train:
-            batch_size: 256
+            batch_size: 128
             num_workers: 12
 
 pl_trainer:

@@ -415,7 +415,12 @@ class GaussianDiffusion:
         
         if model_output is None:
             model_output = model(x, self._scale_timesteps(t), **model_kwargs)
-
+            if isinstance(model_output, dict):
+                aux_output = {}
+                for k, v in model_output.items():
+                    if k != "pred_x_start":
+                        aux_output[k] = v
+                model_output = model_output["pred_x_start"]
         if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
             assert model_output.shape == (B, C * 2, *x.shape[2:])
             model_output, model_var_values = th.split(model_output, C, dim=1)
@@ -484,6 +489,7 @@ class GaussianDiffusion:
             "variance": model_variance,
             "log_variance": model_log_variance,
             "pred_xstart": pred_xstart,
+            **aux_output,
         }
 
     def _predict_xstart_from_eps(self, x_t, t, eps):
@@ -855,208 +861,91 @@ class GaussianDiffusion:
             endecoder = model_kwargs['encoder']
             inputs = model_kwargs['inputs']
 
-            use_optimize = False
-            if use_optimize:
-                with torch.no_grad():
-                    out_orig = self.p_mean_variance(
-                        model,
-                        x,
-                        t,
-                        clip_denoised=clip_denoised,
-                        denoised_fn=denoised_fn,
-                        model_kwargs=model_kwargs,
-                        model_output=model_output,
-                    )
-                    out = out_orig
-                def f(x0):
-                    smpl_pose, smpl_transl = self.motion2global(
-                        x0,
-                        mean=self.motion_mean,
-                        std=self.motion_std,
-                        smpl=self.smpl,
-                        return_jts=False
-                    )
-                    global_orient = smpl_pose[:, :, 0]
-                    global_orient = R0 @ global_orient
-                    smpl_transl = (R0 @ smpl_transl[..., None])[..., 0] + t0
-                    local_pose = smpl_pose[:, :, 1:]
-                    bs, seqlen = smpl_pose.shape[:2]
-                    # gt_global_orient = R0 @ gt_global_orient
-                    # gt_global_transl = (R0 @ gt_global_transl[..., None])[..., 0] + t0
-                    # gt_local_orient = cam_orient.transpose(2, 3) @ gt_global_orient
-                    # gt_local_transl = (cam_orient.transpose(2, 3) @ (gt_global_transl - cam_pos)[..., None])[..., 0]
+            with torch.enable_grad():
+                x = x.detach().requires_grad_()
+                out_orig = self.p_mean_variance(
+                    model,
+                    x,
+                    t,
+                    clip_denoised=clip_denoised,
+                    denoised_fn=denoised_fn,
+                    model_kwargs=model_kwargs,
+                    model_output=model_output,
+                )
+                out = out_orig
+                pred_xstart = out_orig["pred_xstart"]
+                samples = pred_xstart
+                pred_cam = out_orig["pred_cam"]
+                static_conf_logits = samples[:, :, model.s_pred_ind:model.s_pred_ind + 6]
+                assert samples.shape[-1] == model.s_pred_ind + 6 + 151, samples.shape
+                sample = samples[:, :, -151:]
+                decode_dict = endecoder.decode(sample)
 
-                    sout = self.smpl(
-                        global_orient=global_orient.reshape(bs * seqlen, 1, 3, 3),
-                        body_pose=local_pose.reshape(bs * seqlen, 23, 3, 3),
-                        betas=betas.reshape(bs * seqlen, 10),
-                        root_trans=smpl_transl.reshape(bs * seqlen, 3),
-                        orig_joints=True,
-                        pose2rot=False,
-                    )
-                    joints17 = torch.einsum("bik,ji->bjk", [sout.vertices, self.smpl.J_regressor_wham])[:, :17]
-                    joints17 = joints17.reshape(bs, seqlen, 17, 3)
+                outputs = dict()
+                # Post-processing
+                outputs["pred_smpl_params_incam"] = {
+                    "body_pose": decode_dict["body_pose"],  # (B, L, 63)
+                    "betas": decode_dict["betas"],  # (B, L, 10)
+                    "global_orient": decode_dict["global_orient"],  # (B, L, 3)
+                    "transl": compute_transl_full_cam(pred_cam, inputs["bbx_xys"], inputs["K_fullimg"]),
+                }
+                clean_obs_kp2d = inputs['clean_f_condition']['obs']
+                clean_kp2d = unnormalize_kp2d(clean_obs_kp2d, inputs['bbx_xys'], inputs["K_fullimg"])
+                bbx_lurb = convert_bbx_xys_to_lurb(inputs['bbx_xys'])
+                clean_kp2d_bi01 = cvt_to_bi01_p2d(clean_kp2d[..., :2], bbx_lurb)
+                conf = clean_kp2d[..., 2:3]
 
-                    # project 3D joints to 2D
-                    joints = (cam_orient.transpose(2, 3) @ (joints17 - cam_pos[:, :, None]).transpose(2, 3)).transpose(2, 3)
-                    joints = joints / joints[..., 2:3]
-                    joints = (intrinsics @ joints.transpose(2, 3)).transpose(2, 3)
-                    joints = joints[..., :2]
-                    diff = (joints - local_kpt2d)
-                    robust_sqr_dist = gmof(diff, sigma=100)
-                    loss = ((kpt2d_score**2) * robust_sqr_dist).mean()
-                    return loss
-                pred_xstart = out["pred_xstart"]
-                # result = minimize(f, pred_xstart, method="bfgs")
-                # pred_xstart = result.x0
-                x0 = Variable(pred_xstart.contiguous(), requires_grad=True)
-                use_lbfgs = True
-                with torch.enable_grad():
-                    if use_lbfgs:
-                        # optimizer = torch.optim.LBFGS([x0], lr=1e-2, max_iter=5, line_search_fn='strong_wolfe')
-                        optimizer = torch.optim.LBFGS([x0], max_iter=4, history_size=10, line_search_fn='strong_wolfe')
-                        loop_bar = range(5)
-                        def closure():
-                            optimizer.zero_grad()
-                            loss = f(x0)
-                            loss.backward()
-                            return loss
-                        for _ in loop_bar:
-                            optimizer.step(closure)
-                    else:
-                        optimizer = torch.optim.Adam([x0], lr=1e-2)
-                        loop_bar = range(500)
-                        for _ in loop_bar:
-                            optimizer.zero_grad()
-                            loss = f(x0)
-                            loss.backward()
-                            optimizer.step()
+                if 'mask' in inputs:
+                    mask = inputs["mask"]["valid"]  # effective length mask
+                    mask_reproj = ~inputs["mask"]["spv_incam_only"]  # do not supervise reproj for 3DPW
 
-                pred_xstart = x0.detach()
+                pred_c_j3d = endecoder.fk_v2(**outputs["pred_smpl_params_incam"])
+                reproj_z_thr = 0.3
+                pred_c_j3d_z0_mask = pred_c_j3d[..., 2].abs() <= reproj_z_thr
+                # pred_c_j3d[pred_c_j3d_z0_mask] = reproj_z_thr
+                pred_j2d_01 = project_to_bi01(pred_c_j3d, inputs["bbx_xys"], inputs["K_fullimg"])  # 22 joints
 
-            else:
-                with torch.enable_grad():
-                    x = x.detach().requires_grad_()
-                    out_orig = self.p_mean_variance(
-                        model,
-                        x,
-                        t,
-                        clip_denoised=clip_denoised,
-                        denoised_fn=denoised_fn,
-                        model_kwargs=model_kwargs,
-                        model_output=model_output,
-                    )
-                    out = out_orig
-                    pred_xstart = out_orig["pred_xstart"]
-                    samples = pred_xstart
-                    pred_cam = samples[:, :, model.s_pred_ind:model.s_pred_ind + 3]
-                    static_conf_logits = samples[:, :, model.s_pred_ind + 3:model.s_pred_ind + 3 + 6]
-                    assert samples.shape[-1] == model.s_pred_ind + 3 + 6 + 151
-                    sample = samples[:, :, -151:]
-                    decode_dict = endecoder.decode(sample)
+                # 22 -> 10
+                select_smplx = [16, 17, 18, 19, 20, 21, 4, 5, 7, 8]
+                select_coco = [5, 6, 7, 8, 9, 10, 13, 14, 15, 16]
+                loss2d = (conf[..., select_coco, :] * ((clean_kp2d_bi01[..., select_coco, :] - pred_j2d_01[..., select_smplx, :])**2)).mean()
 
-                    outputs = dict()
-                    # Post-processing
-                    outputs["pred_smpl_params_incam"] = {
-                        "body_pose": decode_dict["body_pose"],  # (B, L, 63)
-                        "betas": decode_dict["betas"],  # (B, L, 10)
-                        "global_orient": decode_dict["global_orient"],  # (B, L, 3)
-                        "transl": compute_transl_full_cam(pred_cam, inputs["bbx_xys"], inputs["K_fullimg"]),
-                    }
-                    clean_obs_kp2d = inputs['clean_f_condition']['obs']
-                    clean_kp2d = unnormalize_kp2d(clean_obs_kp2d, inputs['bbx_xys'], inputs["K_fullimg"])
-                    bbx_lurb = convert_bbx_xys_to_lurb(inputs['bbx_xys'])
-                    clean_kp2d_bi01 = cvt_to_bi01_p2d(clean_kp2d[..., :2], bbx_lurb)
-                    conf = clean_kp2d[..., 2:3]
+                if 'vimo_smpl_params' in inputs:
+                    import ipdb; ipdb.set_trace()
 
-                    if 'mask' in inputs:
-                        mask = inputs["mask"]["valid"]  # effective length mask
-                        mask_reproj = ~inputs["mask"]["spv_incam_only"]  # do not supervise reproj for 3DPW
+                slam_scales = inputs["scales"]
+                mean_scale = inputs["mean_scale"]
+                std_slam_scales = slam_scales.std(dim=-1, keepdim=True)
+                conf_scales = (slam_scales - mean_scale).abs() < std_slam_scales
 
-                    pred_c_j3d = endecoder.fk_v2(**outputs["pred_smpl_params_incam"])
-                    reproj_z_thr = 0.3
-                    pred_c_j3d_z0_mask = pred_c_j3d[..., 2].abs() <= reproj_z_thr
-                    # pred_c_j3d[pred_c_j3d_z0_mask] = reproj_z_thr
-                    pred_j2d_01 = project_to_bi01(pred_c_j3d, inputs["bbx_xys"], inputs["K_fullimg"])  # 22 joints
+                get_smpl_params_w_Rt()
+                # loss = (((joints - local_kpt2d).abs() * kpt2d_score / focal[..., None, None]) ** 2).mean()
+                loss = loss2d
+                loss.backward()
+                grad = x.grad
 
-                    # 22 -> 10
-                    select_smplx = [16, 17, 18, 19, 20, 21, 4, 5, 7, 8]
-                    select_coco = [5, 6, 7, 8, 9, 10, 13, 14, 15, 16]
-                    loss = (conf[..., select_coco, :] * ((clean_kp2d_bi01[..., select_coco, :] - pred_j2d_01[..., select_smplx, :])**2)).mean()
+                # self.thresh_grad = 'clip_norm'
+                # # self.thresh_grad = None
+                # # self.thresh_grad = 'var'
+                # self.thresh_grad_param = 10.0
+                # if self.thresh_grad == 'var':
+                #     grad = grad * var.mean()
+                # elif self.thresh_grad == 'clip_norm':
+                #     max_norm = self.thresh_grad_param
+                #     grad_norm = torch.linalg.vector_norm(grad, ord=2, dim=(1,2,3))
+                #     clip_coef = max_norm / (grad_norm + 1e-6)
+                #     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
+                #     grad = grad * clip_coef_clamped[:,None,None,None]
+                # elif self.thresh_grad == 'clip_value':
+                #     clip_val = self.thresh_grad_param
+                #     grad = torch.clamp(grad, min=-clip_val, max=clip_val)
 
-                    # loss = (((joints - local_kpt2d).abs() * kpt2d_score / focal[..., None, None]) ** 2).mean()
-                    loss.backward()
-                    grad = x.grad
-
-                    # self.thresh_grad = 'clip_norm'
-                    # # self.thresh_grad = None
-                    # # self.thresh_grad = 'var'
-                    # self.thresh_grad_param = 10.0
-                    # if self.thresh_grad == 'var':
-                    #     grad = grad * var.mean()
-                    # elif self.thresh_grad == 'clip_norm':
-                    #     max_norm = self.thresh_grad_param
-                    #     grad_norm = torch.linalg.vector_norm(grad, ord=2, dim=(1,2,3))
-                    #     clip_coef = max_norm / (grad_norm + 1e-6)
-                    #     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
-                    #     grad = grad * clip_coef_clamped[:,None,None,None]
-                    # elif self.thresh_grad == 'clip_value':
-                    #     clip_val = self.thresh_grad_param
-                    #     grad = torch.clamp(grad, min=-clip_val, max=clip_val)
-
-                    # pred_xstart = pred_xstart.detach() - grad
-                    # import ipdb; ipdb.set_trace()
-                    # x = x - torch.clamp(grad * 3e7, min=-1, max=1) # * out["variance"]
-                    x = x.detach()
-                    x = x - torch.clamp(grad * 3e7, min=-1, max=1) # * out["variance"]
-                    # x[:, :-9] = x[:, :-9] - torch.clamp(grad[:, :-9] * 3e7, min=-1, max=1) # * out["variance"]
-                    # pred_xstart = pred_xstart.detach() - grad * 3e6
-                with torch.no_grad():
-                    out_orig = self.p_mean_variance(
-                        model,
-                        x,
-                        t,
-                        clip_denoised=clip_denoised,
-                        denoised_fn=denoised_fn,
-                        model_kwargs=model_kwargs,
-                    )
-                    out = out_orig
-                    pred_xstart = out["pred_xstart"]
-                    # self.thresh_pred = "dynamic"
-                    # self.thresh_pred = None
-                    # self.thresh_pred_param = 0.98, 10.0
-                    # pred = pred_xstart
-                    # if self.thresh_pred == 'static':
-                    #     _, clip_val = self.thresh_pred_param
-                    #     pred = torch.clamp(pred, min=-clip_val, max=clip_val)
-                    # elif self.thresh_pred == 'dynamic':
-                    #     B = pred.size(0)
-                    #     perc, clip_val = self.thresh_pred_param
-                    #     s = torch.quantile(torch.abs(pred.reshape((B, -1))), perc, dim=1)
-                    #     # print(s)
-                    #     # for those motions with quantile over thresh, clamp and then scale so they are clip_val at most
-                    #     s = s[:,None,None,None].expand_as(pred)
-                    #     pred = torch.where(s > clip_val, 
-                    #                     torch.clamp(pred, min=-s, max=s) / ((1. / clip_val) * s + 1e-6), 
-                    #                     pred)
-                    # pred_xstart = pred
-
-                    # B = grad.size(0)
-                    # perc, clip_val = 0.95, 8.0
-                    # # s = torch.quantile(torch.abs(pred_xstart.reshape((B, -1))), perc, dim=1)
-                    # # # print(s)
-                    # # # for those motions with quantile over thresh, clamp and then scale so they are clip_val at most
-                    # # s = s[:,None,None,None].expand_as(pred_xstart)
-                    # # pred_xstart = torch.where(s > clip_val, 
-                    # #                 torch.clamp(pred_xstart, min=-s, max=s) / ((1. / clip_val) * s + 1e-6), 
-                    # #                 pred_xstart)
-                    # pred_xstart = torch.clamp(pred_xstart, min=-clip_val, max=clip_val)
-
-                    # max_norm = 250.0
-                    # grad_norm = torch.linalg.vector_norm(grad, ord=2, dim=(1, 2, 3))
-                    # clip_coef = max_norm / (grad_norm + 1e-6)
-                    # clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
-                    # grad = grad * clip_coef_clamped[:, None, None, None]
+                # pred_xstart = pred_xstart.detach() - grad
+                # import ipdb; ipdb.set_trace()
+                # x = x - torch.clamp(grad * 3e7, min=-1, max=1) # * out["variance"]
+                pred_xstart = pred_xstart - torch.clamp(grad * 3e6, min=-1, max=1) # * out["variance"]
+                # x[:, :-9] = x[:, :-9] - torch.clamp(grad[:, :-9] * 3e7, min=-1, max=1) # * out["variance"]
+                # pred_xstart = pred_xstart.detach() - grad * 3e6
 
             out["pred_xstart"] = pred_xstart.detach()
             out_orig["pred_xstart"] = pred_xstart.detach()
@@ -1353,8 +1242,602 @@ class GaussianDiffusion:
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
         )  # no noise when t == 0
         sample = mean_pred + nonzero_mask * sigma * noise
-        return {"sample": sample, "pred_xstart": out_orig["pred_xstart"]}
-    
+        return {"sample": sample, "pred_xstart": out_orig["pred_xstart"], **out_orig}
+
+    def ddim_sample_bak(
+        self,
+        model,
+        x,
+        t,
+        clip_denoised=True,
+        denoised_fn=None,
+        cond_fn=None,
+        model_kwargs=None,
+        eta=0.0,
+        target_motion=None,
+        guide=None,
+        guide_2d=None,
+        overwrite_2d=False,
+        overwrite_data=None,
+        model_output=None,
+    ):
+        """
+        Sample x_{t-1} from the model using DDIM.
+
+        Same usage as p_sample().
+        """
+        if guide_2d or "encoder" in model_kwargs:
+            var = _extract_into_tensor(self.posterior_variance, t, x.shape)
+            sqrt_alphas = _extract_into_tensor(self.sqrt_alphas_cumprod, t, x.shape)
+            bs = x.shape[0]
+            endecoder = model_kwargs["encoder"]
+            inputs = model_kwargs["inputs"]
+
+            use_optimize = False
+            if use_optimize:
+                with torch.no_grad():
+                    out_orig = self.p_mean_variance(
+                        model,
+                        x,
+                        t,
+                        clip_denoised=clip_denoised,
+                        denoised_fn=denoised_fn,
+                        model_kwargs=model_kwargs,
+                        model_output=model_output,
+                    )
+                    out = out_orig
+
+                def f(x0):
+                    smpl_pose, smpl_transl = self.motion2global(
+                        x0,
+                        mean=self.motion_mean,
+                        std=self.motion_std,
+                        smpl=self.smpl,
+                        return_jts=False,
+                    )
+                    global_orient = smpl_pose[:, :, 0]
+                    global_orient = R0 @ global_orient
+                    smpl_transl = (R0 @ smpl_transl[..., None])[..., 0] + t0
+                    local_pose = smpl_pose[:, :, 1:]
+                    bs, seqlen = smpl_pose.shape[:2]
+                    # gt_global_orient = R0 @ gt_global_orient
+                    # gt_global_transl = (R0 @ gt_global_transl[..., None])[..., 0] + t0
+                    # gt_local_orient = cam_orient.transpose(2, 3) @ gt_global_orient
+                    # gt_local_transl = (cam_orient.transpose(2, 3) @ (gt_global_transl - cam_pos)[..., None])[..., 0]
+
+                    sout = self.smpl(
+                        global_orient=global_orient.reshape(bs * seqlen, 1, 3, 3),
+                        body_pose=local_pose.reshape(bs * seqlen, 23, 3, 3),
+                        betas=betas.reshape(bs * seqlen, 10),
+                        root_trans=smpl_transl.reshape(bs * seqlen, 3),
+                        orig_joints=True,
+                        pose2rot=False,
+                    )
+                    joints17 = torch.einsum(
+                        "bik,ji->bjk", [sout.vertices, self.smpl.J_regressor_wham]
+                    )[:, :17]
+                    joints17 = joints17.reshape(bs, seqlen, 17, 3)
+
+                    # project 3D joints to 2D
+                    joints = (
+                        cam_orient.transpose(2, 3)
+                        @ (joints17 - cam_pos[:, :, None]).transpose(2, 3)
+                    ).transpose(2, 3)
+                    joints = joints / joints[..., 2:3]
+                    joints = (intrinsics @ joints.transpose(2, 3)).transpose(2, 3)
+                    joints = joints[..., :2]
+                    diff = joints - local_kpt2d
+                    robust_sqr_dist = gmof(diff, sigma=100)
+                    loss = ((kpt2d_score**2) * robust_sqr_dist).mean()
+                    return loss
+
+                pred_xstart = out["pred_xstart"]
+                # result = minimize(f, pred_xstart, method="bfgs")
+                # pred_xstart = result.x0
+                x0 = Variable(pred_xstart.contiguous(), requires_grad=True)
+                use_lbfgs = True
+                with torch.enable_grad():
+                    if use_lbfgs:
+                        # optimizer = torch.optim.LBFGS([x0], lr=1e-2, max_iter=5, line_search_fn='strong_wolfe')
+                        optimizer = torch.optim.LBFGS(
+                            [x0],
+                            max_iter=4,
+                            history_size=10,
+                            line_search_fn="strong_wolfe",
+                        )
+                        loop_bar = range(5)
+
+                        def closure():
+                            optimizer.zero_grad()
+                            loss = f(x0)
+                            loss.backward()
+                            return loss
+
+                        for _ in loop_bar:
+                            optimizer.step(closure)
+                    else:
+                        optimizer = torch.optim.Adam([x0], lr=1e-2)
+                        loop_bar = range(500)
+                        for _ in loop_bar:
+                            optimizer.zero_grad()
+                            loss = f(x0)
+                            loss.backward()
+                            optimizer.step()
+
+                pred_xstart = x0.detach()
+
+            else:
+                with torch.enable_grad():
+                    x = x.detach().requires_grad_()
+                    out_orig = self.p_mean_variance(
+                        model,
+                        x,
+                        t,
+                        clip_denoised=clip_denoised,
+                        denoised_fn=denoised_fn,
+                        model_kwargs=model_kwargs,
+                        model_output=model_output,
+                    )
+                    out = out_orig
+                    pred_xstart = out_orig["pred_xstart"]
+                    samples = pred_xstart
+                    pred_cam = samples[:, :, model.s_pred_ind : model.s_pred_ind + 3]
+                    static_conf_logits = samples[
+                        :, :, model.s_pred_ind + 3 : model.s_pred_ind + 3 + 6
+                    ]
+                    assert samples.shape[-1] == model.s_pred_ind + 3 + 6 + 151
+                    sample = samples[:, :, -151:]
+                    decode_dict = endecoder.decode(sample)
+
+                    outputs = dict()
+                    # Post-processing
+                    outputs["pred_smpl_params_incam"] = {
+                        "body_pose": decode_dict["body_pose"],  # (B, L, 63)
+                        "betas": decode_dict["betas"],  # (B, L, 10)
+                        "global_orient": decode_dict["global_orient"],  # (B, L, 3)
+                        "transl": compute_transl_full_cam(
+                            pred_cam, inputs["bbx_xys"], inputs["K_fullimg"]
+                        ),
+                    }
+                    clean_obs_kp2d = inputs["clean_f_condition"]["obs"]
+                    clean_kp2d = unnormalize_kp2d(
+                        clean_obs_kp2d, inputs["bbx_xys"], inputs["K_fullimg"]
+                    )
+                    bbx_lurb = convert_bbx_xys_to_lurb(inputs["bbx_xys"])
+                    clean_kp2d_bi01 = cvt_to_bi01_p2d(clean_kp2d[..., :2], bbx_lurb)
+                    conf = clean_kp2d[..., 2:3]
+
+                    if "mask" in inputs:
+                        mask = inputs["mask"]["valid"]  # effective length mask
+                        mask_reproj = ~inputs["mask"][
+                            "spv_incam_only"
+                        ]  # do not supervise reproj for 3DPW
+
+                    pred_c_j3d = endecoder.fk_v2(**outputs["pred_smpl_params_incam"])
+                    reproj_z_thr = 0.3
+                    pred_c_j3d_z0_mask = pred_c_j3d[..., 2].abs() <= reproj_z_thr
+                    # pred_c_j3d[pred_c_j3d_z0_mask] = reproj_z_thr
+                    pred_j2d_01 = project_to_bi01(
+                        pred_c_j3d, inputs["bbx_xys"], inputs["K_fullimg"]
+                    )  # 22 joints
+
+                    # 22 -> 10
+                    select_smplx = [16, 17, 18, 19, 20, 21, 4, 5, 7, 8]
+                    select_coco = [5, 6, 7, 8, 9, 10, 13, 14, 15, 16]
+                    loss = (
+                        conf[..., select_coco, :]
+                        * (
+                            (
+                                clean_kp2d_bi01[..., select_coco, :]
+                                - pred_j2d_01[..., select_smplx, :]
+                            )
+                            ** 2
+                        )
+                    ).mean()
+
+                    # loss = (((joints - local_kpt2d).abs() * kpt2d_score / focal[..., None, None]) ** 2).mean()
+                    loss.backward()
+                    grad = x.grad
+
+                    # self.thresh_grad = 'clip_norm'
+                    # # self.thresh_grad = None
+                    # # self.thresh_grad = 'var'
+                    # self.thresh_grad_param = 10.0
+                    # if self.thresh_grad == 'var':
+                    #     grad = grad * var.mean()
+                    # elif self.thresh_grad == 'clip_norm':
+                    #     max_norm = self.thresh_grad_param
+                    #     grad_norm = torch.linalg.vector_norm(grad, ord=2, dim=(1,2,3))
+                    #     clip_coef = max_norm / (grad_norm + 1e-6)
+                    #     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
+                    #     grad = grad * clip_coef_clamped[:,None,None,None]
+                    # elif self.thresh_grad == 'clip_value':
+                    #     clip_val = self.thresh_grad_param
+                    #     grad = torch.clamp(grad, min=-clip_val, max=clip_val)
+
+                    # pred_xstart = pred_xstart.detach() - grad
+                    # import ipdb; ipdb.set_trace()
+                    # x = x - torch.clamp(grad * 3e7, min=-1, max=1) # * out["variance"]
+                    x = x.detach()
+                    x = x - torch.clamp(grad * 3e7, min=-1, max=1)  # * out["variance"]
+                    # x[:, :-9] = x[:, :-9] - torch.clamp(grad[:, :-9] * 3e7, min=-1, max=1) # * out["variance"]
+                    # pred_xstart = pred_xstart.detach() - grad * 3e6
+                with torch.no_grad():
+                    out_orig = self.p_mean_variance(
+                        model,
+                        x,
+                        t,
+                        clip_denoised=clip_denoised,
+                        denoised_fn=denoised_fn,
+                        model_kwargs=model_kwargs,
+                    )
+                    out = out_orig
+                    pred_xstart = out["pred_xstart"]
+                    # self.thresh_pred = "dynamic"
+                    # self.thresh_pred = None
+                    # self.thresh_pred_param = 0.98, 10.0
+                    # pred = pred_xstart
+                    # if self.thresh_pred == 'static':
+                    #     _, clip_val = self.thresh_pred_param
+                    #     pred = torch.clamp(pred, min=-clip_val, max=clip_val)
+                    # elif self.thresh_pred == 'dynamic':
+                    #     B = pred.size(0)
+                    #     perc, clip_val = self.thresh_pred_param
+                    #     s = torch.quantile(torch.abs(pred.reshape((B, -1))), perc, dim=1)
+                    #     # print(s)
+                    #     # for those motions with quantile over thresh, clamp and then scale so they are clip_val at most
+                    #     s = s[:,None,None,None].expand_as(pred)
+                    #     pred = torch.where(s > clip_val,
+                    #                     torch.clamp(pred, min=-s, max=s) / ((1. / clip_val) * s + 1e-6),
+                    #                     pred)
+                    # pred_xstart = pred
+
+                    # B = grad.size(0)
+                    # perc, clip_val = 0.95, 8.0
+                    # # s = torch.quantile(torch.abs(pred_xstart.reshape((B, -1))), perc, dim=1)
+                    # # # print(s)
+                    # # # for those motions with quantile over thresh, clamp and then scale so they are clip_val at most
+                    # # s = s[:,None,None,None].expand_as(pred_xstart)
+                    # # pred_xstart = torch.where(s > clip_val,
+                    # #                 torch.clamp(pred_xstart, min=-s, max=s) / ((1. / clip_val) * s + 1e-6),
+                    # #                 pred_xstart)
+                    # pred_xstart = torch.clamp(pred_xstart, min=-clip_val, max=clip_val)
+
+                    # max_norm = 250.0
+                    # grad_norm = torch.linalg.vector_norm(grad, ord=2, dim=(1, 2, 3))
+                    # clip_coef = max_norm / (grad_norm + 1e-6)
+                    # clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
+                    # grad = grad * clip_coef_clamped[:, None, None, None]
+
+            out["pred_xstart"] = pred_xstart.detach()
+            out_orig["pred_xstart"] = pred_xstart.detach()
+        else:
+            # print(eta)
+            if guide:
+                raise NotImplementedError
+                if model_output is not None:
+                    raise NotImplementedError
+                out_orig = self.p_mean_variance_guided(
+                    model,
+                    x,
+                    t,
+                    clip_denoised=clip_denoised,
+                    denoised_fn=denoised_fn,
+                    model_kwargs=model_kwargs,
+                    guide=guide,
+                    target_motion=target_motion,
+                )
+            else:
+                out_orig = self.p_mean_variance(
+                    model,
+                    x,
+                    t,
+                    clip_denoised=clip_denoised,
+                    denoised_fn=denoised_fn,
+                    model_kwargs=model_kwargs,
+                    model_output=model_output,
+                )
+            if cond_fn is not None:
+                out = self.condition_score(
+                    cond_fn, out_orig, x, t, model_kwargs=model_kwargs
+                )
+            else:
+                out = out_orig
+
+        alpha_bar = _extract_into_tensor(self.alphas_cumprod, t, x.shape)
+        alpha_bar_prev = _extract_into_tensor(self.alphas_cumprod_prev, t, x.shape)
+
+        # Usually our model outputs epsilon, but we re-derive it
+        # in case we used x_start or x_prev prediction.
+        if overwrite_2d:
+            cam2world = model_kwargs["y"]["cam2world"]
+            local_kpt2d = model_kwargs["y"]["local_kpt2d"]  # [B, T, 17, 2]
+            intrinsics = model_kwargs["y"]["cam_intrinsics"]  # [B, 1, 3, 3]
+            cam_orient = rotation_6d_to_matrix(cam2world[:, :, :6])  # [B, T, 3, 3]
+            cam_pos = cam2world[:, :, 6:]  # [B, T, 3]
+            local_orient = model_kwargs["y"]["local_orient"]
+            local_transl = model_kwargs["y"]["local_transl"]
+            betas = model_kwargs["y"]["betas"]
+            kpt2d_score = model_kwargs["y"]["kpt2d_score"]
+            R0 = local_orient[:, :1]  # [B, 1, 3, 3]
+            t0 = local_transl[:, :1]  # [B, 1, 3]
+            cx, cy = intrinsics[:, :, 0, 2], intrinsics[:, :, 1, 2]
+            focal = intrinsics[:, :, 0, 0]
+            scale = focal
+            bs = local_kpt2d.size(0)
+            alpha_bar = _extract_into_tensor(self.alphas_cumprod, t, x.shape)
+
+            # var = _extract_into_tensor(self.posterior_variance, t, x.shape)
+            pred_xstart = out["pred_xstart"]  # [B, C, 1, T]
+            mask = overwrite_data["mask"]
+            obs_motion = overwrite_data["obs_motion"]
+
+            use_optimize = False
+            if use_optimize:
+
+                def f(xt):
+                    out_orig = self.p_mean_variance(
+                        model,
+                        xt,
+                        t,
+                        clip_denoised=clip_denoised,
+                        denoised_fn=denoised_fn,
+                        model_kwargs=model_kwargs,
+                    )
+                    out = out_orig
+                    pred_xstart = out["pred_xstart"]
+                    use_jts17 = True
+                    if use_jts17:
+                        joints17 = self.motion2global(
+                            pred_xstart,
+                            mean=self.motion_mean,
+                            std=self.motion_std,
+                            smpl=self.smpl,
+                            return_joints17=True,
+                        )
+                        joints17 = (R0 @ joints17.transpose(2, 3)).transpose(2, 3) + t0[
+                            ..., None, :
+                        ]
+                    else:
+                        smpl_pose, smpl_transl = self.motion2global(
+                            pred_xstart,
+                            mean=self.motion_mean,
+                            std=self.motion_std,
+                            smpl=self.smpl,
+                            return_jts=False,
+                        )
+                        global_orient = smpl_pose[:, :, 0]
+                        global_orient = R0 @ global_orient
+                        smpl_transl = (R0 @ smpl_transl[..., None])[..., 0] + t0
+                        local_pose = smpl_pose[:, :, 1:]
+                        bs, seqlen = smpl_pose.shape[:2]
+                        # gt_global_orient = R0 @ gt_global_orient
+                        # gt_global_transl = (R0 @ gt_global_transl[..., None])[..., 0] + t0
+                        # gt_local_orient = cam_orient.transpose(2, 3) @ gt_global_orient
+                        # gt_local_transl = (cam_orient.transpose(2, 3) @ (gt_global_transl - cam_pos)[..., None])[..., 0]
+
+                        sout = self.smpl(
+                            global_orient=global_orient.reshape(bs * seqlen, 1, 3, 3),
+                            body_pose=local_pose.reshape(bs * seqlen, 23, 3, 3),
+                            betas=betas.reshape(bs * seqlen, 10),
+                            root_trans=smpl_transl.reshape(bs * seqlen, 3),
+                            orig_joints=True,
+                            pose2rot=False,
+                        )
+                        joints17 = torch.einsum(
+                            "bik,ji->bjk", [sout.vertices, self.smpl.J_regressor_wham]
+                        )[:, :17]
+                        joints17 = joints17.reshape(bs, seqlen, 17, 3)
+                    # project 3D joints to 2D
+                    joints = (
+                        cam_orient.transpose(2, 3)
+                        @ (joints17 - cam_pos[:, :, None]).transpose(2, 3)
+                    ).transpose(2, 3)
+                    joints = joints / joints[..., 2:3]
+                    joints = (intrinsics @ joints.transpose(2, 3)).transpose(2, 3)
+                    joints = joints[..., :2]
+                    diff = joints - local_kpt2d
+                    robust_sqr_dist = gmof(diff, sigma=100)
+                    robust_sqr_dist = ((kpt2d_score**2) * robust_sqr_dist) / scale[
+                        ..., None, None
+                    ]
+                    # coeff = torch.where(robust_sqr_dist > 10, 10 / robust_sqr_dist.detach(), torch.ones_like(robust_sqr_dist))
+                    alpha_bar_batch = _extract_into_tensor(
+                        self.alphas_cumprod, t, robust_sqr_dist.shape[:1]
+                    )
+                    alpha_bar_batch = alpha_bar_batch[:, None, None, None].clamp(
+                        min=0.01, max=0.5
+                    )
+                    # robust_sqr_dist = robust_sqr_dist * coeff
+                    loss = (((pred_xstart - obs_motion) * mask) ** 2).mean() + (
+                        robust_sqr_dist * alpha_bar_batch**2
+                    ).mean()
+                    return loss
+
+                xt = Variable(x.detach().requires_grad_(), requires_grad=True)
+                use_lbfgs = True
+                with torch.enable_grad():
+                    if use_lbfgs:
+                        optimizer = torch.optim.LBFGS(
+                            [xt],
+                            max_iter=4,
+                            history_size=10,
+                            line_search_fn="strong_wolfe",
+                        )
+                        loop_bar = range(5)
+
+                        def closure():
+                            optimizer.zero_grad()
+                            loss = f(xt)
+                            loss.backward()
+                            # # gradient clipping
+                            # grad_norm = torch.linalg.vector_norm(xt.grad, ord=2, dim=(1,2,3))
+                            # clip_coef = torch.where(grad_norm > 0.05, 0.05 / grad_norm, torch.ones_like(grad_norm))
+                            # xt.grad.mul_(clip_coef.view(-1, 1, 1, 1))
+
+                            return loss
+
+                        for _ in loop_bar:
+                            optimizer.step(closure)
+                    else:
+                        optimizer = torch.optim.Adam([xt], lr=1e-2)
+                        loop_bar = range(500)
+                        for _ in loop_bar:
+                            optimizer.zero_grad()
+                            loss = f(xt)
+                            loss.backward()
+                            optimizer.step()
+                xt = xt.detach()
+                x = xt
+                out_orig = self.p_mean_variance_guided(
+                    model,
+                    xt,
+                    t,
+                    clip_denoised=clip_denoised,
+                    denoised_fn=denoised_fn,
+                    model_kwargs=model_kwargs,
+                    guide=guide,
+                    target_motion=target_motion,
+                )
+                out = out_orig
+
+            else:
+                with torch.enable_grad():
+                    xt = x.detach().requires_grad_()
+                    out_orig = self.p_mean_variance(
+                        model,
+                        xt,
+                        t,
+                        clip_denoised=clip_denoised,
+                        denoised_fn=denoised_fn,
+                        model_kwargs=model_kwargs,
+                    )
+                    out = out_orig
+                    pred_xstart = out["pred_xstart"]
+                    loss_mask = (((pred_xstart - obs_motion) * mask) ** 2).mean()
+                    # loss.backward()
+                    # grad = xt.grad
+                    # grad_mask = torch.autograd.grad([-loss_mask], [xt])[0]
+
+                    joints17 = self.motion2global(
+                        pred_xstart,
+                        mean=self.motion_mean,
+                        std=self.motion_std,
+                        smpl=self.smpl,
+                        return_joints17=True,
+                    )
+                    joints17 = (R0 @ joints17.transpose(2, 3)).transpose(2, 3) + t0[
+                        ..., None, :
+                    ]
+                    # project 3D joints to 2D
+                    joints = (
+                        cam_orient.transpose(2, 3)
+                        @ (joints17 - cam_pos[:, :, None]).transpose(2, 3)
+                    ).transpose(2, 3)
+                    joints = joints / joints[..., 2:3]
+                    joints = (intrinsics @ joints.transpose(2, 3)).transpose(2, 3)
+                    joints = joints[..., :2]
+                    diff = joints - local_kpt2d
+                    robust_sqr_dist = gmof(diff, sigma=100)
+                    # import ipdb; ipdb.set_trace()
+                    # loss_reproj = ((diff.abs() * kpt2d_score) / scale[..., None, None]).mean()
+                    robust_sqr_dist = ((kpt2d_score**2) * robust_sqr_dist) / scale[
+                        ..., None, None
+                    ]
+                    # robust_sqr_dist = robust_sqr_dist * coeff
+                    loss_reproj = robust_sqr_dist.mean()
+
+                    if t[0] <= 100:
+                        loss = loss_mask + loss_reproj * 0.01
+                    else:
+                        loss = loss_mask + loss_reproj * 0.01
+                    grad = torch.autograd.grad([-loss], [xt])[0]
+                    grad[:, -4:] = 0
+
+                    # if t[0] <= 200:
+                    #     # grad[:, 9:] = 0
+                    #     pass
+                    # else:
+                    #     grad[:, 9:] = grad[:, 9:] * th.sqrt(alpha_bar_prev)[:, 9:]
+                    # pred_xstart = pred_xstart.detach() + grad * 3e5 * (out['variance'] / th.sqrt(alpha_bar_prev))
+                    # pred_xstart = pred_xstart.detach() + grad * 3e5 * out["variance"]
+                    # xt = xt.detach() + grad * 3e5 * (out['variance'] / th.sqrt(alpha_bar_prev))
+                    xt = xt.detach() + grad * 3e5 * out["variance"]
+
+                    x = xt.detach()
+
+                    out_orig = self.p_mean_variance(
+                        model,
+                        xt,
+                        t,
+                        clip_denoised=clip_denoised,
+                        denoised_fn=denoised_fn,
+                        model_kwargs=model_kwargs,
+                    )
+                    out = out_orig
+                    pred_xstart = out["pred_xstart"]
+                    # self.thresh_grad = 'var'
+                    # # self.thresh_grad = None
+                    # # self.thresh_grad = 'var'
+                    # self.thresh_grad_param = 10.0
+                    # if self.thresh_grad == 'var':
+                    #     grad = grad * var.mean()
+                    # elif self.thresh_grad == 'clip_norm':
+                    #     max_norm = self.thresh_grad_param
+                    #     grad_norm = torch.linalg.vector_norm(grad, ord=2, dim=(1,2,3))
+                    #     # print(grad_norm)
+                    #     clip_coef = max_norm / (grad_norm + 1e-6)
+                    #     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
+                    #     grad = grad * clip_coef_clamped[:,None,None,None]
+                    # elif self.thresh_grad == 'clip_value':
+                    #     clip_val = self.thresh_grad_param
+                    #     grad = torch.clamp(grad, min=-clip_val, max=clip_val)
+
+                    # pred_xstart = pred_xstart.detach() - grad
+
+                    # self.thresh_pred = "static"
+                    # self.thresh_pred = None
+                    # self.thresh_pred_param = 0.98, 10.0
+                    # pred = pred_xstart
+                    # if self.thresh_pred == 'static':
+                    #     _, clip_val = self.thresh_pred_param
+                    #     pred = torch.clamp(pred, min=-clip_val, max=clip_val)
+                    # elif self.thresh_pred == 'dynamic':
+                    #     B = pred.size(0)
+                    #     perc, clip_val = self.thresh_pred_param
+                    #     s = torch.quantile(torch.abs(pred.reshape((B, -1))), perc, dim=1)
+                    #     # print(s)
+                    #     # for those motions with quantile over thresh, clamp and then scale so they are clip_val at most
+                    #     s = s[:,None,None,None].expand_as(pred)
+                    #     pred = torch.where(s > clip_val,
+                    #                     torch.clamp(pred, min=-s, max=s) / ((1. / clip_val) * s + 1e-6),
+                    #                     pred)
+                    # pred_xstart = pred
+            pred_xstart = obs_motion * mask + pred_xstart * (1 - mask)
+
+            # pred_xstart[:, 198 : 198 + 37, 0] = overwrite_data["normed_kpt2d"].transpose(1, 2)
+            # pred_xstart[:, 198 + 37 : 198 + 37 + 9, 0] = overwrite_data["cam_info"].transpose(1, 2)
+            out["pred_xstart"] = pred_xstart
+            out_orig["pred_xstart"] = pred_xstart
+        eps = self._predict_eps_from_xstart(x, t, out["pred_xstart"])
+
+        sigma = (
+            eta
+            * th.sqrt((1 - alpha_bar_prev) / (1 - alpha_bar))
+            * th.sqrt(1 - alpha_bar / alpha_bar_prev)
+        )
+        # Equation 12.
+        noise = th.randn_like(x)
+        mean_pred = (
+            out["pred_xstart"] * th.sqrt(alpha_bar_prev)
+            + th.sqrt(1 - alpha_bar_prev - sigma**2) * eps
+        )
+        nonzero_mask = (
+            (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
+        )  # no noise when t == 0
+        sample = mean_pred + nonzero_mask * sigma * noise
+        return {"sample": sample, "pred_xstart": out_orig["pred_xstart"], **out_orig}
+
     def ddim_get_xt(self, x, t, pred_xstart, eta):
         eps = self._predict_eps_from_xstart(x, t, pred_xstart)
 
@@ -1537,6 +2020,72 @@ class GaussianDiffusion:
         ):
             final = sample
         return final["sample"]
+
+    def ddim_sample_loop_with_aux(
+        self,
+        model,
+        shape,
+        noise=None,
+        clip_denoised=True,
+        denoised_fn=None,
+        cond_fn=None,
+        model_kwargs=None,
+        model_kwargs_modify_fn=None,
+        device=None,
+        progress=False,
+        eta=0.0,
+        skip_timesteps=0,
+        repeat_final_timesteps=None,
+        init_image=None,
+        randomize_class=False,
+        cond_fn_with_grad=False,
+        dump_steps=None,
+        const_noise=False,
+        target_motion=None,
+        guide=None,
+        update_sample_fn=None,
+        guide_2d=None,
+        overwrite_2d=False,
+        overwrite_data=None,
+    ):
+        """
+        Generate samples from the model using DDIM.
+
+        Same usage as p_sample_loop().
+        """
+        # print(eta)
+        if dump_steps is not None:
+            raise NotImplementedError()
+        if const_noise == True:
+            raise NotImplementedError()
+
+        final = None
+        for sample in self.ddim_sample_loop_progressive(
+            model,
+            shape,
+            noise=noise,
+            clip_denoised=clip_denoised,
+            denoised_fn=denoised_fn,
+            cond_fn=cond_fn,
+            model_kwargs=model_kwargs,
+            model_kwargs_modify_fn=model_kwargs_modify_fn,
+            device=device,
+            progress=progress,
+            eta=eta,
+            skip_timesteps=skip_timesteps,
+            repeat_final_timesteps=repeat_final_timesteps,
+            init_image=init_image,
+            randomize_class=randomize_class,
+            cond_fn_with_grad=cond_fn_with_grad,
+            target_motion=target_motion,
+            guide=guide,
+            update_sample_fn=update_sample_fn,
+            guide_2d=guide_2d,
+            overwrite_2d=overwrite_2d,
+            overwrite_data=overwrite_data,
+        ):
+            final = sample
+        return final
 
     def ddim_sample_loop_progressive(
         self,

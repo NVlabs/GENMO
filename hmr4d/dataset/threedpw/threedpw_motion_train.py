@@ -1,5 +1,5 @@
 import torch
-from torch.utils import data
+# from torch.utils import data
 from pathlib import Path
 import numpy as np
 
@@ -12,6 +12,7 @@ from hmr4d.dataset.imgfeat_motion.base_dataset import ImgfeatMotionDatasetBase
 from hmr4d.utils.net_utils import get_valid_mask, repeat_to_max_len, repeat_to_max_len_dict
 from hmr4d.utils.smplx_utils import make_smplx
 from hmr4d.utils.video_io_utils import get_video_lwh, read_video_np, save_video
+from hmr4d.utils.geo_transform import normalize_T_w2c, as_identity
 
 from hmr4d.configs import MainStore, builds
 
@@ -100,8 +101,17 @@ class ThreedpwSmplDataset(ImgfeatMotionDatasetBase):
         smpl_params_c = data["smplx_params_incam"]
         smpl_params_w_zero = {k: torch.zeros_like(v) for k, v in smpl_params_c.items()}
         K_fullimg = data["K_fullimg"][None].repeat(length, 1, 1)
-        cam_angvel = compute_cam_angvel(data["T_w2c"][:, :3, :3])
-        cam_tvel = compute_cam_tvel(data["T_w2c"][:, :3, 3])
+        T_w2c = data["T_w2c"]
+        normed_T_w2c = normalize_T_w2c(T_w2c)
+        noisy_normed_T_w2c = normed_T_w2c.clone()
+        noisy_t_w2c = noisy_normed_T_w2c[:, :3, 3]
+        rand_scale = min(max(0.1, torch.randn(1) + 3), 10)
+        noisy_t_w2c = noisy_t_w2c / rand_scale
+        noisy_normed_T_w2c[:, :3, 3] = noisy_t_w2c
+
+        cam_angvel = compute_cam_angvel(normed_T_w2c[:, :3, :3])
+        cam_tvel = compute_cam_tvel(normed_T_w2c[:, :3, 3])
+        noisy_cam_tvel = compute_cam_tvel(noisy_normed_T_w2c[:, :3, 3])
         max_len = self.max_motion_frames
         return_data = {
             "meta": data["meta"],
@@ -116,7 +126,8 @@ class ThreedpwSmplDataset(ImgfeatMotionDatasetBase):
             "kp2d": data["kp2d"],  # (F, 17, 3)
             "cam_angvel": cam_angvel,  # (F, 6)
             "cam_tvel": cam_tvel,  # (F, 3)
-            "T_w2c": data["T_w2c"],  # (F, 4, 4)
+            "noisy_cam_tvel": noisy_cam_tvel,  # (F, 3)
+            "T_w2c": normed_T_w2c,  # (F, 4, 4)
             "mask": {
                 "valid": get_valid_mask(max_len, length),
                 "vitpose": False,
@@ -159,6 +170,7 @@ class ThreedpwSmplDataset(ImgfeatMotionDatasetBase):
         return_data["kp2d"] = repeat_to_max_len(return_data["kp2d"], max_len)
         return_data["cam_angvel"] = repeat_to_max_len(return_data["cam_angvel"], max_len)
         return_data["cam_tvel"] = repeat_to_max_len(return_data["cam_tvel"], max_len)
+        return_data["noisy_cam_tvel"] = repeat_to_max_len(return_data["noisy_cam_tvel"], max_len)
         return_data["T_w2c"] = repeat_to_max_len(return_data["T_w2c"], max_len)
 
         return return_data

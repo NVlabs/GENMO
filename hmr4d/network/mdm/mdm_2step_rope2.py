@@ -130,12 +130,12 @@ class MDMBase(nn.Module):
             nn.Dropout(dropout),
             zero_module(nn.Linear(latent_dim, latent_dim)),
         )
-        self.cam_angvel_embedder = nn.Sequential(
-            nn.Linear(self.cam_angvel_dim, latent_dim),
-            nn.SiLU(),
-            nn.Dropout(dropout),
-            zero_module(nn.Linear(latent_dim, latent_dim)),
-        )
+        # self.cam_angvel_embedder = nn.Sequential(
+        #     nn.Linear(self.cam_angvel_dim, latent_dim),
+        #     nn.SiLU(),
+        #     nn.Dropout(dropout),
+        #     zero_module(nn.Linear(latent_dim, latent_dim)),
+        # )
         self.imgseq_embedder = nn.Sequential(
             nn.LayerNorm(self.imgseq_dim),
             zero_module(nn.Linear(self.imgseq_dim, latent_dim)),
@@ -286,7 +286,7 @@ class MDMBase(nn.Module):
             attnmask = None
 
         t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
-        # 1. obtain initial motion
+        # 1. obtain initial motion by regression
         t_init = (torch.ones_like(t) * 999).long()
         t_weights_init = torch.ones_like(t_weights)
         x_t_init = motion.clone()

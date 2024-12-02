@@ -11,6 +11,7 @@ from hmr4d.utils.geo_transform import compute_cam_angvel, compute_cam_tvel, appl
 
 from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines, convert_motion_as_line_mesh
 from hmr4d.utils.smplx_utils import make_smplx
+from hmr4d.utils.geo_transform import normalize_T_w2c, as_identity
 
 
 class BaseDataset(Dataset):
@@ -120,6 +121,24 @@ class BaseDataset(Dataset):
                     writer.append_data(img_overlay_pred)
                 writer.close()
                 pass
+        
+        T_c2w = T_w2c.inverse()
+        noisy_T_c2w = T_c2w.clone()
+        R_c2w = as_identity(T_c2w[:, :3, :3])
+        t_c2w = T_c2w[:, :3, 3]
+        rand_scale = min(max(0.1, torch.randn(1) + 3), 10)
+        noisy_t_c2w = t_c2w / rand_scale
+        noisy_T_c2w[:, :3, 3] = noisy_t_c2w
+        noisy_T_w2c = noisy_T_c2w.inverse()
+        del noisy_T_c2w
+
+        normed_noisy_T_w2c = normalize_T_w2c(noisy_T_w2c)
+        normed_T_w2c = normalize_T_w2c(T_w2c)
+        normed_R_w2c = as_identity(normed_T_w2c[:, :3, :3])
+        normed_t_w2c = normed_T_w2c[:, :3, 3]
+        normed_noisy_R_w2c = as_identity(normed_noisy_T_w2c[:, :3, :3])
+        normed_noisy_t_w2c = normed_noisy_T_w2c[:, :3, 3]
+        del noisy_T_w2c
 
         # SMPL params in cam
         offset = self.smplx.get_skeleton(smpl_params_w["betas"][0])[0]  # (3)
@@ -142,8 +161,9 @@ class BaseDataset(Dataset):
 
         # Image
         K_fullimg = K_fullimg.repeat(length, 1, 1)  # (F, 3, 3)
-        cam_angvel = compute_cam_angvel(T_w2c[:, :3, :3])  # (F, 6)
-        cam_tvel = compute_cam_tvel(T_w2c[:, :3, 3])  # (F, 3)
+        cam_angvel = compute_cam_angvel(normed_T_w2c[:, :3, :3])  # (F, 6)
+        cam_tvel = compute_cam_tvel(normed_T_w2c[:, :3, 3])  # (F, 3)
+        noisy_cam_tvel = compute_cam_tvel(normed_noisy_T_w2c[:, :3, 3])  # (F, 3)
 
         # Returns: do not forget to make it batchable! (last lines)
         # NOTE: bbx_xys and f_imgseq will be added later
@@ -161,7 +181,8 @@ class BaseDataset(Dataset):
             "kp2d": torch.zeros(length, 17, 3),  # (F, 17, 3)
             "cam_angvel": cam_angvel,  # (F, 6)
             "cam_tvel": cam_tvel,  # (F, 3),
-            "T_w2c": T_w2c,
+            "noisy_cam_tvel": noisy_cam_tvel,  # (F, 3),
+            "T_w2c": normed_T_w2c,
             "mask": {
                 "valid": get_valid_mask(length, length),
                 "vitpose": False,
@@ -178,6 +199,7 @@ class BaseDataset(Dataset):
         return_data["K_fullimg"] = repeat_to_max_len(return_data["K_fullimg"], max_len)
         return_data["cam_angvel"] = repeat_to_max_len(return_data["cam_angvel"], max_len)
         return_data["cam_tvel"] = repeat_to_max_len(return_data["cam_tvel"], max_len)
+        return_data["noisy_cam_tvel"] = repeat_to_max_len(return_data["noisy_cam_tvel"], max_len)
         return_data["T_w2c"] = repeat_to_max_len(return_data["T_w2c"], max_len)
         return return_data
 

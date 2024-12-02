@@ -121,13 +121,13 @@ class GvhmrPL(pl.LightningModule):
         batch["j2d_visible_mask"] = j2d_visible_mask
 
         # obtain clean obs
-        # clean_j3d = gt_j3d.clone()
-        # clean_obs_i_j2d = perspective_projection(clean_j3d, batch["K_fullimg"])  # (B, L, J, 2)
-        # clean_j2d_visible_mask = torch.ones_like(j2d_visible_mask)
-        # clean_j2d_visible_mask[clean_j3d[..., 2] < 0.3] = False  # Set close-to-image-plane points as invisible
-        # clean_obs_kp2d = torch.cat([clean_obs_i_j2d, clean_j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
-        # batch["clean_obs"] = normalize_kp2d(clean_obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
-        # batch["clean_j2d_visible_mask"] = clean_j2d_visible_mask
+        clean_j3d = gt_j3d.clone()
+        clean_obs_i_j2d = perspective_projection(clean_j3d, batch["K_fullimg"])  # (B, L, J, 2)
+        clean_j2d_visible_mask = torch.ones_like(j2d_visible_mask)
+        clean_j2d_visible_mask[clean_j3d[..., 2] < 0.3] = False  # Set close-to-image-plane points as invisible
+        clean_obs_kp2d = torch.cat([clean_obs_i_j2d, clean_j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
+        batch["clean_obs"] = normalize_kp2d(clean_obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
+        batch["clean_j2d_visible_mask"] = clean_j2d_visible_mask
 
         if True:  # Use some detected vitpose (presave data)
             prob = 0.5
@@ -136,8 +136,8 @@ class GvhmrPL(pl.LightningModule):
 
         # Set untrusted frames to False
         batch["obs"][~batch["mask"]["valid"]] = 0
-        # batch["clean_obs"][~batch["mask"]["valid"]] = 0
-        # assert batch["clean_obs"].shape == batch["obs"].shape, f"{batch['clean_obs'].shape} != {batch['obs'].shape}"
+        batch["clean_obs"][~batch["mask"]["valid"]] = 0
+        assert batch["clean_obs"].shape == batch["obs"].shape, f"{batch['clean_obs'].shape} != {batch['obs'].shape}"
 
         if False:  # wis3d
             wis3d = make_wis3d(name="debug-aug-kp3d")
@@ -170,6 +170,7 @@ class GvhmrPL(pl.LightningModule):
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         # Options & Check
         do_postproc = self.trainer.state.stage == "test"  # Only apply postproc in test
+        do_postproc = False
         do_flip_test = "flip_test" in batch
         do_postproc_not_flip_test = do_postproc and not do_flip_test  # later pp when flip_test
         assert batch["B"] == 1, "Only support batch size 1 in evalution."
@@ -190,6 +191,11 @@ class GvhmrPL(pl.LightningModule):
             "f_imgseq": batch["f_imgseq"],
             "meta": batch['meta']
         }
+        if 'vimo_smpl_params' in batch:
+            batch_['vimo_smpl_params'] = batch['vimo_smpl_params']
+            batch_['scales'] = batch['scales']
+            batch_['mean_scale'] = batch['mean_scale']
+
         outputs = self.pipeline.forward(batch_, train=False, postproc=do_postproc_not_flip_test)
         outputs["pred_smpl_params_global"] = {k: v[0] for k, v in outputs["pred_smpl_params_global"].items()}
         outputs["pred_smpl_params_incam"] = {k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()}
@@ -211,6 +217,10 @@ class GvhmrPL(pl.LightningModule):
                 "f_imgseq": flip_test["f_imgseq"],
                 "meta": batch["meta"],
             }
+            if "vimo_smpl_params" in flip_test:
+                batch_["vimo_smpl_params"] = flip_test["vimo_smpl_params"]
+                batch_["scales"] = flip_test["scales"]
+                batch_["mean_scale"] = flip_test["mean_scale"]
             batch_["meta"][0]["flip"] = True
             flipped_outputs = self.pipeline.forward(batch_, train=False)
 
@@ -230,6 +240,10 @@ class GvhmrPL(pl.LightningModule):
             outputs["pred_smpl_params_incam"] = smpl_params_avg
 
             # Then update global results
+            # global_trans_w1 = outputs["pred_smpl_params_global"]["transl"]  # (B, 3)
+            # global_trans_w2 = flipped_outputs["pred_smpl_params_global"]["transl"][0]  # (B, 3)
+            # global_vel_w1 = global_trans_w1[1:] - global_trans_w1[:-1]
+            # global_vel_w2 = global_trans_w2[1:] - global_trans_w2[:-1]
             outputs["pred_smpl_params_global"]["betas"] = smpl_params_avg["betas"]
             outputs["pred_smpl_params_global"]["body_pose"] = smpl_params_avg["body_pose"]
 

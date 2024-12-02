@@ -51,6 +51,7 @@ class RichSmplFullSeqDataset(data.Dataset):
         self.preproc_data = torch.load(self.rich_dir / "rich_test_preproc.pt")
         vids = select_subset(self.labels, vid_presets)
 
+        self.vimo_labels = torch.load(self.rich_dir / "rich_test_vimo_preproc.pt")
         # Setup dataset index
         self.idx2meta = []
         for vid in vids:
@@ -77,13 +78,22 @@ class RichSmplFullSeqDataset(data.Dataset):
         label = self.labels[vid]
         preproc_data = self.preproc_data[vid]
 
+        vimo_label = self.vimo_labels[vid]
+
         length = end - start
         meta = {"dataset_id": "RICH", "vid": vid, "vid-start-end": (start, end)}
         data.update({"meta": meta, "length": length})
 
         # SMPLX
         data.update({"gt_smpl_params": label["gt_smplx_params"], "gender": label["gender"]})
-
+        vimo_smpl_params = {
+            "pred_cam": vimo_label["vimo_params"]["pred_cam"],
+            "pred_pose": vimo_label["vimo_params"]["pred_pose"],
+            "pred_shape": vimo_label["vimo_params"]["pred_shape"],
+            "pred_trans_c": vimo_label["vimo_params"]["pred_trans"],
+        }
+        data.update({"vimo_smpl_params": vimo_smpl_params})
+        data["vimo_label"] = vimo_label
         # camera
         cam_key = get_cam_key_wham_vid(vid)
         scan_name = self.seqname_to_scanname[vid.split("/")[1]]
@@ -123,6 +133,7 @@ class RichSmplFullSeqDataset(data.Dataset):
         R_az2ay = axis_angle_to_matrix(torch.tensor([1.0, 0.0, 0.0]) * -torch.pi / 2)  # (3, 3)
         T_w2ay = transform_mat(R_az2ay, R_az2ay.new([0, 0, 0])) @ data["T_w2az"]  # (4, 4)
 
+        vimo_label = data["vimo_label"]
         if False:  #  Visualize groundtruth and observation
             self.rich_smplx = {
                 "male": make_smplx("rich-smplx", gender="male"),
@@ -140,14 +151,18 @@ class RichSmplFullSeqDataset(data.Dataset):
         # process img feature with xys
         length = data["length"]
         f_imgseq = data["f_imgseq"]  # (F, 1024)
-        norm_T_w2c = normalize_T_w2c(data["T_w2c"])
-        R_w2c = norm_T_w2c[:, :3, :3].repeat(length, 1, 1)  # (L, 4, 4)
-        t_w2c = norm_T_w2c[:, :3, 3].repeat(length, 1)  # (L, 3)
+        normed_T_w2c = normalize_T_w2c(data["T_w2c"])
+        R_w2c = normed_T_w2c[:, :3, :3].repeat(length, 1, 1)  # (L, 4, 4)
+        t_w2c = normed_T_w2c[:, :3, 3].repeat(length, 1)  # (L, 3)
         cam_angvel = compute_cam_angvel(R_w2c)  # (L, 6)
         cam_tvel = compute_cam_tvel(t_w2c)  # (L, 3)
 
+        K_fullimg = data["K"][None].expand(length, -1, -1)  # (L, 3, 3)
+
+        scales = torch.ones(length)
+        mean_scale = 1.0
         # Return
-        data = {
+        return_data = {
             # --- not batched
             "task": "CAP-Seq",
             "meta": data["meta"],
@@ -159,7 +174,7 @@ class RichSmplFullSeqDataset(data.Dataset):
             "cam_tvel": cam_tvel,
             "R_w2c": R_w2c,
             "bbx_xys": data["bbx_xys"],  # (F, 3)
-            "K_fullimg": data["K"][None].expand(length, -1, -1),  # (F, 3, 3)
+            "K_fullimg": K_fullimg,  # (L, 3, 3)
             "kp2d": data["kp2d"],  # (F, 17, 3)
             # --- dataset specific
             "model": "smplx",
@@ -167,8 +182,29 @@ class RichSmplFullSeqDataset(data.Dataset):
             "gt_smpl_params": data["gt_smpl_params"],
             "T_w2ay": T_w2ay,  # (4, 4)
             "T_w2c": data["T_w2c"],  # (4, 4)
+            "scales": scales,
+            "mean_scale": mean_scale,
+            "vimo_smpl_params": data["vimo_smpl_params"],
         }
-        return data
+
+        if "vimo_params_flip" in vimo_label:
+            flipped_trans_c = vimo_label["vimo_params_flip"]["pred_trans"]
+            orig_trans_c = data["vimo_smpl_params"]["pred_trans_c"]
+            tz = flipped_trans_c[..., 2]
+            tx = flipped_trans_c[..., 0]
+            focal = K_fullimg[0, 0, 0]
+            cx = K_fullimg[0, 0, 2]
+            width = data["meta_render"]["width_height"][0]
+
+            flipped_tx = tz * (width - 1 - 2 * cx) / focal - tx
+            avg_trans_c = torch.zeros_like(flipped_trans_c)
+            avg_trans_c[..., 0] = (flipped_tx + orig_trans_c[..., 0]) / 2
+            avg_trans_c[..., 0] = orig_trans_c[..., 0]
+            avg_trans_c[..., 1] = (flipped_trans_c[..., 1] + orig_trans_c[..., 1]) / 2
+            avg_trans_c[..., 2] = (tz + orig_trans_c[..., 2]) / 2
+            return_data["vimo_smpl_params"]["pred_trans_c"] = avg_trans_c
+
+        return return_data
 
     def __getitem__(self, idx):
         data = self._load_data(idx)

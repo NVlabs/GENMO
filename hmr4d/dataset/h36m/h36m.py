@@ -17,6 +17,7 @@ from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
 import imageio
 from hmr4d.utils.video_io_utils import read_video_np
 from hmr4d.utils.net_utils import get_valid_mask, repeat_to_max_len, repeat_to_max_len_dict
+from hmr4d.utils.geo_transform import normalize_T_w2c, as_identity
 
 
 class H36mSmplDataset(ImgfeatMotionDatasetBase):
@@ -146,8 +147,12 @@ class H36mSmplDataset(ImgfeatMotionDatasetBase):
         bbx_xys = data["bbx_xys"]  # (F, 3)
         K_fullimg = data["K_fullimg"].repeat(length, 1, 1)  # (F, 3, 3)
         f_imgseq = data["f_imgseq"]  # (F, 1024)
-        cam_angvel = compute_cam_angvel(T_w2c[:, :3, :3])  # (F, 6)  slightly different from WHAM
-        cam_tvel = compute_cam_tvel(T_w2c[:, :3, 3])  # (F, 3)
+
+        normed_T_w2c = normalize_T_w2c(T_w2c)
+
+        cam_angvel = compute_cam_angvel(normed_T_w2c[:, :3, :3])  # (F, 6)  slightly different from WHAM
+        cam_tvel = compute_cam_tvel(normed_T_w2c[:, :3, 3])  # (F, 3)
+        assert cam_tvel.sum() == 0, cam_tvel
 
         # Returns: do not forget to make it batchable! (last lines)
         max_len = self.motion_frames
@@ -164,7 +169,8 @@ class H36mSmplDataset(ImgfeatMotionDatasetBase):
             "kp2d": data["kp2d"],  # (F, 17, 3)
             "cam_angvel": cam_angvel,  # (F, 6)
             "cam_tvel": cam_tvel,  # (F, 3)
-            "T_w2c": T_w2c,  # (F, 4, 4)
+            "noisy_cam_tvel": cam_tvel,  # (F, 3)
+            "T_w2c": normed_T_w2c,  # (F, 4, 4)
             "mask": {
                 "valid": get_valid_mask(max_len, length),
                 "vitpose": False,
@@ -199,6 +205,7 @@ class H36mSmplDataset(ImgfeatMotionDatasetBase):
         return_data["kp2d"] = repeat_to_max_len(return_data["kp2d"], max_len)
         return_data["cam_angvel"] = repeat_to_max_len(return_data["cam_angvel"], max_len)
         return_data["cam_tvel"] = repeat_to_max_len(return_data["cam_tvel"], max_len)
+        return_data["noisy_cam_tvel"] = repeat_to_max_len(return_data["noisy_cam_tvel"], max_len)
         return_data["T_w2c"] = repeat_to_max_len(return_data["T_w2c"], max_len)
         return return_data
 
