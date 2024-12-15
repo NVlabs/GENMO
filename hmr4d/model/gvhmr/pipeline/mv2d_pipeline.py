@@ -267,14 +267,14 @@ class Pipeline(nn.Module):
             noise = torch.randn_like(kp2d)
             t = torch.randint(min_step, max_step + 1, [kp2d.shape[0]], dtype=torch.long, device=device)
             x_t = diffusion.q_sample(kp2d, t, noise=noise)
-            # input view generation
-            f_condition = {
-                "f_imgseq": inputs.get("f_imgseq", torch.zeros(kp2d.shape[0], L, 1024).to(device)),
-                "obs_x_t": x_t,
-                "t": t,
-            }
-            sds_model_output = self.denoiser3d.forward_singleview(length=length.repeat_interleave(3, dim=0), **f_condition)  # pred_x, pred_cam, static_conf_logits
-            singleview_2d = sds_model_output["singleview_2d"].detach()
+            with torch.no_grad():
+                f_condition = {
+                    "f_imgseq": inputs.get("f_imgseq", torch.zeros(kp2d.shape[0], L, 1024).to(device)),
+                    "obs_x_t": x_t,
+                    "t": t,
+                }
+                sds_model_output = self.denoiser3d.forward_singleview(length=length.repeat_interleave(3, dim=0), **f_condition)  # pred_x, pred_cam, static_conf_logits
+                singleview_2d = sds_model_output["singleview_2d"]
             sds_loss = F.mse_loss(singleview_2d, kp2d, reduction="none")
             sds_loss = (sds_loss * mask.repeat_interleave(3, dim=0)[..., None, None]).mean()
             total_loss += self.weights.sds * sds_loss

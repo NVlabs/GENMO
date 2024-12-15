@@ -101,8 +101,6 @@ class NetworkEncoderRoPE(nn.Module):
             17 * 32, hidden_features=self.latent_dim * 2, out_features=self.latent_dim, drop=dropout
         )
 
-        self._build_condition_embedder()
-
         # Transformer
         self.blocks = nn.ModuleList(
             [

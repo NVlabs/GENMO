@@ -45,6 +45,7 @@ pip install transformers==4.41.2
 pip install moviepy imageio
 pip install einops
 pip install dnspython
+pip install numpy==1.23.5
 
 # pip install -e third-party/DPVO
 pip install -e .
