@@ -261,7 +261,11 @@ class Pipeline(nn.Module):
         mask = inputs["mask"]
         
         if self.weights.get("sds", 0.0) > 0.0:
-            kp2d = model_output["mv2d"][:, :, 1:]   # exclude first view
+            kp2d = model_output["mv2d"]
+            repeats = 4
+            if self.weights.get("sds_exclude_first_view", True):
+                kp2d = kp2d[:, :, 1:]   # exclude first view
+                repeats = 3
             kp2d = kp2d.permute(0, 2, 1, 3, 4).reshape(-1, L, *kp2d.shape[3:])
             min_step, max_step = self.weights.get("sds_min_step", 20), self.weights.get("sds_max_step", 980)
             noise = torch.randn_like(kp2d)
@@ -273,10 +277,10 @@ class Pipeline(nn.Module):
                     "obs_x_t": x_t,
                     "t": t,
                 }
-                sds_model_output = self.denoiser3d.forward_singleview(length=length.repeat_interleave(3, dim=0), **f_condition)  # pred_x, pred_cam, static_conf_logits
+                sds_model_output = self.denoiser3d.forward_singleview(length=length.repeat_interleave(repeats, dim=0), **f_condition)  # pred_x, pred_cam, static_conf_logits
                 singleview_2d = sds_model_output["singleview_2d"]
             sds_loss = F.mse_loss(singleview_2d, kp2d, reduction="none")
-            sds_loss = (sds_loss * mask.repeat_interleave(3, dim=0)[..., None, None]).mean()
+            sds_loss = (sds_loss * mask.repeat_interleave(repeats, dim=0)[..., None, None]).mean()
             total_loss += self.weights.sds * sds_loss
             outputs["sds_loss"] = sds_loss
             

@@ -70,6 +70,7 @@ if len(args.exclude) > 0:
     print('total after exclusion:', len(cfg_files))
 
 
+slurm_cmds = []
 for cfg_f in cfg_files:
     cfg = osp.splitext(cfg_f)[0]
     cfg = osp.relpath(cfg, config_dir)
@@ -87,7 +88,6 @@ for cfg_f in cfg_files:
     if args.nodes > 1:
         cfg_tag += f'_{args.nodes}nodes'
 
-    slurm_cmds = []
     tag = f'{args.job_tag}.{cfg_tag}'
     tag = tag[:110] if len(tag) > 110 else tag
     slurm_cmds.append((cmd, tag))
