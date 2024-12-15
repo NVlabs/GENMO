@@ -67,7 +67,7 @@ def train(cfg: DictConfig) -> None:
                 version = int(details['version'])
             print(f"[Auto Resume] Loading. checkpoint: {details['checkpoint']} wandb_id: {details.get('wandb_id', None)}")
     
-    if cfg.task == 'test':
+    if cfg.task == 'test' and not cfg.no_checkpoint:
         test_cp = cfg.get('test_checkpoint', 'last')
         remote_run_dir = cfg.output_dir.replace('outputs', cfg.remote_results_path)
         version = find_last_version(remote_run_dir, cp=test_cp)
@@ -82,6 +82,10 @@ def train(cfg: DictConfig) -> None:
     # preparation
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(cfg.data, _recursive_=False)
     model: pl.LightningModule = hydra.utils.instantiate(cfg.model, _recursive_=False)
+    
+    if cfg.get('pretrain_2d_ckpt', None) is not None and cfg.ckpt_path is None:
+        load_pretrained_model(model, cfg.pretrain_2d_ckpt)
+    
     
     wandb_cfg = OmegaConf.to_container(cfg, resolve=True)
     if cfg.ckpt_path is not None:

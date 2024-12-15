@@ -197,7 +197,7 @@ class Pipeline(nn.Module):
         outputs["loss"] = total_loss
         return outputs
     
-    def forward_2d(self, inputs, train=False, global_step=0):
+    def forward_2d(self, inputs, train=False, global_step=0, diffusion=None):
         outputs = dict()
         length = inputs["length"]  # (B,) effective length of each sample
         device = inputs["obs"].device
@@ -222,42 +222,64 @@ class Pipeline(nn.Module):
         outputs.update({"2d_model_output": model_output, "2d_decode_dict": decode_dict})
         
         # second view generation
-        second_view = np.random.randint(1, self.num_views)
-        view_correspondence = (np.arange(self.num_views) + second_view) % self.num_views
-        input_view_id = (-second_view) % self.num_views
-        mv2d_shuffle = model_output["mv2d"][:, :, view_correspondence]
-        model_output['mv2d_shuffle'] = mv2d_shuffle
-        model_output['input_view_id'] = input_view_id
-        obs_sv = mv2d_shuffle[:, :, 0]
-        obs_sv = torch.cat([obs_sv, torch.ones_like(obs_sv[..., :1])], dim=-1)  # (B, L, J, 3)
-        f_condition = {
-            "obs": obs_sv,  # (B, L, J, 3)
-            "f_cliffcam": torch.zeros(B, L, 3).to(device),  # (B, L, 3)
-            "f_cam_angvel": torch.zeros(B, L, 6).to(device),  # (B, L, C=6)
-            "f_imgseq": torch.zeros(B, L, 1024).to(device),
-            "detach_j3d_for_mv2d": self.args.get('train2d_detach_j3d_for_mv2d', False),
-            "detach_cam_for_mv2d": self.args.get('train2d_detach_cam_for_mv2d', False)
-        }
-        if self.args.get('use_firstview_proj_cam_for_sideview', False):
-            f_condition["proj_2d_cam"] = model_output["proj_2d_cam"]
-        if self.fix_network_for_mv2d_second_view:
-            self.transfer_network_weights_to_copy()    
-            denoiser3d = self.denoiser3d_copy[0]
-        else:
-            denoiser3d = self.denoiser3d
-        model_output_sv = denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
-        # model_output_sv2 = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
-        # diff = (model_output_sv["pred_x"] - model_output_sv2["pred_x"]).abs()
-        # grad = torch.autograd.grad(model_output_sv["pred_x"].sum(), obs_sv, create_graph=True)[0]
-        if 'decode_dict' in model_output_sv:
-            decode_dict_sv = model_output_sv.pop("decode_dict")
-        else:
-            decode_dict_sv = self.endecoder.decode(model_output_sv["pred_x"])  # (B, L, C) -> dict
-        outputs.update({"2d_model_output_sv": model_output_sv, "2d_decode_dict_sv": decode_dict_sv})
+        if not self.weights.get("disable_second_view", False):
+            second_view = np.random.randint(1, self.num_views)
+            view_correspondence = (np.arange(self.num_views) + second_view) % self.num_views
+            input_view_id = (-second_view) % self.num_views
+            mv2d_shuffle = model_output["mv2d"][:, :, view_correspondence]
+            model_output['mv2d_shuffle'] = mv2d_shuffle
+            model_output['input_view_id'] = input_view_id
+            obs_sv = mv2d_shuffle[:, :, 0]
+            obs_sv = torch.cat([obs_sv, torch.ones_like(obs_sv[..., :1])], dim=-1)  # (B, L, J, 3)
+            f_condition = {
+                "obs": obs_sv,  # (B, L, J, 3)
+                "f_cliffcam": torch.zeros(B, L, 3).to(device),  # (B, L, 3)
+                "f_cam_angvel": torch.zeros(B, L, 6).to(device),  # (B, L, C=6)
+                "f_imgseq": torch.zeros(B, L, 1024).to(device),
+                "detach_j3d_for_mv2d": self.args.get('train2d_detach_j3d_for_mv2d', False),
+                "detach_cam_for_mv2d": self.args.get('train2d_detach_cam_for_mv2d', False)
+            }
+            if self.args.get('use_firstview_proj_cam_for_sideview', False):
+                f_condition["proj_2d_cam"] = model_output["proj_2d_cam"]
+            if self.fix_network_for_mv2d_second_view:
+                self.transfer_network_weights_to_copy()    
+                denoiser3d = self.denoiser3d_copy[0]
+            else:
+                denoiser3d = self.denoiser3d
+            model_output_sv = denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
+            # model_output_sv2 = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
+            # diff = (model_output_sv["pred_x"] - model_output_sv2["pred_x"]).abs()
+            # grad = torch.autograd.grad(model_output_sv["pred_x"].sum(), obs_sv, create_graph=True)[0]
+            if 'decode_dict' in model_output_sv:
+                decode_dict_sv = model_output_sv.pop("decode_dict")
+            else:
+                decode_dict_sv = self.endecoder.decode(model_output_sv["pred_x"])  # (B, L, C) -> dict
+            outputs.update({"2d_model_output_sv": model_output_sv, "2d_decode_dict_sv": decode_dict_sv})
 
         # ========== Compute Loss ========== #
         total_loss = 0
         mask = inputs["mask"]
+        
+        if self.weights.get("sds", 0.0) > 0.0:
+            kp2d = model_output["mv2d"][:, :, 1:]   # exclude first view
+            kp2d = kp2d.permute(0, 2, 1, 3, 4).reshape(-1, L, *kp2d.shape[3:])
+            min_step, max_step = self.weights.get("sds_min_step", 20), self.weights.get("sds_max_step", 980)
+            noise = torch.randn_like(kp2d)
+            t = torch.randint(min_step, max_step + 1, [kp2d.shape[0]], dtype=torch.long, device=device)
+            x_t = diffusion.q_sample(kp2d, t, noise=noise)
+            # input view generation
+            f_condition = {
+                "f_imgseq": inputs.get("f_imgseq", torch.zeros(kp2d.shape[0], L, 1024).to(device)),
+                "obs_x_t": x_t,
+                "t": t,
+            }
+            sds_model_output = self.denoiser3d.forward_singleview(length=length.repeat_interleave(3, dim=0), **f_condition)  # pred_x, pred_cam, static_conf_logits
+            singleview_2d = sds_model_output["singleview_2d"].detach()
+            sds_loss = F.mse_loss(singleview_2d, kp2d, reduction="none")
+            sds_loss = (sds_loss * mask.repeat_interleave(3, dim=0)[..., None, None]).mean()
+            total_loss += self.weights.sds * sds_loss
+            outputs["sds_loss"] = sds_loss
+            
         
         if self.weights.get("recon2d", 0.0) > 0.0:
             input_target = inputs["orig_obs"]

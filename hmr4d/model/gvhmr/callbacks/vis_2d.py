@@ -84,19 +84,23 @@ class Vis2D(pl.Callback):
             return
         
         if '2d_model_output' in outputs:
-            input_view_id = outputs['2d_model_output']['input_view_id']
             obs = outputs["batch"]["obs"]
             orig_obs = outputs["batch"]["orig_obs"]
             obs = torch.stack([obs, torch.zeros_like(obs), torch.zeros_like(obs), torch.zeros_like(obs)], dim=2)
-            obs[:, :, input_view_id] = orig_obs
             results = {
                 'obs': obs,
                 'mv2d': outputs['2d_model_output']['mv2d'],
-                'mv2d_shuffle': outputs['2d_model_output']['mv2d_shuffle'],
-                'mv2d_sv': outputs['2d_model_output_sv']['mv2d'],
-                'input_view_id': input_view_id,
+                # 'mv2d_shuffle': outputs['2d_model_output']['mv2d_shuffle'],
+                # 'mv2d_sv': outputs['2d_model_output_sv']['mv2d'],
+                # 'input_view_id': input_view_id,
                 # 'mv2d_proj': outputs['2d_model_output']['mv2d_proj'],
             }
+            if '2d_model_output_sv' in outputs:
+                results['mv2d_shuffle'] = outputs['2d_model_output_sv']['mv2d_shuffle']
+                results['mv2d_sv'] = outputs['2d_model_output_sv']['mv2d']
+                input_view_id = outputs['2d_model_output']['input_view_id']
+                results['obs'][:, :, input_view_id] = orig_obs
+                results['input_view_id'] = input_view_id
             self.log_2d(trainer, pl_module, batch_idx, results)
         elif 'diffusion' in outputs:
             results = outputs['diffusion']

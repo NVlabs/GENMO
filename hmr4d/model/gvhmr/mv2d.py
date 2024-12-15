@@ -27,6 +27,7 @@ from hmr4d.utils.geo.flip_utils import flip_smplx_params, avg_smplx_aa
 from hmr4d.model.gvhmr.utils.postprocess import pp_static_joint, pp_static_joint_cam, process_ik
 from motiondiff.utils.torch_transform import angle_axis_to_rotation_matrix, make_transform, transform_trans, inverse_transform
 from motiondiff.utils.tools import Timer
+from motiondiff.utils.torch_utils import interp_tensor_with_scipy
 from motiondiff.models.model_util import create_gaussian_diffusion
 from motiondiff.models.common.cfg_sampler import ClassifierFreeSampleModel
 from motiondiff.diffusion.resample import create_named_schedule_sampler
@@ -71,6 +72,8 @@ class MV2D(pl.LightningModule):
         self.smplx = make_smplx("supermotion_v437coco17")
         if 'diffusion' in model_cfg:
             self.init_diffusion()
+        else:
+            self.train_diffusion = self.test_diffusion = self.schedule_sampler = None
         
     def init_diffusion(self):
         self.train_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=True)
@@ -298,7 +301,8 @@ class MV2D(pl.LightningModule):
             # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/2d_test_obs.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
 
             # Forward and get loss
-            outputs = self.pipeline.forward_2d(batch, train=True, global_step=self.trainer.global_step)
+            outputs = self.pipeline.forward_2d(batch, train=True, global_step=self.trainer.global_step, diffusion=self.train_diffusion)
+            outputs['batch_size'] = B
 
         return outputs
     
@@ -357,7 +361,6 @@ class MV2D(pl.LightningModule):
             x_t = res["x_t-1"]
         kp2d = x_t
         
-        """ Multi View Diffusion Loop """
         cam_params = {
             "elevations": torch.zeros(B, L).to(device),
             "tilt": torch.zeros(B, L).to(device),
@@ -371,25 +374,87 @@ class MV2D(pl.LightningModule):
         j3d_recon, mv2d_recon = recon_from_2d(mv2d_norm, cam_dict['P'], 1024, 1024)
         # mv2d_recon2, _ = recon_from_2d(mv2d_recon, cam_dict['P'], 1024, 1024)
         
+        """ Multi View Diffusion Loop """
         cond = {
             "length": batch["length"].repeat_interleave(self.num_views, dim=0),
             "f_imgseq": batch.get("f_imgseq", torch.zeros(B, L, 1024).to(device)).repeat_interleave(self.num_views, dim=0),
         }
+        x_t_arr = []
+        x_0_arr = []
         x_t = torch.randn(obs_shape[0] * self.num_views, *obs_shape[1:], device=device)
         for t in indices:
             t = torch.tensor([t] * x_t.shape[0], device=device)
             out = diffusion.p_mean_variance(denoiser, x_t, t, model_kwargs=cond, clip_denoised=False)
             x0 = out["pred_xstart"]
+            x_0_arr.append(x0)
             res = diffusion.ddim_get_xt(x_t, t=t, pred_xstart=x0, eta=ddim_eta)
             x_t = res["x_t-1"]
+            x_t_arr.append(x_t)
+        x_t_progress = torch.stack(x_t_arr, dim=1)
+        x_t_progress = x_t_progress[:, :, 0]
+        x_t_progress = interp_tensor_with_scipy(x_t_progress, L, dim=1)
+        x_t_progress_sv = x_t_progress.reshape(B, self.num_views, *x_t_progress.shape[1:]).permute(0, 2, 1, 3, 4)
+        x_0_progress = torch.stack(x_0_arr, dim=1)
+        x_0_progress = x_0_progress[:, :, 0]
+        x_0_progress = interp_tensor_with_scipy(x_0_progress, L, dim=1)
+        x_0_progress_sv = x_0_progress.reshape(B, self.num_views, *x_0_progress.shape[1:]).permute(0, 2, 1, 3, 4)
         mv2d = x_t
+        
+        
+        """ Multi View Diffusion Loop """
+        cam_params = {
+            "elevations": torch.zeros(B, L).to(device),
+            "tilt": torch.zeros(B, L).to(device),
+            "radius": torch.ones(B, L).to(device) * 8,
+        }
+        cam_dict = generate_cam(cam_params, self.num_views)
+        cond = {
+            "length": batch["length"].repeat_interleave(self.num_views, dim=0),
+            "f_imgseq": batch.get("f_imgseq", torch.zeros(B, L, 1024).to(device)).repeat_interleave(self.num_views, dim=0),
+        }
+        x_t_arr = []
+        x_0_arr = []
+        x3d_t = torch.randn(obs_shape[0], *obs_shape[1:-1], 3, device=device)
+        x_t = project_keypoints(x3d_t, cam_dict['P'], 1024)
+        x_t = (x_t / torch.tensor([1024, 1024]).to(x_t)) * 2 - 1
+        x_t = x_t.permute(0, 2, 1, 3, 4).reshape(B * self.num_views, L, *x_t.shape[3:])
+        x_t_old = torch.randn(obs_shape[0] * self.num_views, *obs_shape[1:], device=device)
+        for t in indices:
+            t = torch.tensor([t] * x_t.shape[0], device=device)
+            out = diffusion.p_mean_variance(denoiser, x_t, t, model_kwargs=cond, clip_denoised=False)
+            x0 = out["pred_xstart"]
+            # reconstruct and reproject
+            x0_rs = x0.reshape(B, self.num_views, *x0.shape[1:]).permute(0, 2, 1, 3, 4)
+            x0_center = self.center_kp2d(x0_rs)
+            j3d_recon, x0_recon = recon_from_2d(x0_center, cam_dict['P'], 1024, 1024)
+            x0 = x0_recon.permute(0, 2, 1, 3, 4).reshape(B * self.num_views, L, *x0_recon.shape[3:])
+            x_0_arr.append(x0)
+            res = diffusion.ddim_get_xt(x_t, t=t, pred_xstart=x0, eta=ddim_eta)
+            x_t = res["x_t-1"]
+            x_t_arr.append(x_t)
+        x_t_progress = torch.stack(x_t_arr, dim=1)
+        x_t_progress = x_t_progress[:, :, 0]
+        x_t_progress = interp_tensor_with_scipy(x_t_progress, L, dim=1)
+        x_t_progress_tri = x_t_progress.reshape(B, self.num_views, *x_t_progress.shape[1:]).permute(0, 2, 1, 3, 4)
+        x_0_progress = torch.stack(x_0_arr, dim=1)
+        x_0_progress = x_0_progress[:, :, 0]
+        x_0_progress = interp_tensor_with_scipy(x_0_progress, L, dim=1)
+        x_0_progress_tri = x_0_progress.reshape(B, self.num_views, *x_0_progress.shape[1:]).permute(0, 2, 1, 3, 4)
+        mv2d_tri = x_t.reshape(B, self.num_views, *x_t.shape[1:]).permute(0, 2, 1, 3, 4)
         
         outputs = {
             'diffusion': {
+                'x_t': x_t.reshape(B, self.num_views, *x_t.shape[1:]).permute(0, 2, 1, 3, 4),
+                'x_t_old': x_t_old.reshape(B, self.num_views, *x_t_old.shape[1:]).permute(0, 2, 1, 3, 4),
                 'kp2d': kp2d,
                 'mv2d': mv2d.reshape(-1, self.num_views, *mv2d.shape[1:]).permute(0, 2, 1, 3, 4),
-                'mv2d_proj': mv2d_norm,
-                'mv2d_recon': mv2d_recon
+                # 'mv2d_progress_sv': x_t_progress_sv,
+                # 'mv2d_x0_progress_sv': x_0_progress_sv,
+                # 'mv2d_proj': mv2d_norm,
+                # 'mv2d_recon': mv2d_recon,
+                'mv2d_tri': mv2d_tri,
+                'mv2d_xt_progress': x_t_progress_tri,
+                'mv2d_x0_progress': x_0_progress_tri,
             }
         }
         return outputs
@@ -444,7 +509,7 @@ class MV2D(pl.LightningModule):
 
         # Forward and get loss
         if self.infer_mode == 'regression':
-            outputs = self.pipeline.forward_2d(batch, train=False, global_step=self.trainer.global_step)
+            outputs = self.pipeline.forward_2d(batch, train=False, global_step=self.trainer.global_step, diffusion=self.train_diffusion)
         else:
             outputs = self.infer_diffusion(batch)
         outputs["batch"] = batch
