@@ -125,7 +125,7 @@ class Pipeline(nn.Module):
         mask = inputs["mask"]["valid"]  # (B, L)
         
         # 0. MV2D loss
-        if self.weights.mv2d > 0.0 and global_step >= self.weights.get("mv2d_start_step", 0):
+        if self.weights.get('mv2d', 0.0) > 0.0 and global_step >= self.weights.get("mv2d_start_step", 0):
             mv2d = model_output["mv2d"]
             target_mv2d = inputs["mv2d_norm"]
             mv2d_loss = F.mse_loss(mv2d, target_mv2d[..., :2], reduction="none")
