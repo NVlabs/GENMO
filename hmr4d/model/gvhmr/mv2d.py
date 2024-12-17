@@ -418,6 +418,7 @@ class MV2D(pl.LightningModule):
         x_t = project_keypoints(x3d_t, cam_dict['P'], 1024)
         x_t = (x_t / torch.tensor([1024, 1024]).to(x_t)) * 2 - 1
         x_t = x_t.permute(0, 2, 1, 3, 4).reshape(B * self.num_views, L, *x_t.shape[3:])
+        x_t_orig = x_t.clone()
         x_t_old = torch.randn(obs_shape[0] * self.num_views, *obs_shape[1:], device=device)
         for t in indices:
             t = torch.tensor([t] * x_t.shape[0], device=device)
@@ -444,8 +445,8 @@ class MV2D(pl.LightningModule):
         
         outputs = {
             'diffusion': {
-                'x_t': x_t.reshape(B, self.num_views, *x_t.shape[1:]).permute(0, 2, 1, 3, 4),
-                'x_t_old': x_t_old.reshape(B, self.num_views, *x_t_old.shape[1:]).permute(0, 2, 1, 3, 4),
+                # 'x_t_orig': x_t_orig.reshape(B, self.num_views, *x_t.shape[1:]).permute(0, 2, 1, 3, 4),
+                # 'x_t_old': x_t_old.reshape(B, self.num_views, *x_t_old.shape[1:]).permute(0, 2, 1, 3, 4),
                 'kp2d': kp2d,
                 'mv2d': mv2d.reshape(-1, self.num_views, *mv2d.shape[1:]).permute(0, 2, 1, 3, 4),
                 # 'mv2d_progress_sv': x_t_progress_sv,
