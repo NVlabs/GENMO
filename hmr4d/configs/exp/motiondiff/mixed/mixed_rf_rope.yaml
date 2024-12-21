@@ -2,7 +2,7 @@
 defaults:
     - override /data: mocap/trainX_testY
     - override /model: gvhmr/gvhmr_pl
-    - override /endecoder: gvhmr/v1_amass_local_bedlam_cam
+    - override /endecoder: gvhmr/v1_amass_local_bedlam_cam_clipstd
     - override /optimizer: adamw_2e-4
     - override /scheduler_cfg: epoch_half_200_350
     - override /train_datasets:
@@ -25,15 +25,20 @@ defaults:
           - metric_rich
           - metric_3dpw
 
-exp_name_base: mixed_2step_ddim_rope
+exp_name_base: mixed_rf_rope
 exp_name_var: ""
 exp_name: ${exp_name_base}_${exp_name_var}
 data_name: mocap_mixed_v1
-
+sde:
+    T: 1.0
+    sampling_eps: 0.0
+    sample_N: 100
+    pred_mode: z1
 pipeline:
-    _target_: hmr4d.model.gvhmr.pipeline.mfm_pipeline.Pipeline
+    _target_: hmr4d.model.gvhmr.pipeline.mfm_pipeline2.Pipeline
     args_denoiser3d:
-        _target_: hmr4d.network.mdm.mdm_2step_rope2.MDM2Step
+        _target_: hmr4d.network.mdm.mdm_rf_rope.MDMRF
+        args: ${pipeline.args}
         model_cfg:
             # pretrained_checkpoint:
             #     path:  /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jiefengl/jiefengl/mdm_egosmpl_v12_contact_b64_gpu8_node1/version_3/checkpoints/model-step=0100000.ckpt
@@ -49,12 +54,13 @@ pipeline:
                 guidance_param: 2.5
                 ddim_eta: 0.0
             denoiser:
-                type: hmr4d.network.mdm.mdm_denoiser_rope.MDMDenoiserROPE
+                type: hmr4d.network.mdm.mdm_denoiser_rope2.MDMDenoiserROPE
                 modeltype: ''
                 nfeats: 1
                 num_actions: 1
                 num_frames: ${pipeline.args_denoiser3d.max_len}
-                output_dim: 166
+                njoints: ${pipeline.args_denoiser3d.motion_rep_dim}
+                output_dim: ${pipeline.args_denoiser3d.motion_rep_dim}
                 translation: true
                 pose_rep: rot6d
                 # hint_rep: kpt2d_cam_vel
@@ -88,10 +94,14 @@ pipeline:
                 #     l6: l3
                 #     l7: l3
                 use_motion_mask: true
-        motion_rep_dim: 160
+                args: ${pipeline.args}
+
+        sde: ${sde}
+        motion_rep_dim: 157
         max_len: 120
         cliffcam_dim: 3
         cam_angvel_dim: 6
+        cam_t_vel_dim: 3
         imgseq_dim: 1024
         latent_dim: 512
         num_layers: 12
@@ -117,11 +127,29 @@ pipeline:
         static_conf:
             vel_thr: 0.15
 
-        infer_version: 3
+        infer_version: 2
+        in_attr:
+            - obs
+            - bbx
+            - imgfeat
+            - cam_angvel
+            # - cam_t_vel
+        uncond_prob:
+            obs: 0.1
+            f_cliffcam: 0.1
+            f_imgseq: 0.5
+            f_cam_angvel: 0.5
+            # f_cam_t_vel: 0.1
+        out_attr:
+            pred_cam: 3
+            # cam_t_vel: 3
+            # - cam_angvel
+            # - cam_scale
+
 data:
     loader_opts:
         train:
-            batch_size: 128
+            batch_size: 256
             num_workers: 12
 
 pl_trainer:

@@ -180,3 +180,7 @@ tensorboard
 glove
 out
 batch_*
+
+third-party
+*.pth
+examples*

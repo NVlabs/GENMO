@@ -155,6 +155,12 @@ class Pipeline(nn.Module):
                     betas=decode_dict['betas'],
                     body_pose=decode_dict['body_pose']
                 )
+                outputs["pred_smpl_params_global"] = {
+                    "body_pose": decode_dict["body_pose"],
+                    "betas": decode_dict["betas"],
+                    **pred_smpl_params_global,
+                }
+                outputs["static_conf_logits"] = model_output["static_conf_logits"]
             elif self.args.infer_version == 3:
                 if 'vimo_smpl_params' in inputs:
                     vimo_smpl_params = inputs['vimo_smpl_params']
@@ -302,6 +308,24 @@ class Pipeline(nn.Module):
             total_loss += simple_loss_init
             outputs["simple_loss_init"] = simple_loss_init
             outputs_init["simple_loss"] = simple_loss_init
+
+        if "pred_x_start_drift_init" in model_output:
+            pred_x_start_drift_init = model_output["pred_x_start_drift_init"]
+            simple_loss_drift_init = F.mse_loss(pred_x_start_drift_init, model_output["target_drift_init"], reduction="none")[:, :, -151:]
+            mask_simple_drift_init = mask[:, :, None].expand(-1, -1, simple_loss_drift_init.size(2)).clone()  # (B, L, C)
+            mask_simple_drift_init[inputs["mask"]["spv_incam_only"], :, -9:] = False  # 3dpw training
+            simple_loss_drift_init = (simple_loss_drift_init * mask_simple_drift_init * valid_loss_mask * t_weights[:, None, None]).mean()
+            total_loss += simple_loss_drift_init
+            outputs["simple_loss_drift_init"] = simple_loss_drift_init
+
+        if "pred_x_start_drift" in model_output:
+            pred_x_start_drift = model_output["pred_x_start_drift"]
+            simple_loss_drift = F.mse_loss(pred_x_start_drift, model_output["target_drift"], reduction="none")[:, :, -151:]
+            mask_simple_drift = mask[:, :, None].expand(-1, -1, simple_loss_drift.size(2)).clone()  # (B, L, C)
+            mask_simple_drift[inputs["mask"]["spv_incam_only"], :, -9:] = False  # 3dpw training
+            simple_loss_drift = (simple_loss_drift * mask_simple_drift * valid_loss_mask * t_weights[:, None, None]).mean()
+            total_loss += simple_loss_drift
+            outputs["simple_loss_drift"] = simple_loss_drift
 
         if 'cam_t_vel' in self.args.out_attr:
             pred_cam_t_vel = model_output["pred_cam_t_vel"]

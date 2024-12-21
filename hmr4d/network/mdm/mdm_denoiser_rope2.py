@@ -269,7 +269,7 @@ class MDMDenoiserROPE(nn.Module):
         self.last_encoded_text = encoded_text
         return encoded_text
 
-    def forward(self, x, timesteps, y=None, motion_mask=None, observed_motion=None, rm_text_flag=None, rm_kpt_flag=None, global_motion=None, global_joint_mask=None, global_joint_func=None, return_aux=False, **kwargs):
+    def forward(self, x, timesteps, y=None, motion_mask=None, observed_motion=None, rm_text_flag=None, rm_kpt_flag=None, global_motion=None, global_joint_mask=None, global_joint_func=None, return_aux=False, clip_cam=True, **kwargs):
         """
         x: [batch_size, njoints, nfeats, max_frames], denoted x_t in the paper
         timesteps: [batch_size] (int)
@@ -402,7 +402,8 @@ class MDMDenoiserROPE(nn.Module):
         if 'pred_cam' in self.args.out_attr:
             pred_cam = self.pred_cam_head(xseq)
             pred_cam = pred_cam * self.pred_cam_std + self.pred_cam_mean
-            torch.clamp_min_(pred_cam[..., 0], 0.25)  # min_clamp s to 0.25 (prevent negative prediction)
+            if clip_cam:
+                torch.clamp_min_(pred_cam[..., 0], 0.25)  # min_clamp s to 0.25 (prevent negative prediction)
             output["pred_cam"] = pred_cam
 
         if 'cam_t_vel' in self.args.out_attr:

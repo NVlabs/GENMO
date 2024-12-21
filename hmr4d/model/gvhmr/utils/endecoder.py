@@ -18,13 +18,16 @@ from . import stats_compose
 
 
 class EnDecoder(nn.Module):
-    def __init__(self, stats_name="DEFAULT_01", noise_pose_k=10):
+    def __init__(self, stats_name="DEFAULT_01", noise_pose_k=10, clip_std=False):
         super().__init__()
         # Load mean, std
         stats = getattr(stats_compose, stats_name)
         Log.info(f"[EnDecoder] Use {stats_name} for statistics!")
         self.register_buffer("mean", torch.tensor(stats["mean"]).float(), False)
         self.register_buffer("std", torch.tensor(stats["std"]).float(), False)
+        if clip_std:
+            self.std = torch.clamp(self.std, 0.1, 1)
+        self.clip_std = clip_std
 
         # option
         self.noise_pose_k = noise_pose_k
@@ -194,6 +197,11 @@ MainStore.store(name="v1", node=cfg_base(stats_name="MM_V1"), group=group_name)
 MainStore.store(
     name="v1_amass_local_bedlam_cam",
     node=cfg_base(stats_name="MM_V1_AMASS_LOCAL_BEDLAM_CAM"),
+    group=group_name,
+)
+MainStore.store(
+    name="v1_amass_local_bedlam_cam_clipstd",
+    node=cfg_base(stats_name="MM_V1_AMASS_LOCAL_BEDLAM_CAM", clip_std=True),
     group=group_name,
 )
 

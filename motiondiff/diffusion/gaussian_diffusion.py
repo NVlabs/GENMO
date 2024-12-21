@@ -415,8 +415,8 @@ class GaussianDiffusion:
         
         if model_output is None:
             model_output = model(x, self._scale_timesteps(t), **model_kwargs)
+            aux_output = {}
             if isinstance(model_output, dict):
-                aux_output = {}
                 for k, v in model_output.items():
                     if k != "pred_x_start":
                         aux_output[k] = v

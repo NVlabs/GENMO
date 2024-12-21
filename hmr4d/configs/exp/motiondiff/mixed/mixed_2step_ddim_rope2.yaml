@@ -2,7 +2,7 @@
 defaults:
     - override /data: mocap/trainX_testY
     - override /model: gvhmr/gvhmr_pl
-    - override /endecoder: gvhmr/v1_amass_local_bedlam_cam
+    - override /endecoder: gvhmr/v1_amass_local_bedlam_cam_clipstd
     - override /optimizer: adamw_2e-4
     - override /scheduler_cfg: epoch_half_200_350
     - override /train_datasets:
@@ -122,7 +122,7 @@ pipeline:
         static_conf:
             vel_thr: 0.15
 
-        infer_version: 3
+        infer_version: 2
         in_attr:
             - obs
             - bbx
