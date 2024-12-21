@@ -1,6 +1,9 @@
 import torch
 import pytorch_lightning as pl
 import numpy as np
+import shutil
+import os
+import wandb
 from pathlib import Path
 from einops import einsum, rearrange
 
@@ -13,6 +16,7 @@ from hmr4d.utils.vis.cv2_utils import cv2, draw_bbx_xys_on_image_batch, draw_coc
 from hmr4d.utils.video_io_utils import read_video_np, get_video_lwh, save_video
 from hmr4d.utils.geo_transform import apply_T_on_points
 from hmr4d.utils.seq_utils import rearrange_by_mask
+from hmr4d.model.gvhmr.utils.mv2d_utils import draw_motion_2d, coco_joint_parents, draw_mv_imgs, images_to_video
 
 
 class MetricMocap(pl.Callback):
@@ -34,12 +38,66 @@ class MetricMocap(pl.Callback):
         self.smplx2smpl = torch.load("hmr4d/utils/body_model/smplx2smpl_sparse.pt")
         self.faces_smplx = self.smplx.faces
         self.faces_smpl = self.smpl["male"].faces
+        self.img_h = self.img_w = 256
 
         # The metrics are calculated similarly for val/test/predict
         self.on_test_batch_end = self.on_validation_batch_end = self.on_predict_batch_end
 
         # Only validation record the metrics with logger
         self.on_test_epoch_end = self.on_validation_epoch_end = self.on_predict_epoch_end
+        
+            
+    def log_2d(self, trainer, pl_module, batch_idx, results):
+        mv2d = results['mv2d']
+        input_view_id = results['input_view_id']
+        for ind in range(mv2d.shape[0]):
+            vid_file = f'out/video/vis_2d_3dpw/b{batch_idx:03d}_i{ind:02d}.mp4'
+            os.makedirs(os.path.dirname(vid_file), exist_ok=True)
+            frame_dir = os.path.splitext(vid_file)[0] + '_frames'
+            os.makedirs(frame_dir, exist_ok=True)
+            # create blank image
+            for t in range(mv2d.shape[1]):
+                mv_imgs = []
+                obs_img = draw_mv_imgs(results['obs'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True, highlight_view=input_view_id)
+                mv_imgs.append(obs_img)
+                # mv2d_proj = draw_mv_imgs(results['mv2d_proj'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True)
+                # mv_imgs.append(mv2d_proj)
+                mv2d_img = draw_mv_imgs(mv2d[ind, t].cpu(), coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True)
+                mv_imgs.append(mv2d_img)
+                mv2d_shuffle_img = draw_mv_imgs(results['mv2d_shuffle'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True, highlight_view=input_view_id)
+                mv_imgs.append(mv2d_shuffle_img)
+                mv2d_sv_img = draw_mv_imgs(results['mv2d_sv'][ind, t], coco_joint_parents, self.img_w, self.img_h, add_coco_root=True, unnormalize=True, highlight_view=input_view_id)
+                mv_imgs.append(mv2d_sv_img)
+                mv_imgs = np.concatenate(mv_imgs, axis=0)
+
+                if trainer.global_rank == 0:
+                    cv2.imwrite(f'{frame_dir}/{t:06d}.jpg', mv_imgs[..., ::-1])
+
+            if trainer.global_rank == 0:
+                images_to_video(frame_dir, vid_file, fps=30, verbose=False)
+                shutil.rmtree(frame_dir, ignore_errors=True)
+            
+                if isinstance(wandb.run, wandb.sdk.wandb_run.Run):
+                    pl_module.logger.log_metrics({f'3dpw/b{batch_idx:03d}_i{ind:02d}': wandb.Video(vid_file)})
+                    # wandb.log({f'vis_2d/{ind:04d}': wandb.Video(vid_file)}, step=trainer.global_step if trainer is not None else 0)
+        return
+    
+    def vis_2d(self, outputs, trainer, pl_module, batch_idx):
+        input_view_id = outputs['2d_model_output']['input_view_id']
+        obs = outputs["batch"]["obs"]
+        orig_obs = outputs["batch"]["orig_obs"]
+        obs = torch.stack([obs, torch.zeros_like(obs), torch.zeros_like(obs), torch.zeros_like(obs)], dim=2)
+        obs[:, :, input_view_id] = orig_obs
+        results = {
+            'obs': obs,
+            'mv2d': outputs['2d_model_output']['mv2d'],
+            'mv2d_shuffle': outputs['2d_model_output']['mv2d_shuffle'],
+            'mv2d_sv': outputs['2d_model_output_sv']['mv2d'],
+            'input_view_id': input_view_id,
+            # 'mv2d_proj': outputs['2d_model_output']['mv2d_proj'],
+        }
+        self.log_2d(trainer, pl_module, batch_idx, results)
+        
 
     # ================== Batch-based Computation  ================== #
     def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
@@ -48,6 +106,9 @@ class MetricMocap(pl.Callback):
         dataset_id = batch["meta"][0]["dataset_id"]
         if dataset_id != "3DPW":
             return
+        
+        if 'outputs_2d' in outputs and outputs['outputs_2d']['vis_2d']:
+            self.vis_2d(outputs['outputs_2d'], trainer, pl_module, batch_idx)
 
         # Move to cuda if not
         self.smplx = self.smplx.cuda()
@@ -86,6 +147,7 @@ class MetricMocap(pl.Callback):
         camcoord_metrics = compute_camcoord_metrics(batch_eval, mask=mask, pelvis_idxs=[2, 3])
         for k in camcoord_metrics:
             self.metric_aggregator[k][vid] = as_np_array(camcoord_metrics[k])
+            # print(f"{vid} {k}: {camcoord_metrics[k].mean()}")
 
         if False:  # Render incam (simple)
             from hmr4d.utils.vis.renderer_utils import simple_render_mesh_background

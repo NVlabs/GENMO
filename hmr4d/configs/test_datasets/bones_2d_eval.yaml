@@ -1,0 +1,21 @@
+bones_2d:
+  _target_: hmr4d.dataset.wild.bones_2d_dataset_v2.Bones2DDatasetV2SingleView
+  split: test
+  precompute_data_folder:
+  always_start_from_first_frame: true
+  use_orig_length: true
+  return_smpl: true
+  num_frames: 120
+  num_data: 100
+  shuffle_data_seed: 7
+  img_h: 1024
+  img_w: 1024
+  cam_radius: 8
+  cam_elevation: 0
+  focal_scale: 2
+  sample_beta: true
+  cam_aug_cfg:
+    elevation_mean: 5
+    elevation_std: 10
+    radius_min: 2
+    radius_max: 16

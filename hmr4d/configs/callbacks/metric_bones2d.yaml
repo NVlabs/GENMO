@@ -1,0 +1,2 @@
+metric_bones2d:
+  _target_: hmr4d.model.gvhmr.callbacks.metric_bones2d.MetricMocap

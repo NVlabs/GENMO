@@ -3,7 +3,7 @@ defaults:
   - override /data: mocap/testY
   - override /test_datasets:
       - bones_2d_test
-      - 3dpw/fliptest
+      # - 3dpw/fliptest
   - override /callbacks:
       - vis_2d
       - metric_3dpw

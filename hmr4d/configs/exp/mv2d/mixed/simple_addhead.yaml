@@ -16,7 +16,7 @@ defaults:
           - rich/all
           - 3dpw/fliptest
     - override /callbacks:
-          - simple_ckpt_saver/every10e_top100
+          - simple_ckpt_saver/every100e_top100
           - prog_bar/prog_reporter_every0.1
           - train_speed_timer/base
           - lr_monitor/pl
@@ -56,6 +56,7 @@ pipeline:
 
 network:
     _target_: hmr4d.network.mv2d.relative_transformer_addhead.NetworkEncoderRoPE
+    # _target_: hmr4d.network.mv2d.relative_transformer_cam.NetworkEncoderRoPE  # debug
     num_views: ${model_cfg.num_views}
 
 data:

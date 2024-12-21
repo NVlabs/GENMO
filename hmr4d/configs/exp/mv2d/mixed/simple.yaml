@@ -16,7 +16,7 @@ defaults:
           - rich/all
           - 3dpw/fliptest
     - override /callbacks:
-          - simple_ckpt_saver/every10e_top100
+          - simple_ckpt_saver/every100e_top100
           - prog_bar/prog_reporter_every0.1
           - train_speed_timer/base
           - lr_monitor/pl

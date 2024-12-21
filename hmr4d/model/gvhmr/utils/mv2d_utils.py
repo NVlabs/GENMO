@@ -5,6 +5,7 @@ import cv2
 import shutil
 from motiondiff.utils.vis import images_to_video
 from .geom import batch_triangulate_torch, perspective_projection, lookat_correct, spherical_to_cartesian
+from motiondiff.utils.torch_transform import rotation_matrix_to_angle_axis, make_transform, quat_mul, angle_axis_to_quaternion, angle_axis_to_rotation_matrix, quaternion_to_rotation_matrix, inverse_transform
 
 
 coco_joint_parent_mapping = {
@@ -105,7 +106,7 @@ def draw_motion_2d(motion_2d, fname, joint_parents, img_w, img_h, fps=30, show_j
     os.makedirs(frame_dir, exist_ok=True)
     # create blank image
     for t in range(motion_2d.shape[0]):
-        mv_imgs = draw_mv_imgs(motion_2d[t], joint_parents, img_w, img_h, show_joints=show_joints, mask=mask[t])
+        mv_imgs = draw_mv_imgs(motion_2d[t], joint_parents, img_w, img_h, show_joints=show_joints, mask=mask[t] if mask is not None else None)
         cv2.imwrite(f'{frame_dir}/{t:06d}.jpg', mv_imgs[..., ::-1])
 
     images_to_video(frame_dir, fname, fps=fps)
@@ -158,4 +159,104 @@ def project_3d_to_2d(kpt3d_recon, cam_P, img_h, img_w, num_views, mean=None, std
     samples_recon = samples_recon.permute(0, 2, 1).unsqueeze(2)
     return samples_recon
 
+
+
+def generate_cam(mv2d_cam_params, num_views=4):
+    device = mv2d_cam_params['elevations'].device
+    orig_shape = mv2d_cam_params['elevations'].shape[:2]
+    elevations = mv2d_cam_params['elevations'].view(-1, 1)
+    radius = mv2d_cam_params['radius'].view(-1, 1)
+    tilt = mv2d_cam_params['tilt'].view(-1, 1)
     
+    def get_naive_intrinsics(res, focal_scale):
+        # Assume 45 degree FOV
+        img_w, img_h = res
+        focal_length = (img_w * img_w + img_h * img_h) ** 0.5 * focal_scale
+        cam_intrinsics = torch.eye(3).repeat(1, 1, 1).float()
+        cam_intrinsics[:, 0, 0] = focal_length
+        cam_intrinsics[:, 1, 1] = focal_length
+        cam_intrinsics[:, 0, 2] = img_w/2.
+        cam_intrinsics[:, 1, 2] = img_h/2.
+        return cam_intrinsics
+    
+    def lookat_correct(eye, at, up):
+        zaxis = (at - eye) / torch.norm(at - eye, dim=-1, keepdim=True)
+        xaxis = torch.cross(up, zaxis, dim=-1)
+        xaxis = xaxis / torch.norm(xaxis, dim=-1, keepdim=True)
+        yaxis = torch.cross(zaxis, xaxis, dim=-1)
+        view_matrix = torch.zeros((eye.shape[0], 4, 4), device=device)
+        view_matrix[:, :3, 0] = xaxis
+        view_matrix[:, :3, 1] = yaxis
+        view_matrix[:, :3, 2] = zaxis
+        view_matrix[:, :3, 3] = eye
+        view_matrix[:, 3, 3] = 1.0
+        return view_matrix
+    
+    def spherical_to_cartesian(r, azimuth, elevation):
+        azimuth = torch.deg2rad(azimuth)
+        elevation = torch.deg2rad(elevation)
+        x = r * torch.cos(elevation) * torch.cos(azimuth)
+        y = r * torch.cos(elevation) * torch.sin(azimuth)
+        z = r * torch.sin(elevation)
+        return torch.stack([x, y, z], dim=-1)
+
+    # elevations = (torch.ones((1, num_views)) * 0.0).to(device)
+    # radius = (torch.ones((1, num_views)) * 8.0).to(device)
+    # tilt = (torch.ones((1, num_views))).to(device)
+    elevations = elevations.repeat(1, num_views)
+    radius = radius.repeat(1, num_views)
+    tilt = tilt.repeat(1, num_views)
+    azimuths = torch.linspace(0, 360, num_views + 1)[:num_views].to(device)
+    azimuths = azimuths.unsqueeze(0).expand(elevations.shape[0], -1)
+    eyes = spherical_to_cartesian(radius, azimuths, elevations)
+    
+    eyes_flat = eyes.view(-1, 3)
+    at = torch.zeros((eyes_flat.shape[0], 3), device=device)
+    up = torch.tensor([0., 0., 1.], device=device)[None, :].expand(eyes_flat.shape[0], -1)
+    c2w = lookat_correct(eyes_flat, at, up).reshape(eyes.shape[0], num_views, 4, 4)
+    if torch.norm(tilt) > 0:
+        tilt_rot = angle_axis_to_rotation_matrix(torch.stack([torch.zeros_like(tilt), torch.zeros_like(tilt), torch.deg2rad(tilt)], dim=-1))
+        c2w = c2w @ make_transform(tilt_rot, torch.zeros(3).to(tilt_rot))
+    w2c = inverse_transform(c2w)
+    
+    cam_intrinsics = get_naive_intrinsics((1024, 1024), 2)
+    intrinsics = cam_intrinsics.to(device).unsqueeze(0).repeat(eyes.shape[0], num_views, 1, 1)
+    P = torch.matmul(intrinsics, w2c[..., :3, :])
+    
+    cam_dict = {
+        'c2w': c2w.reshape(orig_shape + c2w.shape[1:]),
+        'w2c': w2c.reshape(orig_shape + w2c.shape[1:]),
+        'intrinsics': intrinsics.reshape(orig_shape + intrinsics.shape[1:]),
+        'P': P.reshape(orig_shape + P.shape[1:]),
+        'azimuths': azimuths.reshape(orig_shape + azimuths.shape[1:]),
+        'elevations': elevations.reshape(orig_shape + elevations.shape[1:]),
+        'radius': radius.reshape(orig_shape + radius.shape[1:]),
+    }
+    
+    return cam_dict
+
+
+def project_keypoints(kpt3d, cam_P, img_h):
+    kpt3d_pad = torch.cat((kpt3d, torch.ones_like(kpt3d[..., :1])), dim=-1)
+    local_kpt2d_new = (cam_P @ kpt3d_pad[:, :, None].transpose(-1, -2)).transpose(-1, -2)
+    local_kpt2d_new = local_kpt2d_new[..., :2] / local_kpt2d_new[..., 2:]
+    local_kpt2d_new[..., 1] = img_h - local_kpt2d_new[..., 1]
+    return local_kpt2d_new
+
+
+def recon_from_2d(samples, cam_P, img_h, img_w):
+    """ unnormalization """
+    local_kpt2d = (samples + 1) * 0.5 * torch.tensor([img_w, img_h], device=samples.device)
+    local_kpt2d_orig = local_kpt2d.clone()
+    local_kpt2d[..., 1] = img_h - local_kpt2d[..., 1]
+    """ triangulate """
+    local_kpt2d_rs = local_kpt2d.reshape(-1, *local_kpt2d.shape[2:])
+    cam_P_rs = cam_P.reshape(-1, *cam_P.shape[2:])
+    kpt3d_recon = batch_triangulate_torch(local_kpt2d_rs, cam_P_rs)[..., :3]
+    kpt3d_recon = kpt3d_recon.reshape(local_kpt2d.shape[:2] + kpt3d_recon.shape[1:])
+    """ reprojection """
+    local_kpt2d_recon = project_keypoints(kpt3d_recon, cam_P, img_h)
+    # sanity check: local_kpt2d_recon - local_kpt2d_orig ~= 0
+    """ normalization """
+    samples_recon = (local_kpt2d_recon / torch.tensor([img_w, img_h]).to(local_kpt2d_recon)) * 2 - 1
+    return kpt3d_recon, samples_recon

@@ -29,7 +29,7 @@ class Bones2DDatasetV2(KP2DDatasetV2):
                  split_folder='inputs/mv2d/splits/v1', num_keypoints=17, num_frames=120, num_data=None, split="train", shuffle_data_seed=None, debug=False, rng=None, img_w=1024, img_h=1024, num_views=4,
                  cam_radius=8, cam_elevation=0, focal_scale=2, synthetic_view_type='even', normalize_type='image_size', bbox_scale=1.4, use_coco_pelvis=False, 
                  normalize_stats_dir=None, sample_beta=True, cam_aug_cfg={}, use_our_normalization=False, always_start_from_first_frame=False, use_orig_length=False, hand_leg_aug=False,
-                 precompute_data_folder='/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR/bones2d/v1', device='cpu', **kwargs):
+                 precompute_data_folder='/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR/bones2d/v1', return_smpl=False, device='cpu', **kwargs):
         super().__init__(num_frames, img_w, img_h, num_views, cam_radius, cam_elevation, focal_scale, synthetic_view_type, normalize_type, bbox_scale, normalize_stats_dir, cam_aug_cfg, use_our_normalization, hand_leg_aug, use_orig_length)
         self.datapath = datapath
         meta = pd.read_csv(meta_file)
@@ -68,6 +68,7 @@ class Bones2DDatasetV2(KP2DDatasetV2):
         self.smpl = make_smplx('smpl').to(device)
         self.precompute_data_folder = precompute_data_folder
         self.precompute = self.precompute_data_folder is not None
+        self.return_smpl = return_smpl
         self.device = device
         
     def get_global_rot_augmentation(self, rng):
@@ -93,6 +94,7 @@ class Bones2DDatasetV2(KP2DDatasetV2):
             else:
                 idx = np.random.randint(0, pose.shape[0] - self.num_frames + 1)
             pose = pose[idx:idx + self.num_frames]
+        pose_orig = pose
         pose = angle_axis_to_rotation_matrix(pose.view(-1, 24, 3))
         rmat = self.get_global_rot_augmentation(rng)
         rmat = self.base_rot_mat @ rmat
@@ -108,6 +110,7 @@ class Bones2DDatasetV2(KP2DDatasetV2):
         target = {
             'rng': rng,
             'pose': pose,
+            'pose_orig': pose_orig,
             'betas': shape,
             'res': torch.tensor([self.img_w, self.img_h]).float(),
             'm_length': pose.shape[0],
@@ -159,6 +162,7 @@ class Bones2DDatasetV2SingleView(Bones2DDatasetV2):
             end = start + self.num_frames
             for key in {'obs_kp2d', 'mask', 'conf'}:
                 data[key] = data[key][start:end]
+            data['length'] = self.num_frames
         elif length < self.num_frames:
             for key in {'obs_kp2d', 'mask', 'conf'}:
                 val = data[key]
@@ -183,7 +187,7 @@ class Bones2DDatasetV2SingleView(Bones2DDatasetV2):
                 mask = np.zeros((self.num_frames, ))
                 mask[:m_length] = 1
             conf = mask[:, None].repeat(self.num_keypoints, axis=-1)
-            return {
+            outputs = {
                 'idx': self.split_index[item],
                 'obs_kp2d': target['obs_kp2d'].astype(np.float32),
                 'mask': mask.astype(np.bool8),
@@ -194,6 +198,10 @@ class Bones2DDatasetV2SingleView(Bones2DDatasetV2):
                     'dataset_id': 'bones2d_v2',
                 }
             }
+            if self.return_smpl:
+                outputs['pose'] = target['pose_orig']
+                outputs['betas'] = target['betas']
+            return outputs
 
 
 if __name__ == '__main__':

@@ -30,6 +30,7 @@ from hmr4d.utils.geo.hmr_global import (
 )
 from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
 from hmr4d.utils.smplx_utils import make_smplx
+from hmr4d.model.gvhmr.utils.mv2d_utils import draw_motion_2d, coco_joint_parents
 
 
 class Pipeline(nn.Module):
@@ -37,10 +38,15 @@ class Pipeline(nn.Module):
         super().__init__()
         self.args = args
         self.weights = args.weights  # loss weights
+        self.fix_network_for_mv2d_second_view = args.get('fix_network_for_mv2d_second_view', False)
 
         # Networks
         self.num_views = args.num_views
         self.denoiser3d = instantiate(args_denoiser3d, _recursive_=False)
+        if self.fix_network_for_mv2d_second_view:
+            self.denoiser3d_copy = [instantiate(args_denoiser3d, _recursive_=False)]
+            for parameter in self.denoiser3d_copy[0].parameters():
+                parameter.requires_grad = False
         # Log.info(self.denoiser3d)
 
         # Normalizer
@@ -51,10 +57,12 @@ class Pipeline(nn.Module):
             self.register_buffer("cam_angvel_std", torch.tensor(cam_angvel_stats["std"]), persistent=False)
             
         self.denoiser3d.endecoder = [self.endecoder]
+        if self.fix_network_for_mv2d_second_view:
+            self.denoiser3d_copy[0].endecoder = [self.endecoder]
 
     # ========== Training ========== #
 
-    def forward(self, inputs, train=False, postproc=False, static_cam=False):
+    def forward(self, inputs, train=False, postproc=False, static_cam=False, global_step=0):
         outputs = dict()
         length = inputs["length"]  # (B,) effective length of each sample
 
@@ -68,6 +76,8 @@ class Pipeline(nn.Module):
             "f_cliffcam": cliff_cam,  # (B, L, 3)
             "f_cam_angvel": f_cam_angvel,  # (B, L, C=6)
             "f_imgseq": inputs["f_imgseq"],  # (B, L, C=1024)
+            "detach_j3d_for_mv2d": self.args.get('train3d_detach_j3d_for_mv2d', True),
+            "detach_cam_for_mv2d": self.args.get('train3d_detach_cam_for_mv2d', False)
         }
         if train:
             f_condition = randomly_set_null_condition(f_condition, 0.1)
@@ -115,13 +125,52 @@ class Pipeline(nn.Module):
         mask = inputs["mask"]["valid"]  # (B, L)
         
         # 0. MV2D loss
-        mv2d = model_output["mv2d"]
-        target_mv2d = inputs["mv2d_norm"]
-        mv2d_loss = F.mse_loss(mv2d, target_mv2d[..., :2], reduction="none")
-        mv2d_loss *= target_mv2d[..., [2]]  # weight by confidence
-        mv2d_loss = (mv2d_loss * mask[..., None, None, None]).mean()
-        total_loss += self.weights.mv2d * mv2d_loss
-        outputs["mv2d_loss"] = mv2d_loss
+        if self.weights.get('mv2d', 0.0) > 0.0 and global_step >= self.weights.get("mv2d_start_step", 0):
+            mv2d = model_output["mv2d"]
+            target_mv2d = inputs["mv2d_norm"]
+            mv2d_loss = F.mse_loss(mv2d, target_mv2d[..., :2], reduction="none")
+            mv2d_loss *= target_mv2d[..., [2]]  # weight by confidence
+            mv2d_loss = (mv2d_loss * mask[..., None, None, None]).mean()
+            total_loss += self.weights.mv2d * mv2d_loss
+            outputs["mv2d_loss"] = mv2d_loss
+        # vis_ind = 0
+        # mv2d_norm = mv2d.detach()
+        # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
+        # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 128, f"out/debug_vis/loss_mv2d.mp4", coco_joint_parents, 256, 256, fps=30)
+        # mv2d_norm = target_mv2d.detach()
+        # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
+        # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 128, f"out/debug_vis/loss_mv2d_target.mp4", coco_joint_parents, 256, 256, fps=30)
+        
+        # 0.1 MV2D cam loss
+        if self.weights.get("cam_elevation_loss", 0.0) > 0.0:
+            elevations = torch.deg2rad(model_output["mv2d_cam_params"]["elevations"])
+            target_elevations = inputs["cam_elevations"]
+            elevation_loss = F.mse_loss(elevations, target_elevations, reduction="none")
+            elevation_loss = (elevation_loss * mask)[inputs['cam_param_valid']].mean()
+            total_loss += self.weights.cam_elevation_loss * elevation_loss
+            outputs["cam_elevation_loss"] = elevation_loss
+            
+        if self.weights.get("cam_tilt_loss", 0.0) > 0.0:
+            tilt = torch.deg2rad(model_output["mv2d_cam_params"]["tilt"])
+            target_tilt = inputs["cam_tilt"]
+            tilt_loss = F.mse_loss(tilt, target_tilt, reduction="none")
+            tilt_loss = (tilt_loss * mask)[inputs['cam_param_valid']].mean()
+            total_loss += self.weights.cam_tilt_loss * tilt_loss
+            outputs["cam_tilt_loss"] = tilt_loss
+            
+        if self.weights.get("cam_elevation_reg", 0.0) > 0.0:
+            elevations = torch.deg2rad(model_output["mv2d_cam_params"]["elevations"])
+            elevation_reg = elevations ** 2
+            elevation_reg = (elevation_reg * mask)[inputs['cam_param_valid']].mean()
+            total_loss += self.weights.cam_elevation_reg * elevation_reg
+            outputs["cam_elevation_reg_loss"] = elevation_reg
+            
+        if self.weights.get("cam_tilt_reg", 0.0) > 0.0:
+            tilt = torch.deg2rad(model_output["mv2d_cam_params"]["tilt"])
+            tilt_reg = tilt ** 2
+            tilt_reg = (tilt_reg * mask)[inputs['cam_param_valid']].mean()
+            total_loss += self.weights.cam_tilt_reg * tilt_reg
+            outputs["cam_tilt_reg_loss"] = tilt_reg
 
         # 1. Simple loss: MSE
         pred_x = model_output["pred_x"]  # (B, L, C)
@@ -148,7 +197,7 @@ class Pipeline(nn.Module):
         outputs["loss"] = total_loss
         return outputs
     
-    def forward_2d(self, inputs, train=False):
+    def forward_2d(self, inputs, train=False, global_step=0, diffusion=None):
         outputs = dict()
         length = inputs["length"]  # (B,) effective length of each sample
         device = inputs["obs"].device
@@ -158,7 +207,9 @@ class Pipeline(nn.Module):
         f_condition = {
             "f_cliffcam": torch.zeros(B, L, 3).to(device),  # (B, L, 3)
             "f_cam_angvel": torch.zeros(B, L, 6).to(device),  # (B, L, C=6)
-            "f_imgseq": inputs.get("f_imgseq", torch.zeros(B, L, 1024).to(device))
+            "f_imgseq": inputs.get("f_imgseq", torch.zeros(B, L, 1024).to(device)),
+            "detach_j3d_for_mv2d": self.args.get('train2d_detach_j3d_for_mv2d', False),
+            "detach_cam_for_mv2d": self.args.get('train2d_detach_cam_for_mv2d', False)
         }
         if train:
             f_condition = randomly_set_null_condition(f_condition, 0.1)
@@ -171,30 +222,78 @@ class Pipeline(nn.Module):
         outputs.update({"2d_model_output": model_output, "2d_decode_dict": decode_dict})
         
         # second view generation
-        second_view = np.random.randint(1, self.num_views)
-        view_correspondence = (np.arange(self.num_views) + second_view) % self.num_views
-        input_view_id = (-second_view) % self.num_views
-        mv2d_shuffle = model_output["mv2d"][:, :, view_correspondence]
-        model_output['mv2d_shuffle'] = mv2d_shuffle
-        model_output['input_view_id'] = input_view_id
-        obs_sv = mv2d_shuffle[:, :, 0]
-        obs_sv = torch.cat([obs_sv, torch.ones_like(obs_sv[..., :1])], dim=-1)  # (B, L, J, 3)
-        f_condition = {
-            "obs": obs_sv,  # (B, L, J, 3)
-            "f_cliffcam": torch.zeros(B, L, 3).to(device),  # (B, L, 3)
-            "f_cam_angvel": torch.zeros(B, L, 6).to(device),  # (B, L, C=6)
-            "f_imgseq": torch.zeros(B, L, 1024).to(device)
-        }
-        model_output_sv = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
-        if 'decode_dict' in model_output_sv:
-            decode_dict_sv = model_output_sv.pop("decode_dict")
-        else:
-            decode_dict_sv = self.endecoder.decode(model_output_sv["pred_x"])  # (B, L, C) -> dict
-        outputs.update({"2d_model_output_sv": model_output_sv, "2d_decode_dict_sv": decode_dict_sv})
+        if not self.weights.get("disable_second_view", False):
+            second_view = np.random.randint(1, self.num_views)
+            view_correspondence = (np.arange(self.num_views) + second_view) % self.num_views
+            input_view_id = (-second_view) % self.num_views
+            mv2d_shuffle = model_output["mv2d"][:, :, view_correspondence]
+            model_output['mv2d_shuffle'] = mv2d_shuffle
+            model_output['input_view_id'] = input_view_id
+            obs_sv = mv2d_shuffle[:, :, 0]
+            obs_sv = torch.cat([obs_sv, torch.ones_like(obs_sv[..., :1])], dim=-1)  # (B, L, J, 3)
+            f_condition = {
+                "obs": obs_sv,  # (B, L, J, 3)
+                "f_cliffcam": torch.zeros(B, L, 3).to(device),  # (B, L, 3)
+                "f_cam_angvel": torch.zeros(B, L, 6).to(device),  # (B, L, C=6)
+                "f_imgseq": torch.zeros(B, L, 1024).to(device),
+                "detach_j3d_for_mv2d": self.args.get('train2d_detach_j3d_for_mv2d', False),
+                "detach_cam_for_mv2d": self.args.get('train2d_detach_cam_for_mv2d', False)
+            }
+            if self.args.get('use_firstview_proj_cam_for_sideview', False):
+                f_condition["proj_2d_cam"] = model_output["proj_2d_cam"]
+            if self.fix_network_for_mv2d_second_view:
+                self.transfer_network_weights_to_copy()    
+                denoiser3d = self.denoiser3d_copy[0]
+            else:
+                denoiser3d = self.denoiser3d
+            model_output_sv = denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
+            # model_output_sv2 = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
+            # diff = (model_output_sv["pred_x"] - model_output_sv2["pred_x"]).abs()
+            # grad = torch.autograd.grad(model_output_sv["pred_x"].sum(), obs_sv, create_graph=True)[0]
+            if 'decode_dict' in model_output_sv:
+                decode_dict_sv = model_output_sv.pop("decode_dict")
+            else:
+                decode_dict_sv = self.endecoder.decode(model_output_sv["pred_x"])  # (B, L, C) -> dict
+            outputs.update({"2d_model_output_sv": model_output_sv, "2d_decode_dict_sv": decode_dict_sv})
 
         # ========== Compute Loss ========== #
         total_loss = 0
         mask = inputs["mask"]
+        
+        if self.weights.get("sds", 0.0) > 0.0:
+            kp2d = model_output["mv2d"]
+            repeats = 4
+            if self.weights.get("sds_exclude_first_view", True):
+                kp2d = kp2d[:, :, 1:]   # exclude first view
+                repeats = 3
+            kp2d = kp2d.permute(0, 2, 1, 3, 4).reshape(-1, L, *kp2d.shape[3:])
+            min_step, max_step = self.weights.get("sds_min_step", 20), self.weights.get("sds_max_step", 980)
+            noise = torch.randn_like(kp2d)
+            t = torch.randint(min_step, max_step + 1, [kp2d.shape[0]], dtype=torch.long, device=device)
+            x_t = diffusion.q_sample(kp2d, t, noise=noise)
+            with torch.no_grad():
+                f_condition = {
+                    "f_imgseq": inputs.get("f_imgseq", torch.zeros(kp2d.shape[0], L, 1024).to(device)),
+                    "obs_x_t": x_t,
+                    "t": t,
+                }
+                sds_model_output = self.denoiser3d.forward_singleview(length=length.repeat_interleave(repeats, dim=0), **f_condition)  # pred_x, pred_cam, static_conf_logits
+                singleview_2d = sds_model_output["singleview_2d"]
+            sds_loss = F.mse_loss(singleview_2d, kp2d, reduction="none")
+            sds_loss = (sds_loss * mask.repeat_interleave(repeats, dim=0)[..., None, None]).mean()
+            total_loss += self.weights.sds * sds_loss
+            outputs["sds_loss"] = sds_loss
+            
+        
+        if self.weights.get("recon2d", 0.0) > 0.0:
+            input_target = inputs["orig_obs"]
+            mv2d_fv = model_output["mv2d"][:, :, 0]
+            recon2d_loss = F.mse_loss(mv2d_fv, input_target[..., :2], reduction="none")
+            recon2d_loss *= input_target[..., [2]]
+            recon2d_loss = (recon2d_loss * mask[..., None, None]).mean()
+            total_loss += self.weights.recon2d * recon2d_loss
+            outputs["recon2d_loss"] = recon2d_loss
+        
         
         # 0. cycle input 2d loss
         if self.weights.cycle_in2d > 0.0:
@@ -239,13 +338,53 @@ class Pipeline(nn.Module):
 
         outputs["loss_2d"] = total_loss
         return outputs
+    
+    def forward_singleview_diffusion(self, inputs, train=False, global_step=0):
+        length = inputs["length"]  # (B,) effective length of each sample
+        device = inputs["obs_x_t"].device
+        B, L = inputs["obs_x_t"].shape[:2]
+        outputs = {'batch_size': B}
+
+        # input view generation
+        f_condition = {
+            "f_imgseq": inputs.get("f_imgseq", torch.zeros(B, L, 1024).to(device)),
+        }
+        if train:
+            f_condition = randomly_set_null_condition(f_condition, 0.1)
+        f_condition["obs_x_t"] = inputs["obs_x_t"]  # (B, L, J, 3)
+        f_condition["t"] = inputs["scaled_t"]  # (B, L, J, 3)
+        model_output = self.denoiser3d.forward_singleview(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
+        outputs.update({"2d_model_output": model_output})
+
+        # ========== Compute Loss ========== #
+        total_loss = 0
+        mask = inputs["mask"]
+        
+        if self.weights.singleview_2d > 0.0:
+            singleview_target = inputs["orig_obs"]
+            singleview_pred = model_output["singleview_2d"]
+            singleview_2d_loss = F.mse_loss(singleview_pred, singleview_target[..., :2], reduction="none")
+            singleview_2d_loss *= singleview_target[..., [2]]
+            singleview_2d_loss = (singleview_2d_loss * mask[..., None, None]).mean()
+            total_loss += self.weights.singleview_2d * singleview_2d_loss
+            outputs["singleview_2d_loss"] = singleview_2d_loss
+        
+        outputs["loss_2d"] = total_loss
+        return outputs
+    
+    def transfer_network_weights_to_copy(self):
+        device = next(self.denoiser3d.parameters()).device
+        if next(self.denoiser3d_copy[0].parameters()).device != device:
+            self.denoiser3d_copy[0].to(device)
+        for parameter, parameter_copy in zip(self.denoiser3d.parameters(), self.denoiser3d_copy[0].parameters()):
+            parameter_copy.data.copy_(parameter.data)
 
 
 def randomly_set_null_condition(f_condition, uncond_prob=0.1):
     """Conditions are in shape (B, L, *)"""
     keys = list(f_condition.keys())
     for k in keys:
-        if f_condition[k] is None:
+        if f_condition[k] is None or type(f_condition[k]) == bool:
             continue
         f_condition[k] = f_condition[k].clone()
         mask = torch.rand(f_condition[k].shape[:2]) < uncond_prob

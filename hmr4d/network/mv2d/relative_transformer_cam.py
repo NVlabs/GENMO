@@ -9,7 +9,7 @@ from hmr4d.network.base_arch.transformer.encoder_rope import EncoderRoPEBlock
 from hmr4d.network.base_arch.transformer.layer import zero_module
 from hmr4d.utils.geo.hmr_cam import perspective_projection, normalize_kp2d, safely_render_x3d_K, get_bbx_xys
 from hmr4d.model.gvhmr.utils.geom import lookat_correct, spherical_to_cartesian
-from motiondiff.utils.torch_transform import rotation_matrix_to_angle_axis, quaternion_to_angle_axis, quat_mul, angle_axis_to_quaternion, angle_axis_to_rotation_matrix, quaternion_to_rotation_matrix
+from motiondiff.utils.torch_transform import rotation_matrix_to_angle_axis, make_transform, quat_mul, angle_axis_to_quaternion, angle_axis_to_rotation_matrix, quaternion_to_rotation_matrix, inverse_transform
 
 from hmr4d.utils.net_utils import length_to_mask
 from timm.models.vision_transformer import Mlp
@@ -37,7 +37,17 @@ class NetworkEncoderRoPE(nn.Module):
         dropout=0.1,
         # other
         avgbeta=True,
-        num_views=4
+        num_views=4,
+        default_radius=8.0,
+        use_gv_for_mv2d=True,
+        use_fp32_for_cam=False,
+        cam_gen_nograd=False,
+        use_elevation=None,
+        use_radius=None,
+        use_tilt=None,
+        clamp_elevation=None,
+        clamp_tilt=None,
+        average_cam_across_frames=False,
     ):
         super().__init__()
 
@@ -86,6 +96,7 @@ class NetworkEncoderRoPE(nn.Module):
             self.pred_cam_head = Mlp(self.latent_dim, out_features=pred_cam_dim)
             self.register_buffer("pred_cam_mean", torch.tensor([1.0606, -0.0027, 0.2702]), False)
             self.register_buffer("pred_cam_std", torch.tensor([0.1784, 0.0956, 0.0764]), False)
+        self.proj_2d_cam_head = Mlp(self.latent_dim, out_features=3)
 
         self.static_conf_head = static_conf_dim > 0
         if self.static_conf_head:
@@ -95,6 +106,16 @@ class NetworkEncoderRoPE(nn.Module):
         self.endecoder = None
         self.img_h = self.img_w = 1024
         self.get_naive_intrinsics((self.img_w, self.img_h), focal_scale=2.0)
+        self.default_radius = default_radius
+        self.use_gv_for_mv2d = use_gv_for_mv2d
+        self.use_fp32_for_cam = use_fp32_for_cam
+        self.cam_gen_nograd = cam_gen_nograd
+        self.use_elevation = use_elevation
+        self.use_radius = use_radius
+        self.use_tilt = use_tilt
+        self.clamp_elevation = clamp_elevation
+        self.clamp_tilt = clamp_tilt
+        self.average_cam_across_frames = average_cam_across_frames
 
     def _build_condition_embedder(self):
         latent_dim = self.latent_dim
@@ -118,7 +139,7 @@ class NetworkEncoderRoPE(nn.Module):
                 zero_module(nn.Linear(self.imgseq_dim, latent_dim)),
             )
 
-    def forward(self, length, obs=None, f_cliffcam=None, f_cam_angvel=None, f_imgseq=None, **kwargs):
+    def forward(self, length, obs=None, f_cliffcam=None, f_cam_angvel=None, f_imgseq=None, detach_j3d_for_mv2d=False, detach_cam_for_mv2d=False, proj_2d_cam=None):
         """
         Args:
             x: None we do not use it
@@ -191,19 +212,24 @@ class NetworkEncoderRoPE(nn.Module):
         static_conf_logits = None
         if self.static_conf_head:
             static_conf_logits = self.static_conf_head(x)  # (B, L, C')
+            
+        if proj_2d_cam is None:
+            proj_2d_cam = self.proj_2d_cam_head(x)
 
         output = {
             "pred_context": x,
             "pred_x": sample,
             "pred_cam": pred_cam,
             "static_conf_logits": static_conf_logits,
+            "proj_2d_cam": proj_2d_cam,
             # "mv2d": mv2d,
         }
         
         endecoder = self.endecoder[0]
         decode_dict = endecoder.decode(output["pred_x"])  # (B, L, C) -> dict
         
-        grot_mat = angle_axis_to_rotation_matrix(decode_dict["global_orient"])
+        grot_key = "global_orient_gv" if self.use_gv_for_mv2d else "global_orient"
+        grot_mat = angle_axis_to_rotation_matrix(decode_dict[grot_key])
         base_rot = angle_axis_to_rotation_matrix(torch.tensor([[0., 0., -0.5 * np.pi]]).to(grot_mat)) @ angle_axis_to_rotation_matrix(torch.tensor([[-0.5 * np.pi, 0., 0.]]).to(grot_mat))
         grot_world = base_rot @ grot_mat
         grot_world = rotation_matrix_to_angle_axis(grot_world)
@@ -213,17 +239,20 @@ class NetworkEncoderRoPE(nn.Module):
             "global_orient": grot_world,  # (B, L, 3)
             "transl": torch.zeros_like(grot_world),  # (B, L, 3)
         }
-        _, j3d = endecoder.smplx_model(**smpl_gv_dict)
+        with torch.set_grad_enabled(not detach_j3d_for_mv2d):
+            _, j3d = endecoder.smplx_model(**smpl_gv_dict)
         
-        cam_dict = self.generate_cam(device=j3d.device)
+        if detach_cam_for_mv2d:
+            proj_2d_cam = proj_2d_cam.detach()
+        mv2d_cam_params = self.obtain_mv2d_cam_params(proj_2d_cam)
+        with torch.autocast(device_type='cuda', enabled=not self.use_fp32_for_cam):
+            with torch.set_grad_enabled(not self.cam_gen_nograd):
+                cam_dict = self.generate_cam(mv2d_cam_params)
         kp2d = self.project_keypoints(j3d, cam_dict)
-        # cam_dict2 = self.generate_cam2(device=j3d.device)
-        # kp2d = self.project_keypoints(j3d, cam_dict2)
         bbx_xys = get_bbx_xys(kp2d, do_augment=False)
         kp2d_norm = normalize_kp2d(torch.cat([kp2d, torch.ones_like(kp2d[..., :1])], dim=-1), bbx_xys)[..., :2]
         output['mv2d'] = kp2d_norm
-        output['mv2d_proj'] = kp2d_norm.clone()
-        
+        output['mv2d_cam_params'] = mv2d_cam_params
         output['decode_dict'] = decode_dict
         return output
     
@@ -236,8 +265,40 @@ class NetworkEncoderRoPE(nn.Module):
         self.cam_intrinsics[:, 1, 1] = self.focal_length
         self.cam_intrinsics[:, 0, 2] = img_w/2.
         self.cam_intrinsics[:, 1, 2] = img_h/2.
+        
+    def obtain_mv2d_cam_params(self, proj_2d_cam):
+        elevations, radius, tilt = proj_2d_cam[..., 0], proj_2d_cam[..., 1], proj_2d_cam[..., 2]
+        radius += self.default_radius
+        elevations *= 10.0
+        tilt *= 10.0
+        if self.average_cam_across_frames:
+            num_frames = proj_2d_cam.shape[1]
+            elevations = elevations.mean(dim=1, keepdim=True).repeat(1, num_frames)
+            radius = radius.mean(dim=1, keepdim=True).repeat(1, num_frames)
+            tilt = tilt.mean(dim=1, keepdim=True).repeat(1, num_frames)
+        if self.use_elevation is not None:
+            elevations = torch.ones_like(elevations) * self.use_elevation
+        if self.use_radius is not None:
+            radius = torch.ones_like(elevations) * self.use_radius
+        if self.use_tilt is not None:
+            tilt = torch.ones_like(elevations) * self.use_tilt
+        if self.clamp_elevation is not None:
+            elevations = torch.clamp(elevations, min=-self.clamp_elevation, max=self.clamp_elevation)
+        if self.clamp_tilt is not None:
+            tilt = torch.clamp(tilt, min=-self.clamp_tilt, max=self.clamp_tilt)
+        return {
+            'elevations': elevations,
+            'radius': radius,
+            'tilt': tilt,
+        }
 
-    def generate_cam(self, device):
+    def generate_cam(self, mv2d_cam_params):
+        device = mv2d_cam_params['elevations'].device
+        orig_shape = mv2d_cam_params['elevations'].shape[:2]
+        elevations = mv2d_cam_params['elevations'].view(-1, 1)
+        radius = mv2d_cam_params['radius'].view(-1, 1)
+        tilt = mv2d_cam_params['tilt'].view(-1, 1)
+        
         def lookat_correct(eye, at, up):
             zaxis = (at - eye) / torch.norm(at - eye, dim=-1, keepdim=True)
             xaxis = torch.cross(up, zaxis, dim=-1)
@@ -259,10 +320,13 @@ class NetworkEncoderRoPE(nn.Module):
             z = r * torch.sin(elevation)
             return torch.stack([x, y, z], dim=-1)
 
-        cam_dict = []
+        # elevations = (torch.ones((1, self.num_views)) * 0.0).to(device)
+        # radius = (torch.ones((1, self.num_views)) * 8.0).to(device)
+        # tilt = (torch.ones((1, self.num_views))).to(device)
+        elevations = elevations.repeat(1, self.num_views)
+        radius = radius.repeat(1, self.num_views)
+        tilt = tilt.repeat(1, self.num_views)
         azimuths = torch.linspace(0, 360, self.num_views + 1)[:self.num_views].to(device)
-        elevations = (torch.ones((1, self.num_views)) * 0.0).to(device)
-        radius = (torch.ones((1, self.num_views)) * 8.0).to(device)
         azimuths = azimuths.unsqueeze(0).expand(elevations.shape[0], -1)
         eyes = spherical_to_cartesian(radius, azimuths, elevations)
         
@@ -270,58 +334,31 @@ class NetworkEncoderRoPE(nn.Module):
         at = torch.zeros((eyes_flat.shape[0], 3), device=device)
         up = torch.tensor([0., 0., 1.], device=device)[None, :].expand(eyes_flat.shape[0], -1)
         c2w = lookat_correct(eyes_flat, at, up).reshape(eyes.shape[0], self.num_views, 4, 4)
-        w2c = torch.inverse(c2w)
+        if torch.norm(tilt) > 0:
+            tilt_rot = angle_axis_to_rotation_matrix(torch.stack([torch.zeros_like(tilt), torch.zeros_like(tilt), torch.deg2rad(tilt)], dim=-1))
+            c2w = c2w @ make_transform(tilt_rot, torch.zeros(3).to(tilt_rot))
+        w2c = inverse_transform(c2w)
         intrinsics = self.cam_intrinsics.to(device).unsqueeze(0).repeat(eyes.shape[0], self.num_views, 1, 1)
         P = torch.matmul(intrinsics, w2c[..., :3, :])
         
         cam_dict = {
-            'c2w': c2w,
-            'w2c': w2c,
-            'intrinsics': intrinsics,
-            'P': P,
-            'azimuths': azimuths,
-            'elevations': elevations,
-            'radius': radius,
+            'c2w': c2w.reshape(orig_shape + c2w.shape[1:]),
+            'w2c': w2c.reshape(orig_shape + w2c.shape[1:]),
+            'intrinsics': intrinsics.reshape(orig_shape + intrinsics.shape[1:]),
+            'P': P.reshape(orig_shape + P.shape[1:]),
+            'azimuths': azimuths.reshape(orig_shape + azimuths.shape[1:]),
+            'elevations': elevations.reshape(orig_shape + elevations.shape[1:]),
+            'radius': radius.reshape(orig_shape + radius.shape[1:]),
         }
         
         return cam_dict
     
     def project_keypoints(self, kpt3d, cam_dict):
         kpt3d_pad = torch.cat((kpt3d, torch.ones_like(kpt3d[..., :1])), dim=-1)
-        local_kpt2d_new = (cam_dict['P'][:, None] @ kpt3d_pad[:, :, None].transpose(-1, -2)).transpose(-1, -2)
+        local_kpt2d_new = (cam_dict['P'] @ kpt3d_pad[:, :, None].transpose(-1, -2)).transpose(-1, -2)
         local_kpt2d_new = local_kpt2d_new[..., :2] / local_kpt2d_new[..., 2:]
         local_kpt2d_new[..., 1] = self.img_h - local_kpt2d_new[..., 1]
         return local_kpt2d_new
-    
-    def generate_eyes2(self):
-        azimuths = np.linspace(0, 360, self.num_views, endpoint=False)
-        elevations = np.ones(self.num_views) * 0
-        radius = np.ones(self.num_views) * 8
-        eyes = np.stack([spherical_to_cartesian(r, azimuth, elevation) for azimuth, elevation, r in zip(azimuths, elevations, radius)], axis=0)
-        return eyes, azimuths, elevations, radius
-    
-    def generate_cam2(self, device):
-        cam_dict = []
-        eyes, azimuths, elevations, radius = self.generate_eyes2()
-        for i in range(self.num_views):
-            eye = eyes[i]
-            at = np.array([0, 0, 0])
-            up = np.array([0, 0, 1])
-            c2w = torch.tensor(lookat_correct(eye, at, up)).float().to(device)
-            w2c = torch.inverse(c2w)
-            P = torch.matmul(self.cam_intrinsics.to(device), w2c[:3, :])
-            cam_dict.append({
-                'c2w': c2w,
-                'w2c': w2c,
-                'intrinsics': self.cam_intrinsics,
-                'P': P.squeeze(0),
-            })
-        cam_dict = {k: torch.stack([x[k] for x in cam_dict]) for k in cam_dict[0]}
-        cam_dict['azimuths'] = torch.tensor(azimuths).float()
-        cam_dict['elevations'] = torch.tensor(elevations).float()
-        cam_dict['radius'] = torch.tensor(radius).float()
-        cam_dict['P'] = cam_dict['P'].unsqueeze(0)
-        return cam_dict
 
 
 # Add to MainStore

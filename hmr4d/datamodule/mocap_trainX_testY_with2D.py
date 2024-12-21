@@ -31,7 +31,7 @@ def collate_fn(batch):
 
 
 class DataModule(pl.LightningDataModule):
-    def __init__(self, dataset_opts: DictConfig, loader_opts: DictConfig, limit_each_trainset=None):
+    def __init__(self, dataset_opts: DictConfig, loader_opts: DictConfig, limit_each_trainset=None, train_subset_ratio=None, train_2d_only=False):
         """This is a general datamodule that can be used for any dataset.
         Train uses ConcatDataset
         Val and Test use CombinedLoader, sequential, completely consumes ecah iterable sequentially, and returns a triplet (data, idx, iterable_idx)
@@ -44,6 +44,8 @@ class DataModule(pl.LightningDataModule):
         super().__init__()
         self.loader_opts = loader_opts
         self.limit_each_trainset = limit_each_trainset
+        self.train_subset_ratio = train_subset_ratio
+        self.train_2d_only = train_2d_only
 
         # Train uses concat dataset
         if "train" in dataset_opts:
@@ -56,6 +58,8 @@ class DataModule(pl.LightningDataModule):
                 dataset_i = instantiate(v)
                 if self.limit_each_trainset:
                     dataset_i = Subset(dataset_i, choice(len(dataset_i), self.limit_each_trainset))
+                if self.train_subset_ratio is not None:
+                    dataset_i = Subset(dataset_i, choice(len(dataset_i), int(len(dataset_i) * self.train_subset_ratio)))
                 dataset.append(dataset_i)
                 Log.info(f"[Train Dataset][{idx+1}/{dataset_num}]: name={k}, size={len(dataset[-1])}, {v._target_}")
             dataset = ConcatDataset(dataset)
@@ -98,21 +102,24 @@ class DataModule(pl.LightningDataModule):
 
     def train_dataloader(self):
         if hasattr(self, "trainset"):
-            loader_3d = DataLoader(
-                self.trainset,
-                shuffle=True,
-                num_workers=self.loader_opts.train.num_workers,
-                persistent_workers=True and self.loader_opts.train.num_workers > 0,
-                batch_size=self.loader_opts.train.batch_size,
-                drop_last=True,
-                collate_fn=collate_fn,
-            )
             loader_2d = DataLoader(
                 self.train_2d_dataset,
                 shuffle=True,
                 num_workers=self.loader_opts.train_2d.num_workers,
                 persistent_workers=True and self.loader_opts.train_2d.num_workers > 0,
                 batch_size=self.loader_opts.train_2d.batch_size,
+                drop_last=True,
+                collate_fn=collate_fn,
+            )
+            if self.train_2d_only:
+                return loader_2d
+                
+            loader_3d = DataLoader(
+                self.trainset,
+                shuffle=True,
+                num_workers=self.loader_opts.train.num_workers,
+                persistent_workers=True and self.loader_opts.train.num_workers > 0,
+                batch_size=self.loader_opts.train.batch_size,
                 drop_last=True,
                 collate_fn=collate_fn,
             )

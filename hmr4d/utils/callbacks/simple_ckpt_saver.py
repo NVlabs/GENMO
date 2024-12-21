@@ -167,3 +167,4 @@ MainStore.store(name="every5e_top100", node=base(every_n_epochs=5, save_top_k=10
 MainStore.store(name="every10e", node=base(every_n_epochs=10), group=group_name)
 MainStore.store(name="every10e_top100", node=base(every_n_epochs=10, save_top_k=100), group=group_name)
 MainStore.store(name="every100e_top100", node=base(every_n_epochs=100, save_top_k=100), group=group_name)
+MainStore.store(name="every1000e_top100", node=base(every_n_epochs=1000, save_top_k=100), group=group_name)
