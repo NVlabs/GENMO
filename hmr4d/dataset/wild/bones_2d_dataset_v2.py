@@ -177,7 +177,9 @@ class Bones2DDatasetV2SingleView(Bones2DDatasetV2):
 
     def __getitem__(self, item):
         if self.precompute:
-            return self.get_precompute_data(item)
+            outputs = self.get_precompute_data(item)
+            outputs['K_fullimg'] = self.cam_intrinsics.repeat(self.num_frames, 1, 1)
+            return outputs
         else:
             target = self.get_motion(item)
             m_length = target['m_length']
@@ -190,6 +192,7 @@ class Bones2DDatasetV2SingleView(Bones2DDatasetV2):
             outputs = {
                 'idx': self.split_index[item],
                 'obs_kp2d': target['obs_kp2d'].astype(np.float32),
+                "K_fullimg": self.cam_intrinsics.repeat(self.num_frames, 1, 1),  # (F, 3, 3)
                 'mask': mask.astype(np.bool8),
                 'conf': conf,
                 'length': m_length,

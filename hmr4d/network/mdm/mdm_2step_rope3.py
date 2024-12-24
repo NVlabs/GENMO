@@ -112,6 +112,7 @@ class MDMBase(nn.Module):
         self.cam_angvel_dim = cam_angvel_dim
         self.cam_t_vel_dim = cam_t_vel_dim
         self.imgseq_dim = imgseq_dim
+        self.s_pred_ind = 0
 
         # intermediate
         self.latent_dim = latent_dim
@@ -282,7 +283,6 @@ class MDMBase(nn.Module):
         motion = motion * vis_mask[..., None]
         clean_motion = clean_motion * vis_mask[..., None]
 
-        self.s_pred_ind = 0
         self.denoiser.s_pred_ind = self.s_pred_ind
         # if 'f_condition_valid_mask' in batch:
         #     f_condition_valid_mask = batch['f_condition_valid_mask']
@@ -454,6 +454,71 @@ class MDMBase(nn.Module):
             target_x=target_x,
             static_gt=static_gt,
         )
+        return output
+
+    def forward_train_2d(self, inputs):
+        assert self.training, "forward_train_2d should only be called during training"
+        diffusion = self.train_diffusion if self.training else self.test_diffusion
+
+        outputs = dict()
+        length = inputs["length"]  # (B,) effective length of each sample
+        L = self.max_len
+        C = self.motion_rep_dim
+        B = length.shape[0]
+        target_x = torch.zeros(B, L, 151).to(inputs['f_condition']['obs'].device)
+        static_gt = torch.zeros(B, L, 6).to(inputs['f_condition']['obs'].device)
+
+        f_cond, motion, _, _ = self.generate_motion_rep(
+            inputs, target_x, static_gt
+        )
+        # Setup length and make padding mask
+        vis_mask = length_to_mask(length, L)  # (B, L)
+        if L > self.max_len:
+            attnmask = torch.ones((L, L), device=motion.device, dtype=torch.bool)
+            for i in range(L):
+                min_ind = max(0, i - self.max_len // 2)
+                max_ind = min(L, i + self.max_len // 2)
+                max_ind = max(self.max_len, max_ind)
+                min_ind = min(L - self.max_len, min_ind)
+                attnmask[i, min_ind:max_ind] = False
+        else:
+            attnmask = None
+        t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
+
+        t = torch.ones_like(t) * 999
+        t_weights = torch.ones_like(t_weights)
+        x_t = torch.rand_like(motion)
+        f_cond = f_cond * vis_mask[..., None]
+
+        denoiser_kwargs = {
+            "y": {
+                "text": [""] * B,
+                "f_cond": f_cond.clone(),
+                "mask": vis_mask.clone(),
+                "length": length.clone(),
+            }
+        }
+        self.denoiser.s_pred_ind = self.s_pred_ind
+        denoise_out = self.denoiser(
+            x_t, diffusion._scale_timesteps(t), return_aux=False, **denoiser_kwargs
+        )
+        pred_x_start = denoise_out["pred_x_start"]
+        valid_loss_mask = torch.zeros_like(pred_x_start)
+
+        if 'pred_cam' in self.args.out_attr:
+            pred_cam = denoise_out["pred_cam"]
+
+        static_conf_logits = pred_x_start[:, :, self.s_pred_ind : self.s_pred_ind + 6]
+        assert pred_x_start.shape[-1] == self.s_pred_ind + 6 + 151
+        sample = pred_x_start[:, :, self.s_pred_ind + 6:]
+
+        output = {
+            "pred_x": sample,
+            "static_conf_logits": static_conf_logits,
+            "t_weights": t_weights,
+        }
+        if 'pred_cam' in self.args.out_attr:
+            output["pred_cam"] = pred_cam
         return output
 
     def forward_test(self, inputs, train=False, postproc=False, static_cam=False, progress=False):

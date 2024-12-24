@@ -34,9 +34,7 @@ from motiondiff.diffusion.resample import create_named_schedule_sampler
 from .utils.mv2d_utils import draw_motion_2d, coco_joint_parents, generate_cam, project_keypoints, recon_from_2d
 
 
-
-
-class MV2D(pl.LightningModule):
+class MFMHMR(pl.LightningModule):
     def __init__(
         self,
         pipeline,
@@ -44,15 +42,13 @@ class MV2D(pl.LightningModule):
         scheduler_cfg=None,
         model_cfg=None,
         ignored_weights_prefix=["smplx", "pipeline.endecoder"],
+        **kwargs,
     ):
         super().__init__()
         self.pipeline = instantiate(pipeline, _recursive_=False)
         self.optimizer = instantiate(optimizer)
         self.model_cfg = model_cfg
-        self.num_views = model_cfg.num_views
         self.scheduler_cfg = scheduler_cfg
-        self.validate_2d_in_3d = model_cfg.get("validate_2d_in_3d", False)
-        self.enable_test_time_opt = model_cfg.get("enable_test_time_opt", False)
         self.train_3d_modes = model_cfg.get("train_3d_modes", ["regression"])
         self.train_2d_modes = model_cfg.get("train_2d_modes", ["regression"])
         self.infer_mode = model_cfg.get("infer_mode", "regression")
@@ -74,48 +70,20 @@ class MV2D(pl.LightningModule):
             self.init_diffusion()
         else:
             self.train_diffusion = self.test_diffusion = self.schedule_sampler = None
-        
+
     def init_diffusion(self):
         self.train_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=True)
         self.test_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=False)
         self.schedule_sampler = create_named_schedule_sampler(self.model_cfg.diffusion.schedule_sampler_type, self.train_diffusion)
         return
-        
-    def obtain_mv2d(self, batch, gt_j3d):
-        gt_j3d = gt_j3d.float()
-        h36m_index = torch.tensor([meta["data_name"] == "h36m" for meta in batch["meta"]])
-        rot_angle_base = torch.zeros(gt_j3d.shape[0], 3).float()
-        rot_angle_base[h36m_index, 2] = 0.5 * np.pi
-        rot_angle_base[~h36m_index, 1] = 0.5 * np.pi
-        
-        with torch.autocast(device_type='cuda', enabled=False):
-            mv2d = []
-            T_c2w = inverse_transform(batch["T_w2c"])
-            gt_j3d_world = apply_T_on_points(gt_j3d, T_c2w)
-            gt_root_world = gt_j3d_world[:, :, 0]
-            T_c2w[..., :3, -1] -= gt_root_world
-            for i in range(self.num_views):
-                y_rot = angle_axis_to_rotation_matrix(rot_angle_base * i).unsqueeze(1)
-                T_y_rot = make_transform(y_rot, torch.zeros(3).to(T_c2w))
-                T_c2w_new = T_y_rot @ T_c2w
-                T_c2w_new[..., :3, -1] += gt_root_world
-                T_w2c_new = inverse_transform(T_c2w_new)
-                gt_j3d_local = apply_T_on_points(gt_j3d_world, T_w2c_new) 
-                new_j2d = perspective_projection(gt_j3d_local, batch["K_fullimg"])
-                mv2d.append(new_j2d)
-        mv2d = torch.stack(mv2d, dim=2)
-        # mv2d = torch.cat([mv2d, (mv2d[..., [11], :] + mv2d[..., [12], :]) * 0.5], dim=-2)
-        # vis_id = 0
-        # draw_motion_2d(mv2d[vis_id].cpu(), f"out/debug_vis/{batch['meta'][vis_id]['data_name']}.mp4", coco_joint_parents, 1000, 1000, fps=30)
-        return mv2d
-    
+
     def training_step(self, batch, batch_idx):
         if not ('3d' in batch or '2d' in batch):
             if 'is_2d' in batch and batch['is_2d'][0]:
                 batch = {'2d': batch}
             else:
                 batch = {'3d': batch}
-                
+
         def append_mode_to_loss(outputs, mode):
             for k in list(outputs.keys()):
                 if "_loss" in k or k in {"loss", "loss_2d"}:
@@ -178,7 +146,7 @@ class MV2D(pl.LightningModule):
             batch["bbx_xys"][~mask_bbx_xys] = bbx_xys[~mask_bbx_xys]
 
         # noisy_j3d -> project to i_j2d -> compute a bbx -> normalized kp2d [-1, 1]
-        
+
         noisy_j3d = gt_j3d + get_wham_aug_kp3d(gt_j3d.shape[:2])
         if True:
             noisy_j3d = randomly_modify_hands_legs(noisy_j3d)
@@ -194,32 +162,6 @@ class MV2D(pl.LightningModule):
         batch["obs"] = obs
         batch["j2d_visible_mask"] = j2d_visible_mask
 
-        mv2d = self.obtain_mv2d(batch, gt_j3d)
-        T_w2c = batch["T_w2c"]
-        mv2d = torch.cat([mv2d, torch.ones_like(mv2d[..., :1])], dim=-1)
-        mv2d_bbox = []
-        mv2d_norm = []
-        for i in range(self.num_views):
-            bbox = get_bbx_xys(mv2d[:, :, i], do_augment=False)
-            mv2d_bbox.append(bbox)
-            mv2d_norm.append(normalize_kp2d(mv2d[:, :, i], bbox))
-        batch['mv2d_bbox'] = mv2d_bbox = torch.stack(mv2d_bbox, dim=2)
-        batch['mv2d_norm'] = mv2d_norm = torch.stack(mv2d_norm, dim=2)
-        # cam parameters
-        batch['cam_elevations'] = torch.arcsin(-T_w2c[:, :, 2, 1])
-        cam_tilt = np.pi - torch.atan2(T_w2c[:, :, 0, 1], T_w2c[:, :, 1, 1])
-        cam_tilt[cam_tilt > np.pi] -= 2 * np.pi
-        cam_tilt[cam_tilt < -np.pi] += 2 * np.pi
-        batch['cam_tilt'] = cam_tilt
-        batch['cam_param_valid'] = torch.tensor([meta["data_name"] != "h36m" for meta in batch["meta"]])
-        
-        # vis_ind = 0
-        # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
-        # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/{batch['meta'][vis_ind]['data_name']}_new.mp4", coco_joint_parents, 1000, 1000, fps=30)
-        # mv2d_norm[:, :, 0, :17] = obs
-        # mv2d_norm[:, :, :, [17]] = (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5
-        # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/{batch['meta'][vis_ind]['data_name']}_obs.mp4", coco_joint_parents, 1000, 1000, fps=30)
-        
         if True:  # Use some detected vitpose (presave data)
             prob = 0.5
             mask_real_vitpose = (torch.rand(B).to(obs_kp2d) < prob) * batch["mask"]["vitpose"]
@@ -227,8 +169,8 @@ class MV2D(pl.LightningModule):
 
         # Set untrusted frames to False
         batch["obs"][~batch["mask"]["valid"]] = 0
-        batch["mv2d_bbox"][~batch["mask"]["valid"]] = 0
-        batch["mv2d_norm"][~batch["mask"]["valid"]] = 0
+        # batch["clean_obs"][~batch["mask"]["valid"]] = 0
+        # assert batch["clean_obs"].shape == batch["obs"].shape, f"{batch['clean_obs'].shape} != {batch['obs'].shape}"
 
         if False:  # wis3d
             wis3d = make_wis3d(name="debug-aug-kp3d")
@@ -288,9 +230,10 @@ class MV2D(pl.LightningModule):
             outputs = self.pipeline.forward_singleview_diffusion(batch, train=True, global_step=self.trainer.global_step)
         elif mode in {'regression'}:
             obs_kp2d = torch.cat([obs_kp2d, j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
-            obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
+            obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"].clone())  # (B, L, J, 3)
             obs[~batch["mask"]] = 0
             batch["obs"] = obs
+            batch["j2d_visible_mask"] = j2d_visible_mask
             
             # vis_ind = 0
             # mv2d_norm = obs.unsqueeze(2)
@@ -335,7 +278,7 @@ class MV2D(pl.LightningModule):
         bbox = get_bbx_xys(kp2d, do_augment=False)
         kp2d_norm = normalize_kp2d(kp2d, bbox)
         return kp2d_norm
-    
+
     def infer_diffusion(self, batch):
         obs_shape = batch["obs"][..., :2].shape
         B, L = obs_shape[:2]
@@ -347,7 +290,7 @@ class MV2D(pl.LightningModule):
         indices = list(range(diffusion.num_timesteps))[::-1]
         denoiser = self.pipeline.denoiser3d.get_denoiser()
         
-        """ Single View Diffusion Loop """
+        """ Diffusion Loop """
         cond = {
             "length": batch["length"],
             "f_imgseq": batch.get("f_imgseq", torch.zeros(B, L, 1024).to(device)),
@@ -359,106 +302,14 @@ class MV2D(pl.LightningModule):
             x0 = out["pred_xstart"]
             res = diffusion.ddim_get_xt(x_t, t=t, pred_xstart=x0, eta=ddim_eta)
             x_t = res["x_t-1"]
-        kp2d = x_t
-        
-        cam_params = {
-            "elevations": torch.zeros(B, L).to(device),
-            "tilt": torch.zeros(B, L).to(device),
-            "radius": torch.ones(B, L).to(device) * 8,
-        }
-        # j3d = torch.load('out/j3d.pth')[:, :120]
-        # cam_dict = generate_cam(cam_params, self.num_views)
-        # mv2d_proj = project_keypoints(j3d, cam_dict['P'], 1024)
-        # mv2d_norm = self.norm_kp2d(mv2d_proj)
-        # mv2d_norm = self.center_kp2d(mv2d_norm)
-        # j3d_recon, mv2d_recon = recon_from_2d(mv2d_norm, cam_dict['P'], 1024, 1024)
-        # mv2d_recon2, _ = recon_from_2d(mv2d_recon, cam_dict['P'], 1024, 1024)
-        
-        """ Multi View Diffusion Loop """
-        cond = {
-            "length": batch["length"].repeat_interleave(self.num_views, dim=0),
-            "f_imgseq": batch.get("f_imgseq", torch.zeros(B, L, 1024).to(device)).repeat_interleave(self.num_views, dim=0),
-        }
-        x_t_arr = []
-        x_0_arr = []
-        x_t = torch.randn(obs_shape[0] * self.num_views, *obs_shape[1:], device=device)
-        for t in indices:
-            t = torch.tensor([t] * x_t.shape[0], device=device)
-            out = diffusion.p_mean_variance(denoiser, x_t, t, model_kwargs=cond, clip_denoised=False)
-            x0 = out["pred_xstart"]
-            x_0_arr.append(x0)
-            res = diffusion.ddim_get_xt(x_t, t=t, pred_xstart=x0, eta=ddim_eta)
-            x_t = res["x_t-1"]
-            x_t_arr.append(x_t)
-        x_t_progress = torch.stack(x_t_arr, dim=1)
-        x_t_progress = x_t_progress[:, :, 0]
-        x_t_progress = interp_tensor_with_scipy(x_t_progress, L, dim=1)
-        x_t_progress_sv = x_t_progress.reshape(B, self.num_views, *x_t_progress.shape[1:]).permute(0, 2, 1, 3, 4)
-        x_0_progress = torch.stack(x_0_arr, dim=1)
-        x_0_progress = x_0_progress[:, :, 0]
-        x_0_progress = interp_tensor_with_scipy(x_0_progress, L, dim=1)
-        x_0_progress_sv = x_0_progress.reshape(B, self.num_views, *x_0_progress.shape[1:]).permute(0, 2, 1, 3, 4)
-        mv2d = x_t
-        
-        
-        """ Multi View Diffusion Loop """
-        cam_params = {
-            "elevations": torch.zeros(B, L).to(device),
-            "tilt": torch.zeros(B, L).to(device),
-            "radius": torch.ones(B, L).to(device) * 8,
-        }
-        cam_dict = generate_cam(cam_params, self.num_views)
-        cond = {
-            "length": batch["length"].repeat_interleave(self.num_views, dim=0),
-            "f_imgseq": batch.get("f_imgseq", torch.zeros(B, L, 1024).to(device)).repeat_interleave(self.num_views, dim=0),
-        }
-        x_t_arr = []
-        x_0_arr = []
-        x3d_t = torch.randn(obs_shape[0], *obs_shape[1:-1], 3, device=device)
-        x_t = project_keypoints(x3d_t, cam_dict['P'], 1024)
-        x_t = (x_t / torch.tensor([1024, 1024]).to(x_t)) * 2 - 1
-        x_t = x_t.permute(0, 2, 1, 3, 4).reshape(B * self.num_views, L, *x_t.shape[3:])
-        x_t_orig = x_t.clone()
-        x_t_old = torch.randn(obs_shape[0] * self.num_views, *obs_shape[1:], device=device)
-        for t in indices:
-            t = torch.tensor([t] * x_t.shape[0], device=device)
-            out = diffusion.p_mean_variance(denoiser, x_t, t, model_kwargs=cond, clip_denoised=False)
-            x0 = out["pred_xstart"]
-            # reconstruct and reproject
-            x0_rs = x0.reshape(B, self.num_views, *x0.shape[1:]).permute(0, 2, 1, 3, 4)
-            x0_center = self.center_kp2d(x0_rs)
-            j3d_recon, x0_recon = recon_from_2d(x0_center, cam_dict['P'], 1024, 1024)
-            x0 = x0_recon.permute(0, 2, 1, 3, 4).reshape(B * self.num_views, L, *x0_recon.shape[3:])
-            x_0_arr.append(x0)
-            res = diffusion.ddim_get_xt(x_t, t=t, pred_xstart=x0, eta=ddim_eta)
-            x_t = res["x_t-1"]
-            x_t_arr.append(x_t)
-        x_t_progress = torch.stack(x_t_arr, dim=1)
-        x_t_progress = x_t_progress[:, :, 0]
-        x_t_progress = interp_tensor_with_scipy(x_t_progress, L, dim=1)
-        x_t_progress_tri = x_t_progress.reshape(B, self.num_views, *x_t_progress.shape[1:]).permute(0, 2, 1, 3, 4)
-        x_0_progress = torch.stack(x_0_arr, dim=1)
-        x_0_progress = x_0_progress[:, :, 0]
-        x_0_progress = interp_tensor_with_scipy(x_0_progress, L, dim=1)
-        x_0_progress_tri = x_0_progress.reshape(B, self.num_views, *x_0_progress.shape[1:]).permute(0, 2, 1, 3, 4)
-        mv2d_tri = x_t.reshape(B, self.num_views, *x_t.shape[1:]).permute(0, 2, 1, 3, 4)
-        
+        x0 = x_t
         outputs = {
             'diffusion': {
-                # 'x_t_orig': x_t_orig.reshape(B, self.num_views, *x_t.shape[1:]).permute(0, 2, 1, 3, 4),
-                # 'x_t_old': x_t_old.reshape(B, self.num_views, *x_t_old.shape[1:]).permute(0, 2, 1, 3, 4),
-                'kp2d': kp2d,
-                'mv2d': mv2d.reshape(-1, self.num_views, *mv2d.shape[1:]).permute(0, 2, 1, 3, 4),
-                # 'mv2d_progress_sv': x_t_progress_sv,
-                # 'mv2d_x0_progress_sv': x_0_progress_sv,
-                # 'mv2d_proj': mv2d_norm,
-                # 'mv2d_recon': mv2d_recon,
-                'mv2d_tri': mv2d_tri,
-                'mv2d_xt_progress': x_t_progress_tri,
-                'mv2d_x0_progress': x_0_progress_tri,
+                'x_start': x0,
             }
         }
         return outputs
+
 
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
@@ -514,12 +365,12 @@ class MV2D(pl.LightningModule):
         else:
             outputs = self.infer_diffusion(batch)
         outputs["batch"] = batch
-        outputs['vis_2d'] = self.model_cfg.get("vis_2d", False)
         return outputs
         
     def validation_3d(self, batch, batch_idx, dataloader_idx=0):
         # Options & Check
         do_postproc = self.trainer.state.stage == "test"  # Only apply postproc in test
+        do_postproc = False
         do_flip_test = "flip_test" in batch
         do_postproc_not_flip_test = do_postproc and not do_flip_test  # later pp when flip_test
         assert batch["B"] == 1, "Only support batch size 1 in evalution."
@@ -559,8 +410,16 @@ class MV2D(pl.LightningModule):
             "bbx_xys": batch["bbx_xys"],
             "K_fullimg": batch["K_fullimg"],
             "cam_angvel": batch["cam_angvel"],
+            "cam_tvel": batch["cam_tvel"],
+            "R_w2c": batch['R_w2c'],
             "f_imgseq": batch["f_imgseq"],
+            "meta": batch['meta']
         }
+        if 'vimo_smpl_params' in batch:
+            batch_['vimo_smpl_params'] = batch['vimo_smpl_params']
+            batch_['scales'] = batch['scales']
+            batch_['mean_scale'] = batch['mean_scale']
+
         outputs = self.pipeline.forward(batch_, train=False, postproc=do_postproc_not_flip_test, global_step=self.trainer.global_step)
         outputs["pred_smpl_params_global"] = {k: v[0] for k, v in outputs["pred_smpl_params_global"].items()}
         outputs["pred_smpl_params_incam"] = {k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()}
@@ -577,8 +436,16 @@ class MV2D(pl.LightningModule):
                 "bbx_xys": flip_test["bbx_xys"],
                 "K_fullimg": batch["K_fullimg"],
                 "cam_angvel": flip_test["cam_angvel"],
+                "cam_tvel": flip_test["cam_tvel"],
+                "R_w2c": flip_test["R_w2c"],
                 "f_imgseq": flip_test["f_imgseq"],
+                "meta": batch["meta"],
             }
+            if "vimo_smpl_params" in flip_test:
+                batch_["vimo_smpl_params"] = flip_test["vimo_smpl_params"]
+                batch_["scales"] = flip_test["scales"]
+                batch_["mean_scale"] = flip_test["mean_scale"]
+            batch_["meta"][0]["flip"] = True
             flipped_outputs = self.pipeline.forward(batch_, train=False, global_step=self.trainer.global_step)
 
             # First update incam results
@@ -597,6 +464,10 @@ class MV2D(pl.LightningModule):
             outputs["pred_smpl_params_incam"] = smpl_params_avg
 
             # Then update global results
+            # global_trans_w1 = outputs["pred_smpl_params_global"]["transl"]  # (B, 3)
+            # global_trans_w2 = flipped_outputs["pred_smpl_params_global"]["transl"][0]  # (B, 3)
+            # global_vel_w1 = global_trans_w1[1:] - global_trans_w1[:-1]
+            # global_vel_w2 = global_trans_w2[1:] - global_trans_w2[:-1]
             outputs["pred_smpl_params_global"]["betas"] = smpl_params_avg["betas"]
             outputs["pred_smpl_params_global"]["body_pose"] = smpl_params_avg["body_pose"]
 
@@ -707,12 +578,13 @@ class MV2D(pl.LightningModule):
         return ckpt
 
 
-mv2d = builds(
-    MV2D,
+
+mfm_hmr = builds(
+    MFMHMR,
     pipeline="${pipeline}",
     optimizer="${optimizer}",
     scheduler_cfg="${scheduler_cfg}",
     model_cfg="${model_cfg}",
     populate_full_signature=True,  # Adds all the arguments to the signature
 )
-MainStore.store(name="mv2d", node=mv2d, group="model/gvhmr")
+MainStore.store(name="mfm_hmr", node=mfm_hmr, group="model/gvhmr")

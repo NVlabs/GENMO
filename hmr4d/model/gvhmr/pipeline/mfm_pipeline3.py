@@ -382,6 +382,102 @@ class Pipeline(nn.Module):
         outputs["loss"] = total_loss
         return outputs
 
+    def forward_2d(self, inputs, train=False, global_step=0, diffusion=None):
+        outputs = dict()
+        length = inputs["length"]  # (B,) effective length of each sample
+        device = inputs["obs"].device
+        B, L = inputs["obs"].shape[:2]
+
+        try:
+            cliff_cam = compute_bbox_info_bedlam(inputs["bbx_xys"], inputs["K_fullimg"])  # (B, L, 3)
+        except:
+            import ipdb; ipdb.set_trace()
+
+        # input view generation
+        f_condition = {
+            "f_cliffcam": cliff_cam.to(device),  # (B, L, 3)
+            # "f_cam_angvel": torch.zeros(B, L, 6).to(device),  # (B, L, C=6)
+            # "detach_j3d_for_mv2d": self.args.get('train2d_detach_j3d_for_mv2d', False),
+            # "detach_cam_for_mv2d": self.args.get('train2d_detach_cam_for_mv2d', False)
+        }
+        if 'f_imgseq' in inputs:
+            f_condition['f_imgseq'] = inputs['f_imgseq']
+        f_condition["obs"] = inputs["obs"]  # (B, L, J, 3)
+        if train:
+            f_condition_valid_mask = {}
+            for k in f_condition.keys():
+                if f_condition[k] is None:
+                    continue
+                if train:
+                    f_condition[k] = f_condition[k].clone()
+                    uncond_prob = self.args.uncond_prob[k]
+                    mask = torch.rand(f_condition[k].shape[:2], device=f_condition[k].device) < uncond_prob
+                    # set this later in the motion mask
+                    # f_condition[k][mask] = 0.0
+                    f_condition_valid_mask[k] = ~mask
+                else:
+                    f_condition_valid_mask[k] = torch.rand(f_condition[k].shape[:2], device=f_condition[k].device) > -1
+
+            # f_condition = randomly_set_null_condition(f_condition, 0.1)
+
+        inputs["f_condition"] = f_condition
+        inputs["f_condition_valid_mask"] = f_condition_valid_mask
+        # inputs["clean_f_condition"] = clean_f_condition
+        # model_output = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
+        model_output = self.denoiser3d.forward_train_2d(inputs)  # pred_x, pred_cam, static_conf_logits
+        if 'decode_dict' in model_output:
+            decode_dict = model_output.pop("decode_dict")
+        else:
+            decode_dict = self.endecoder.decode(model_output["pred_x"])  # (B, L, C) -> dict
+        outputs.update({"2d_model_output": model_output, "2d_decode_dict": decode_dict})
+
+        # Post-processing
+        outputs["2d_pred_smpl_params_incam"] = {
+            "body_pose": decode_dict["body_pose"],  # (B, L, 63)
+            "betas": decode_dict["betas"],  # (B, L, 10)
+            "global_orient": decode_dict["global_orient"],  # (B, L, 3)
+            "transl": compute_transl_full_cam(model_output["pred_cam"], inputs["bbx_xys"], inputs["K_fullimg"]),
+        }
+
+        # ========== Compute Loss ========== #
+        total_loss = 0
+        mask = inputs["mask"]
+
+        # 2. Extra loss
+        model_output = outputs["2d_model_output"]
+        endecoder = self.endecoder
+        extra_loss_dict = {}
+        # mask_reproj = ~inputs["mask"]["spv_incam_only"]  # do not supervise reproj for 3DPW
+
+        # Incam FK
+        # prediction
+        # pred_c_j3d = endecoder.fk_v2(**outputs["pred_smpl_params_incam"])
+        # pred_cr_j3d = pred_c_j3d - pred_c_j3d[:, :, :1]  # (B, L, J, 3)
+
+        if self.weights.j2d > 0.0:
+            pred_c_j17 = endecoder.smplx_model(**outputs["2d_pred_smpl_params_incam"])[1]
+            conf_2d = inputs['conf']
+            pred_c_j17[conf_2d < 0.1] = 0.0
+            # prevent divide 0 or small value to overflow(fp16)
+            reproj_z_thr = 0.3
+            pred_c_j3d_z0_mask = pred_c_j17[..., 2].abs() <= reproj_z_thr
+            pred_c_j17[pred_c_j3d_z0_mask] = reproj_z_thr
+            gt_c_j17_2d = inputs["orig_obs"][..., :2]
+
+            # project and normalize
+            pred_j2d_01 = project_to_bi01(pred_c_j17, inputs["bbx_xys"], inputs["K_fullimg"])
+            pred_j2d_01[conf_2d < 0.1] = 0.0
+
+            j2d_loss = F.mse_loss(pred_j2d_01, gt_c_j17_2d, reduction="none")
+            j2d_loss = (j2d_loss * mask[..., None, None] * conf_2d[..., None]).mean()
+
+            total_loss += j2d_loss * self.weights.j2d
+            extra_loss_dict["j2d_loss_2d"] = j2d_loss
+
+        outputs["loss_2d"] = total_loss
+        return outputs
+
+
 
 def randomly_set_null_condition(f_condition, uncond_prob=0.1):
     """Conditions are in shape (B, L, *)"""

@@ -282,8 +282,10 @@ class MDMDenoiserROPE(nn.Module):
         f_cond = y["f_cond"]
 
         x = x[:, :, self.s_pred_ind:]
-        motion_mask = motion_mask[:, :, self.s_pred_ind:]
-        observed_motion = observed_motion[:, :, self.s_pred_ind:]
+        if motion_mask is not None:
+            motion_mask = motion_mask[:, :, self.s_pred_ind:]
+        if observed_motion is not None:
+            observed_motion = observed_motion[:, :, self.s_pred_ind:]
 
         if 'text' in self.cond_mode:
             if 'enc_text' not in y:
@@ -311,7 +313,7 @@ class MDMDenoiserROPE(nn.Module):
                     init_observed_motion = init_observed_motion.transpose(1, 2).unsqueeze(2)
                     motion_mask = motion_mask * (1 - force_motion_mask) + init_motion_mask * force_motion_mask
                     observed_motion = observed_motion * (1 - force_motion_mask) + init_observed_motion * force_motion_mask
-
+                assert x.shape == motion_mask.shape, (x.shape, motion_mask.shape)
                 x = x * (1 - motion_mask) + observed_motion * motion_mask
 
                 x = torch.cat([x, motion_mask], axis=2)
