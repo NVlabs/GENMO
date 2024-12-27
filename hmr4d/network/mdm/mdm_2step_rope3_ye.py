@@ -354,11 +354,16 @@ class MDMBase(nn.Module):
         static_conf_logits = pred_x_start[:, :, self.s_pred_ind : self.s_pred_ind + 6]
         assert pred_x_start.shape[-1] == self.s_pred_ind + 6 + 151
         sample = pred_x_start[:, :, self.s_pred_ind + 6:]
-
+        
+        valid_loss_mask = torch.ones_like(pred_x_start)
+        valid_loss_mask[batch["mask"]["spv_incam_only"], :, -9:] *= 0
+        valid_loss_mask[batch["mask"]["spv_incam_only"], :, self.s_pred_ind :self.s_pred_ind + 6] *= 0
+        valid_loss_mask = valid_loss_mask * valid_mask[:, :, None]
+        
         output = {
             "pred_x_start": pred_x_start,
             "target_x_start": target_x_start,
-            # "valid_loss_mask": valid_loss_mask,
+            "valid_loss_mask": valid_loss_mask,
             "pred_x": sample,
             "static_conf_logits": static_conf_logits,
             "t_weights": t_weights,
