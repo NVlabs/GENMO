@@ -130,6 +130,8 @@ class MV2D(pl.LightningModule):
                     outputs['loss'] += outputs_3d['loss']
                     append_mode_to_loss(outputs_3d, mode)
                     outputs.update(outputs_3d)
+                    if mode == 'regression' and 'diffusion' in self.train_3d_modes:
+                        batch['3d']['regression_outputs'] = outputs_3d.copy()
                     
         
         start_2d_training_steps = self.model_cfg.get("start_2d_training_steps", 0)
@@ -158,6 +160,12 @@ class MV2D(pl.LightningModule):
 
     def train_3d_step(self, batch, batch_idx, mode):
         B, F = batch["smpl_params_c"]["body_pose"].shape[:2]
+        
+        batch = batch.copy()
+        for k, v in batch.items():
+            if isinstance(v, torch.Tensor):
+                # print(k, v.shape)
+                batch[k] = v.detach().clone()
 
         # Create augmented noisy-obs : gt_j3d(coco17)
         with torch.no_grad():
@@ -241,7 +249,7 @@ class MV2D(pl.LightningModule):
         # batch["f_imgseq"] = f_imgseq.clone()
 
         # Forward and get loss
-        outputs = self.pipeline.forward(batch, train=True, global_step=self.trainer.global_step)
+        outputs = self.pipeline.forward(batch, train=True, global_step=self.trainer.global_step, mode=mode)
         outputs['batch_size'] = B
 
         return outputs
@@ -301,7 +309,7 @@ class MV2D(pl.LightningModule):
             # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/2d_test_obs.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
 
             # Forward and get loss
-            outputs = self.pipeline.forward_2d(batch, train=True, global_step=self.trainer.global_step, diffusion=self.train_diffusion)
+            outputs = self.pipeline.forward_2d(batch, train=True, global_step=self.trainer.global_step, diffusion=self.train_diffusion, mode=mode)
             outputs['batch_size'] = B
 
         return outputs
