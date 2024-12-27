@@ -230,8 +230,9 @@ class MDMBase(nn.Module):
             obs = obs.clone()
             visible_mask = obs[..., [2]] > 0.5  # (B, L, J, 1)
 
-            valid_mask = f_condition_valid_mask["obs"]  # (B, L)
-            visible_mask[~valid_mask] = False
+            if 'obs' in f_condition_valid_mask:
+                valid_mask = f_condition_valid_mask["obs"]  # (B, L)
+                visible_mask[~valid_mask] = False
             obs[~visible_mask[..., 0]] = 0  # set low-conf to all zeros
 
             # f_obs = obs[..., :2]  # (B, L, J, 32)
@@ -243,27 +244,30 @@ class MDMBase(nn.Module):
         if 'f_cliffcam' in f_condition:
             f_cliffcam = f_condition["f_cliffcam"]  # (B, L, 3)
             f_cliffcam = self.cliffcam_embedder(f_cliffcam)
-            valid_mask = f_condition_valid_mask["f_cliffcam"]  # (B, L)
-            f_cliffcam = f_cliffcam * valid_mask[..., None] + self.learned_cliffcam_params.repeat(B, L, 1) * ~valid_mask[..., None]
-
+            if 'f_cliffcam' in f_condition_valid_mask:
+                valid_mask = f_condition_valid_mask["f_cliffcam"]  # (B, L)
+                f_cliffcam = f_cliffcam * valid_mask[..., None] + self.learned_cliffcam_params.repeat(B, L, 1) * ~valid_mask[..., None]
             f_cond = f_cond + f_cliffcam
         if "f_cam_angvel" in f_condition:
             f_cam_angvel = f_condition["f_cam_angvel"]  # (B, L, 6)
             f_cam_angvel = self.cam_angvel_embedder(f_cam_angvel)
-            valid_mask = f_condition_valid_mask["f_cam_angvel"]  # (B, L)
-            f_cam_angvel = f_cam_angvel * valid_mask[..., None] + self.learned_cam_angvel_params.repeat(B, L, 1) * ~valid_mask[..., None]
+            if 'f_cam_angvel' in f_condition_valid_mask:
+                valid_mask = f_condition_valid_mask["f_cam_angvel"]  # (B, L)
+                f_cam_angvel = f_cam_angvel * valid_mask[..., None] + self.learned_cam_angvel_params.repeat(B, L, 1) * ~valid_mask[..., None]
             f_cond = f_cond + f_cam_angvel
         if "f_cam_t_vel" in f_condition:
             f_cam_t_vel = f_condition["f_cam_t_vel"]  # (B, L, 3)
             f_cam_t_vel = self.cam_t_vel_embedder(f_cam_t_vel)
-            valid_mask = f_condition_valid_mask["f_cam_t_vel"]  # (B, L)
-            f_cam_t_vel = f_cam_t_vel * valid_mask[..., None] + self.learned_cam_t_vel_params.repeat(B, L, 1) * ~valid_mask[..., None]
+            if 'f_cam_t_vel' in f_condition_valid_mask:
+                valid_mask = f_condition_valid_mask["f_cam_t_vel"]  # (B, L)
+                f_cam_t_vel = f_cam_t_vel * valid_mask[..., None] + self.learned_cam_t_vel_params.repeat(B, L, 1) * ~valid_mask[..., None]
             f_cond = f_cond + f_cam_t_vel
         if 'f_imgseq' in f_condition:
             f_imgseq = f_condition["f_imgseq"]  # (B, L, C)
             f_imgseq = self.imgseq_embedder(f_imgseq)
-            valid_mask = f_condition_valid_mask["f_imgseq"]  # (B, L)
-            f_imgseq = f_imgseq * valid_mask[..., None]
+            if 'f_imgseq' in f_condition_valid_mask:
+                valid_mask = f_condition_valid_mask["f_imgseq"]  # (B, L)
+                f_imgseq = f_imgseq * valid_mask[..., None]
             f_cond = f_cond + f_imgseq
 
         # f_cam = self.cam_angvel_embedder(f_cam_angvel)
@@ -307,7 +311,8 @@ class MDMBase(nn.Module):
         B, L, _ = motion.shape
         # Setup length and make padding mask
         vis_mask = length_to_mask(length, L)  # (B, L)
-        f_cond = f_cond * vis_mask[..., None]
+        if self.args.get("vis_masking_f_cond", True):
+            f_cond = f_cond * vis_mask[..., None]
 
         denoiser_kwargs = {
             "y": {

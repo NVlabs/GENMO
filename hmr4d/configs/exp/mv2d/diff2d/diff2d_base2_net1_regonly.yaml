@@ -38,7 +38,7 @@ data_name: mocap_mixed_v1
 model_cfg:
     # train_2d_modes: ["sv-diffusion"]
     # infer_mode: "diffusion"
-    train_3d_modes: ["regression", "diffusion"]
+    train_3d_modes: ["regression"]
     # train_3d_modes: ["regression"]
     train_2d_modes: ["regression"]
     infer_mode: "regression"
@@ -54,6 +54,7 @@ pipeline:
         endecoder_opt: ${endecoder}
         normalize_cam_angvel: True
         num_views: ${model_cfg.num_views}
+        regression_only: true
         weights:
             cr_j3d: 500.
             transl_c: 1.

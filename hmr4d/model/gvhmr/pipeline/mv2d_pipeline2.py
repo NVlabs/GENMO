@@ -90,19 +90,24 @@ class Pipeline(nn.Module):
                 f_condition["f_cam_t_vel"] = inputs["noisy_cam_tvel"]
             else:
                 f_condition['f_cam_t_vel'] = inputs["cam_tvel"]
+                
         f_condition_valid_mask = {}
-        for k in f_condition.keys():
-            if f_condition[k] is None:
-                continue
+        if self.args.get("old_f_condition_masking", False):
             if train:
-                f_condition[k] = f_condition[k].clone()
-                uncond_prob = self.args.uncond_prob[k]
-                mask = torch.rand(f_condition[k].shape[:2], device=f_condition[k].device) < uncond_prob
-                # set this later in the motion mask
-                # f_condition[k][mask] = 0.0
-                f_condition_valid_mask[k] = ~mask
-            else:
-                f_condition_valid_mask[k] = torch.rand(f_condition[k].shape[:2], device=f_condition[k].device) > -1
+                f_condition = randomly_set_null_condition(f_condition, 0.1)
+        else:
+            for k in f_condition.keys():
+                if f_condition[k] is None:
+                    continue
+                if train:
+                    f_condition[k] = f_condition[k].clone()
+                    uncond_prob = self.args.uncond_prob[k]
+                    mask = torch.rand(f_condition[k].shape[:2], device=f_condition[k].device) < uncond_prob
+                    # set this later in the motion mask
+                    # f_condition[k][mask] = 0.0
+                    f_condition_valid_mask[k] = ~mask
+                else:
+                    f_condition_valid_mask[k] = torch.rand(f_condition[k].shape[:2], device=f_condition[k].device) > -1
 
         inputs["f_condition_valid_mask"] = f_condition_valid_mask
 

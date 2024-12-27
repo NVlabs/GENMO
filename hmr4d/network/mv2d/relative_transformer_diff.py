@@ -51,6 +51,7 @@ class NetworkEncoderRoPE(nn.Module):
         dropout=0.1,
         # other
         avgbeta=True,
+        njoints=None,
         num_views=4,
         pl_module=None,
         **kwargs,
@@ -71,6 +72,8 @@ class NetworkEncoderRoPE(nn.Module):
         self.num_layers = num_layers
         self.num_heads = num_heads
         self.dropout = dropout
+        self.njoints = njoints
+        self.nfeats = 1
 
         # ===== build model ===== #
         # Input (Kp2d)
