@@ -10,14 +10,14 @@ defaults:
           - pure_motion_amass/v11
           - imgfeat_bedlam/v2
           - imgfeat_h36m/v1
-          - imgfeat_3dpw/v1
+          - imgfeat_3dpw/occ
     - override /train_2d_datasets:
           - bones_2d
     - override /test_datasets:
           - emdb1/v1_fliptest
           - emdb2/v1_fliptest
           - rich/all
-          - 3dpw/fliptest
+          - 3dpw/occ_fliptest
         #   - bones_2d_test
     - override /callbacks:
           - simple_ckpt_saver/every10e_top100

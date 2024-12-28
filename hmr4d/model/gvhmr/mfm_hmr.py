@@ -49,6 +49,7 @@ class MFMHMR(pl.LightningModule):
         self.optimizer = instantiate(optimizer)
         self.model_cfg = model_cfg
         self.scheduler_cfg = scheduler_cfg
+        self.validate_2d_in_3d = model_cfg.get("validate_2d_in_3d", False)
         self.train_3d_modes = model_cfg.get("train_3d_modes", ["regression"])
         self.train_2d_modes = model_cfg.get("train_2d_modes", ["regression"])
         self.infer_mode = model_cfg.get("infer_mode", "regression")
@@ -309,8 +310,6 @@ class MFMHMR(pl.LightningModule):
             }
         }
         return outputs
-
-
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         if 'is_2d' in batch and batch['is_2d'][0]:

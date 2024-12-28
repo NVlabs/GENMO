@@ -370,7 +370,7 @@ class MDMBase(nn.Module):
         # inpaint_mask[batch["mask"]["spv_incam_only"], :, -9:] *= 0
         valid_loss_mask[batch["mask"]["spv_incam_only"], :, -9:] *= 0
         # inpaint_mask[batch["mask"]["spv_incam_only"], :, self.s_pred_ind + 3 :self.s_pred_ind + 3 + 6] *= 0
-        valid_loss_mask[batch["mask"]["spv_incam_only"], :, self.s_pred_ind + 3 :self.s_pred_ind + 3 + 6] *= 0
+        valid_loss_mask[batch["mask"]["spv_incam_only"], :, self.s_pred_ind :self.s_pred_ind + 6] *= 0
         # inpaint_mask = inpaint_mask * valid_mask[:, :, None]
         valid_mask = batch["mask"]["valid"]
         valid_loss_mask = valid_loss_mask * valid_mask[:, :, None]

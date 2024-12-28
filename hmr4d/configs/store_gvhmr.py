@@ -4,6 +4,8 @@ import hmr4d.dataset.emdb.emdb_motion_test
 import hmr4d.dataset.rich.rich_motion_test
 import hmr4d.dataset.threedpw.threedpw_motion_test
 import hmr4d.dataset.threedpw.threedpw_motion_train
+import hmr4d.dataset.threedpw.threedpw_occ_motion_train
+import hmr4d.dataset.threedpw.threedpw_occ_motion_test
 import hmr4d.dataset.bedlam.bedlam
 import hmr4d.dataset.h36m.h36m
 
@@ -19,6 +21,7 @@ import hmr4d.model.common_utils.scheduler_cfg
 import hmr4d.model.gvhmr.callbacks.metric_emdb
 import hmr4d.model.gvhmr.callbacks.metric_rich
 import hmr4d.model.gvhmr.callbacks.metric_3dpw
+import hmr4d.model.gvhmr.callbacks.metric_3dpw_occ
 import hmr4d.model.gvhmr.callbacks.vis_2d
 
 
