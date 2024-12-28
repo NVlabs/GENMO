@@ -413,22 +413,13 @@ class MDMBase(nn.Module):
         )
         # Setup length and make padding mask
         vis_mask = length_to_mask(length, L)  # (B, L)
-        if L > self.max_len:
-            attnmask = torch.ones((L, L), device=motion.device, dtype=torch.bool)
-            for i in range(L):
-                min_ind = max(0, i - self.max_len // 2)
-                max_ind = min(L, i + self.max_len // 2)
-                max_ind = max(self.max_len, max_ind)
-                min_ind = min(L - self.max_len, min_ind)
-                attnmask[i, min_ind:max_ind] = False
-        else:
-            attnmask = None
         t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
 
         t = torch.ones_like(t) * 999
         t_weights = torch.ones_like(t_weights)
         x_t = torch.rand_like(motion)
-        f_cond = f_cond * vis_mask[..., None]
+        if self.args.get("vis_masking_f_cond", True):
+            f_cond = f_cond * vis_mask[..., None]
 
         denoiser_kwargs = {
             "y": {
@@ -479,7 +470,8 @@ class MDMBase(nn.Module):
         )
 
         vis_mask = length_to_mask(length, L)  # (B, L)
-        f_cond = f_cond * vis_mask[..., None]
+        if self.args.get("vis_masking_f_cond", True):
+            f_cond = f_cond * vis_mask[..., None]
         if regression_only:
             denoiser_kwargs = {
                 "y": {
