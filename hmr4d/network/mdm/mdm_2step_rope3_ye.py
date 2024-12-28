@@ -334,13 +334,14 @@ class MDMBase(nn.Module):
         elif mode == 'diffusion':
             t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
             pred_x_start_regression = batch['regression_outputs']['model_output']['pred_x_start'].detach()
-            inpaint_mask = torch.ones_like(pred_x_start_regression)
-            # inpaint_mask[batch["mask"]["spv_incam_only"], :, -9:] *= 0
-            # inpaint_mask[batch["mask"]["spv_incam_only"], :, self.s_pred_ind + 3 :self.s_pred_ind + 3 + 6] *= 0
-            inpaint_mask = inpaint_mask * valid_mask[:, :, None]
-            inpaint_mask = inpaint_mask * vis_mask[:, :, None]
-            x_start = clean_motion.clone() * inpaint_mask + pred_x_start_regression * (1 - inpaint_mask)
-            x_start = x_start * valid_mask[:, :, None]
+            if self.args.get('diffusion_all_regression_outputs', False):
+                x_start = pred_x_start_regression
+            else:
+                inpaint_mask = torch.ones_like(pred_x_start_regression)
+                inpaint_mask = inpaint_mask * valid_mask[:, :, None]
+                inpaint_mask = inpaint_mask * vis_mask[:, :, None]
+                x_start = clean_motion.clone() * inpaint_mask + pred_x_start_regression * (1 - inpaint_mask)
+                x_start = x_start * valid_mask[:, :, None]
             noise = torch.randn_like(x_start)
             x_t = self.train_diffusion.q_sample(x_start.clone(), t, noise=noise)
         
@@ -396,7 +397,7 @@ class MDMBase(nn.Module):
         )
         return output
 
-    def forward_train_2d(self, inputs):
+    def forward_train_2d(self, inputs, mode):
         assert self.training, "forward_train_2d should only be called during training"
         diffusion = self.train_diffusion if self.training else self.test_diffusion
 
@@ -413,43 +414,47 @@ class MDMBase(nn.Module):
         )
         # Setup length and make padding mask
         vis_mask = length_to_mask(length, L)  # (B, L)
-        t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
-
-        t = torch.ones_like(t) * 999
-        t_weights = torch.ones_like(t_weights)
-        x_t = torch.rand_like(motion)
         if self.args.get("vis_masking_f_cond", True):
             f_cond = f_cond * vis_mask[..., None]
-
+        
         denoiser_kwargs = {
             "y": {
                 "text": [""] * B,
-                "f_cond": f_cond.clone(),
-                "mask": vis_mask.clone(),
-                "length": length.clone(),
+                "f_cond": f_cond,
+                "mask": vis_mask,
+                "length": length,
             }
         }
-        self.denoiser.s_pred_ind = self.s_pred_ind
+        
+        if mode == 'regression':
+            t = (torch.ones(B) * 999).long().to(motion.device)
+            t_weights = torch.ones(B).to(motion.device)
+            x_t = torch.rand_like(motion)
+        elif mode == 'diffusion':
+            t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
+            pred_x_start_regression = inputs['regression_outputs']['2d_model_output']['pred_x_start'].detach()
+            x_start = pred_x_start_regression
+            noise = torch.randn_like(x_start)
+            x_t = self.train_diffusion.q_sample(x_start.clone(), t, noise=noise)
+            
         denoise_out = self.denoiser(
             x_t, diffusion._scale_timesteps(t), return_aux=False, **denoiser_kwargs
         )
+        
         pred_x_start = denoise_out["pred_x_start"]
-        valid_loss_mask = torch.zeros_like(pred_x_start)
-
-        if 'pred_cam' in self.args.out_attr:
-            pred_cam = denoise_out["pred_cam"]
 
         static_conf_logits = pred_x_start[:, :, self.s_pred_ind : self.s_pred_ind + 6]
         assert pred_x_start.shape[-1] == self.s_pred_ind + 6 + 151
         sample = pred_x_start[:, :, self.s_pred_ind + 6:]
 
         output = {
+            "pred_x_start": pred_x_start,
             "pred_x": sample,
             "static_conf_logits": static_conf_logits,
             "t_weights": t_weights,
         }
-        if 'pred_cam' in self.args.out_attr:
-            output["pred_cam"] = pred_cam
+        for x in self.args.out_attr:
+            output[x] = denoise_out[x]
         return output
 
     def forward_test(self, inputs, train=False, postproc=False, static_cam=False, progress=False, mode=None):

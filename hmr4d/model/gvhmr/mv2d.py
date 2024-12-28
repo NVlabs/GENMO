@@ -142,6 +142,8 @@ class MV2D(pl.LightningModule):
                     outputs['loss'] += outputs_2d['loss_2d']
                     append_mode_to_loss(outputs_2d, mode)
                     outputs.update(outputs_2d)
+                    if mode == 'regression' and 'diffusion' in self.train_2d_modes:
+                        batch['2d']['regression_outputs'] = outputs_2d.copy()
 
         # Log
         log_kwargs = {
@@ -268,6 +270,7 @@ class MV2D(pl.LightningModule):
         return outputs
     
     def train_2d_step(self, batch, batch_idx, mode):
+        batch = batch.copy()
         B = batch["obs_kp2d"].shape[0]
         obs_kp2d = batch['obs_kp2d'].squeeze(2)
         conf = batch['conf']
@@ -312,7 +315,7 @@ class MV2D(pl.LightningModule):
             batch["obs_x_t"][~batch["mask"]] = 0
             batch['scaled_t'] = scaled_t
             outputs = self.pipeline.forward_singleview_diffusion(batch, train=True, global_step=self.trainer.global_step)
-        elif mode in {'regression'}:
+        elif mode in {'regression', 'diffusion'}:
             obs_kp2d = torch.cat([obs_kp2d, j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
             obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
             obs[~batch["mask"]] = 0
