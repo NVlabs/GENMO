@@ -271,10 +271,16 @@ class MV2D(pl.LightningModule):
     
     def train_2d_step(self, batch, batch_idx, mode):
         batch = batch.copy()
+        for k, v in batch.items():
+            if isinstance(v, torch.Tensor):
+                # print(k, v.shape)
+                batch[k] = v.detach().clone()
+        
         B = batch["obs_kp2d"].shape[0]
         obs_kp2d = batch['obs_kp2d'].squeeze(2)
         conf = batch['conf']
-        batch["bbx_xys"] = get_bbx_xys(obs_kp2d, do_augment=False)
+        aug_bbox = self.model_cfg.get('train_2d_aug_bbox', False)
+        batch["bbx_xys"] = get_bbx_xys(obs_kp2d, do_augment=aug_bbox)
         
         # TODO: add bbox augmentation
         

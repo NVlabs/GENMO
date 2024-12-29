@@ -49,6 +49,7 @@ model_cfg:
     start_2d_training_steps: 0
     noisy_2d_obs: true
     kp2d_noise_scale: 0.5
+    train_2d_aug_bbox: true
     diffusion:
         test_timestep_respacing: '5'
         guidance_param: 2.5
@@ -71,7 +72,7 @@ pipeline:
             verts2d: 1000.
 
             norm_j2d: 1000.
-            train2d_skip_regression: false
+            train2d_skip_regression: true
 
             transl_w: 1.
             static_conf_bce: 1.

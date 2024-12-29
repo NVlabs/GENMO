@@ -303,7 +303,7 @@ class Pipeline(nn.Module):
         # pred_c_j3d = endecoder.fk_v2(**outputs["pred_smpl_params_incam"])
         # pred_cr_j3d = pred_c_j3d - pred_c_j3d[:, :, :1]  # (B, L, J, 3)
 
-        if self.weights.get('j2d_train2d', 0.0) > 0.0:
+        if self.weights.get('j2d_train2d', 0.0) > 0.0 and not (mode == 'regression' and self.weights.train2d_skip_regression):
             pred_c_j17 = endecoder.smplx_model(**outputs["2d_pred_smpl_params_incam"])[1]
             conf_2d = inputs['conf']
             pred_c_j17[conf_2d < 0.1] = 0.0
@@ -323,7 +323,7 @@ class Pipeline(nn.Module):
             total_loss += j2d_loss * self.weights.j2d_train2d
             extra_loss_dict["j2d_loss_2d"] = j2d_loss
             
-        if self.weights.norm_j2d > 0.0 and not (mode == 'regression' and self.weights.norm_j2d_skip_regression):
+        if self.weights.get('norm_j2d', 0.0) > 0.0 and not (mode == 'regression' and self.weights.train2d_skip_regression):
             pred_c_j17 = endecoder.smplx_model(**outputs["2d_pred_smpl_params_incam"])[1]
             conf_2d = inputs['conf']
             conf_2d[conf_2d < 0.1] = 0.0

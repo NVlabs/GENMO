@@ -70,8 +70,9 @@ pipeline:
             j2d: 1000.
             verts2d: 1000.
 
-            norm_j2d: 1000.
-            train2d_skip_regression: false
+            j2d_train2d: 1000.
+            # norm_j2d: 1000.
+            train2d_skip_regression: true
 
             transl_w: 1.
             static_conf_bce: 1.
