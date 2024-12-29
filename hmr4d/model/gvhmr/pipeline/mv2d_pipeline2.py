@@ -295,7 +295,6 @@ class Pipeline(nn.Module):
         # 2. Extra loss
         model_output = outputs["2d_model_output"]
         endecoder = self.endecoder
-        extra_loss_dict = {}
         # mask_reproj = ~inputs["mask"]["spv_incam_only"]  # do not supervise reproj for 3DPW
 
         # Incam FK
@@ -321,7 +320,7 @@ class Pipeline(nn.Module):
             j2d_loss = (j2d_loss * mask[..., None, None] * conf_2d[..., None]).mean()
 
             total_loss += j2d_loss * self.weights.j2d_train2d
-            extra_loss_dict["j2d_loss_2d"] = j2d_loss
+            outputs["j2d_loss_2d"] = j2d_loss
             
         if self.weights.get('norm_j2d', 0.0) > 0.0 and not (mode == 'regression' and self.weights.train2d_skip_regression):
             pred_c_j17 = endecoder.smplx_model(**outputs["2d_pred_smpl_params_incam"])[1]
@@ -345,7 +344,7 @@ class Pipeline(nn.Module):
             norm_j2d_loss = (norm_j2d_loss * mask[..., None, None] * conf_2d[..., None]).mean()
 
             total_loss += norm_j2d_loss * self.weights.norm_j2d
-            extra_loss_dict["norm_j2d_loss_2d"] = norm_j2d_loss
+            outputs["norm_j2d_loss_2d"] = norm_j2d_loss
 
         outputs["loss_2d"] = total_loss
         return outputs

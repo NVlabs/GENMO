@@ -116,10 +116,12 @@ class MV2D(pl.LightningModule):
             else:
                 batch = {'3d': batch}
                 
-        def append_mode_to_loss(outputs, mode):
+        def append_mode_to_loss(outputs, mode, suffix=""):
+            if suffix != "":
+                suffix = f"_{suffix}"
             for k in list(outputs.keys()):
                 if "_loss" in k or k in {"loss", "loss_2d"}:
-                    outputs[f'Loss_{mode}/{k}'] = outputs.pop(k)
+                    outputs[f'Loss_{mode}{suffix}/{k}'] = outputs.pop(k)
             return outputs
             
         outputs = {'loss': 0}
@@ -140,7 +142,7 @@ class MV2D(pl.LightningModule):
                 for mode in self.train_2d_modes:
                     outputs_2d = self.train_2d_step(batch['2d'], batch_idx, mode=mode)
                     outputs['loss'] += outputs_2d['loss_2d']
-                    append_mode_to_loss(outputs_2d, mode)
+                    append_mode_to_loss(outputs_2d, mode, suffix="2d")
                     outputs.update(outputs_2d)
                     if mode == 'regression' and 'diffusion' in self.train_2d_modes:
                         batch['2d']['regression_outputs'] = outputs_2d.copy()

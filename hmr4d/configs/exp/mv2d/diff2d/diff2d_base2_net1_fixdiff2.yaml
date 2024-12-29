@@ -41,7 +41,7 @@ model_cfg:
     train_3d_modes: ["regression", "diffusion"]
     # train_3d_modes: ["regression"]
     train_2d_modes: []
-    infer_mode: "regression"
+    # infer_mode: "regression"
     num_views: 4
     start_2d_training_steps: 10000000
     noisy_2d_obs: true
