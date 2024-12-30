@@ -22,7 +22,7 @@ from motiondiff.models.mdm.rotation_conversions import (
     axis_angle_to_matrix,
     matrix_to_axis_angle,
 )
-from hmr4d.utils.geo.hmr_cam import compute_bbox_info_bedlam, compute_transl_full_cam, get_a_pred_cam, project_to_bi01, perspective_projection, get_bbx_xys, normalize_kp2d
+from hmr4d.utils.geo.hmr_cam import compute_bbox_info_bedlam, compute_transl_full_cam, get_a_pred_cam, project_to_bi01, perspective_projection, get_bbx_xys, normalize_kp2d, convert_bbx_xys_to_lurb, cvt_to_bi01_p2d
 from hmr4d.utils.geo.hmr_global import (
     rollout_local_transl_vel,
     get_static_joint_mask,
@@ -310,11 +310,24 @@ class Pipeline(nn.Module):
             reproj_z_thr = 0.3
             pred_c_j3d_z0_mask = pred_c_j17[..., 2].abs() <= reproj_z_thr
             pred_c_j17[pred_c_j3d_z0_mask] = reproj_z_thr
-            gt_c_j17_2d = inputs["orig_obs"][..., :2]
 
             # project and normalize
             pred_j2d_01 = project_to_bi01(pred_c_j17, inputs["bbx_xys"], inputs["K_fullimg"])
             pred_j2d_01[conf_2d < 0.1] = 0.0
+            
+            if self.weights.get('proj_gt_j2d_to_bi01', False):
+                bbx_lurb = convert_bbx_xys_to_lurb(inputs["bbx_xys"])
+                gt_c_j17_2d = cvt_to_bi01_p2d(inputs['obs_kp2d'][:, :, 0], bbx_lurb)
+            else:
+                gt_c_j17_2d = inputs["orig_obs"][..., :2]
+                
+            # vis_ind = 0
+            # mv2d_norm = pred_j2d_01.unsqueeze(2)
+            # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
+            # draw_motion_2d(mv2d_norm[vis_ind, ..., :2].detach().cpu() * 1000, f"out/debug_vis/jj2d_norm.mp4", coco_joint_parents, 1000, 1000, fps=30)
+            # mv2d_norm = gt_c_j17_2d.unsqueeze(2)
+            # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
+            # draw_motion_2d(mv2d_norm[vis_ind, ..., :2].detach().cpu() * 1000, f"out/debug_vis/jj2d_gt.mp4", coco_joint_parents, 1000, 1000, fps=30)
 
             j2d_loss = F.mse_loss(pred_j2d_01, gt_c_j17_2d, reduction="none")
             j2d_loss = (j2d_loss * mask[..., None, None] * conf_2d[..., None]).mean()
@@ -325,7 +338,11 @@ class Pipeline(nn.Module):
         if self.weights.get('norm_j2d', 0.0) > 0.0 and not (mode == 'regression' and self.weights.train2d_skip_regression):
             pred_c_j17 = endecoder.smplx_model(**outputs["2d_pred_smpl_params_incam"])[1]
             conf_2d = inputs['conf']
-            conf_2d[conf_2d < 0.1] = 0.0
+            pred_c_j17[conf_2d < 0.1] = 0.0
+            # prevent divide 0 or small value to overflow(fp16)
+            reproj_z_thr = 0.3
+            pred_c_j3d_z0_mask = pred_c_j17[..., 2].abs() <= reproj_z_thr
+            pred_c_j17[pred_c_j3d_z0_mask] = reproj_z_thr
             
             kp2d = perspective_projection(pred_c_j17, inputs["K_fullimg"])
             bbx = get_bbx_xys(kp2d, do_augment=False)

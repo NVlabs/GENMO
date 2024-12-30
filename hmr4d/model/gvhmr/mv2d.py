@@ -206,6 +206,9 @@ class MV2D(pl.LightningModule):
         if 'body_mask_cfg' in self.model_cfg:
             mask = self.generate_mask(self.model_cfg.body_mask_cfg, j2d_visible_mask, batch["length"])
             j2d_visible_mask = j2d_visible_mask & mask
+        if self.model_cfg.get("mask_occluded_imgfeats", False) and 'f_imgseq' in batch:
+            occluded_img_mask = (~j2d_visible_mask).all(dim=-1)
+            batch['f_imgseq'][occluded_img_mask] = 0
             
         obs_kp2d = torch.cat([obs_i_j2d, j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
         obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
@@ -310,6 +313,9 @@ class MV2D(pl.LightningModule):
         if 'body_mask_cfg' in self.model_cfg:
             mask = self.generate_mask(self.model_cfg.body_mask_cfg, j2d_visible_mask, batch["length"])
             j2d_visible_mask = j2d_visible_mask & mask
+        if self.model_cfg.get("mask_occluded_imgfeats", False) and 'f_imgseq' in batch:
+            occluded_img_mask = (~j2d_visible_mask).all(dim=-1)
+            batch['f_imgseq'][occluded_img_mask] = 0
         
         if mode == 'sv-diffusion':  #single view diffusion
             diffusion = self.train_diffusion
