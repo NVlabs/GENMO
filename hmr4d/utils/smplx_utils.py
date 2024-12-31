@@ -48,6 +48,10 @@ def make_smplx(type="neu_fullpose", **kwargs):
         model = SmplxLiteV437Coco17()
     elif type == "supermotion_smpl24":
         model = SmplxLiteSmplN24()
+    elif type == "supermotion_smpl24_male":
+        model = SmplxLiteSmplN24(gender="male")
+    elif type == "supermotion_smpl24_female":
+        model = SmplxLiteSmplN24(gender="female")
     elif type == "rich-smplx":
         # https://github.com/paulchhuang/rich_toolkit/blob/main/smplx2images.py
         bm_kwargs = {
