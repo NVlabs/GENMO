@@ -23,7 +23,7 @@ from motiondiff.models.mdm.rotation_conversions import (
     axis_angle_to_matrix,
     matrix_to_axis_angle,
 )
-from hmr4d.utils.geo.hmr_cam import compute_bbox_info_bedlam, compute_transl_full_cam, get_a_pred_cam, project_to_bi01
+from hmr4d.utils.geo.hmr_cam import compute_bbox_info_bedlam, compute_transl_full_cam, get_a_pred_cam, project_to_bi01, perspective_projection, get_bbx_xys, normalize_kp2d, convert_bbx_xys_to_lurb, cvt_to_bi01_p2d
 from hmr4d.utils.geo.hmr_global import (
     rollout_local_transl_vel,
     get_static_joint_mask,
@@ -291,34 +291,6 @@ class Pipeline(nn.Module):
         total_loss += simple_loss
         outputs["simple_loss"] = simple_loss
 
-        if "pred_x_start_init" in model_output:
-            pred_x_start_init = model_output["pred_x_start_init"]
-            simple_loss_init = F.mse_loss(pred_x_start_init, target_x_start, reduction="none")[:, :, -151:]
-            mask_simple_init = mask[:, :, None].expand(-1, -1, simple_loss_init.size(2)).clone()  # (B, L, C)
-            mask_simple_init[inputs["mask"]["spv_incam_only"], :, -9:] = False  # 3dpw training
-            simple_loss_init = (simple_loss_init * mask_simple_init * valid_loss_mask * t_weights[:, None, None]).mean()
-            total_loss += simple_loss_init
-            outputs["simple_loss_init"] = simple_loss_init
-            outputs_init["simple_loss"] = simple_loss_init
-
-        if "pred_x_start_drift_init" in model_output:
-            pred_x_start_drift_init = model_output["pred_x_start_drift_init"]
-            simple_loss_drift_init = F.mse_loss(pred_x_start_drift_init, model_output["target_drift_init"], reduction="none")[:, :, -151:]
-            mask_simple_drift_init = mask[:, :, None].expand(-1, -1, simple_loss_drift_init.size(2)).clone()  # (B, L, C)
-            mask_simple_drift_init[inputs["mask"]["spv_incam_only"], :, -9:] = False  # 3dpw training
-            simple_loss_drift_init = (simple_loss_drift_init * mask_simple_drift_init * valid_loss_mask * t_weights[:, None, None]).mean()
-            total_loss += simple_loss_drift_init
-            outputs["simple_loss_drift_init"] = simple_loss_drift_init
-
-        if "pred_x_start_drift" in model_output:
-            pred_x_start_drift = model_output["pred_x_start_drift"]
-            simple_loss_drift = F.mse_loss(pred_x_start_drift, model_output["target_drift"], reduction="none")[:, :, -151:]
-            mask_simple_drift = mask[:, :, None].expand(-1, -1, simple_loss_drift.size(2)).clone()  # (B, L, C)
-            mask_simple_drift[inputs["mask"]["spv_incam_only"], :, -9:] = False  # 3dpw training
-            simple_loss_drift = (simple_loss_drift * mask_simple_drift * valid_loss_mask * t_weights[:, None, None]).mean()
-            total_loss += simple_loss_drift
-            outputs["simple_loss_drift"] = simple_loss_drift
-
         if 'cam_t_vel' in self.args.out_attr:
             pred_cam_t_vel = model_output["pred_cam_t_vel"]
             target_cam_t_vel = inputs["cam_tvel"]
@@ -328,13 +300,6 @@ class Pipeline(nn.Module):
             cam_t_vel_loss = F.mse_loss(pred_cam_t, target_cam_t) * self.weights.cam_t_vel
             total_loss += cam_t_vel_loss
             outputs["cam_t_vel_loss"] = cam_t_vel_loss
-
-            if 'pred_cam_t_vel_init' in model_output:
-                pred_cam_t_vel_init = model_output["pred_cam_t_vel_init"]
-                pred_cam_t_init = torch.cumsum(pred_cam_t_vel_init, dim=-2)
-                cam_t_vel_loss_init = F.mse_loss(pred_cam_t_init, target_cam_t) * self.weights.cam_t_vel
-                total_loss += cam_t_vel_loss_init
-                outputs["cam_t_vel_loss_init"] = cam_t_vel_loss_init
 
         if 'cam_scale' in self.args.out_attr:
             pred_cam_scale = model_output["pred_cam_scale"]
@@ -348,13 +313,6 @@ class Pipeline(nn.Module):
             total_loss += cam_scale_loss
             outputs["cam_scale_loss"] = cam_scale_loss
 
-            if 'pred_cam_scale_init' in model_output:
-                pred_cam_scale_init = model_output["pred_cam_scale_init"]
-                pred_cam_t_init = torch.cumsum(noisy_cam_tvel, dim=-2) * pred_cam_scale_init
-                cam_scale_loss_init = F.mse_loss(pred_cam_t_init, target_cam_t) * self.weights.cam_t_vel
-                total_loss += cam_scale_loss_init
-                outputs["cam_scale_loss_init"] = cam_scale_loss_init
-
         # 2. Extra loss
         extra_funcs = [
             compute_extra_incam_loss,
@@ -365,16 +323,10 @@ class Pipeline(nn.Module):
             total_loss += extra_loss
             outputs.update(extra_loss_dict)
 
-        if "pred_x_init" in model_output:
-            extra_loss, extra_loss_dict = extra_func(inputs, outputs_init, self)
-            total_loss += extra_loss
-            outputs_init.update(extra_loss_dict)
-            for k, v in outputs_init.items():
-                outputs[k + "_init"] = v
         outputs["loss"] = total_loss
         return outputs
-
-    def forward_2d(self, inputs, train=False, global_step=0, diffusion=None):
+    
+    def forward_2d(self, inputs, train=False, global_step=0, diffusion=None, mode=None):
         outputs = dict()
         length = inputs["length"]  # (B,) effective length of each sample
         device = inputs["obs"].device
@@ -395,28 +347,29 @@ class Pipeline(nn.Module):
         if 'f_imgseq' in inputs:
             f_condition['f_imgseq'] = inputs['f_imgseq']
         f_condition["obs"] = inputs["obs"]  # (B, L, J, 3)
+        f_condition_valid_mask = {}
         if train:
-            f_condition_valid_mask = {}
-            for k in f_condition.keys():
-                if f_condition[k] is None:
-                    continue
-                if train:
-                    f_condition[k] = f_condition[k].clone()
-                    uncond_prob = self.args.uncond_prob[k]
-                    mask = torch.rand(f_condition[k].shape[:2], device=f_condition[k].device) < uncond_prob
-                    # set this later in the motion mask
-                    # f_condition[k][mask] = 0.0
-                    f_condition_valid_mask[k] = ~mask
-                else:
-                    f_condition_valid_mask[k] = torch.rand(f_condition[k].shape[:2], device=f_condition[k].device) > -1
-
-            # f_condition = randomly_set_null_condition(f_condition, 0.1)
+            if self.args.get("old_f_condition_masking", False):
+                f_condition = randomly_set_null_condition(f_condition, 0.1)
+            else:
+                for k in f_condition.keys():
+                    if f_condition[k] is None:
+                        continue
+                    if train:
+                        f_condition[k] = f_condition[k].clone()
+                        uncond_prob = self.args.uncond_prob[k]
+                        mask = torch.rand(f_condition[k].shape[:2], device=f_condition[k].device) < uncond_prob
+                        # set this later in the motion mask
+                        # f_condition[k][mask] = 0.0
+                        f_condition_valid_mask[k] = ~mask
+                    else:
+                        f_condition_valid_mask[k] = torch.rand(f_condition[k].shape[:2], device=f_condition[k].device) > -1
 
         inputs["f_condition"] = f_condition
         inputs["f_condition_valid_mask"] = f_condition_valid_mask
         # inputs["clean_f_condition"] = clean_f_condition
         # model_output = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
-        model_output = self.denoiser3d.forward_train_2d(inputs)  # pred_x, pred_cam, static_conf_logits
+        model_output = self.denoiser3d.forward_train_2d(inputs, mode)  # pred_x, pred_cam, static_conf_logits
         if 'decode_dict' in model_output:
             decode_dict = model_output.pop("decode_dict")
         else:
@@ -438,7 +391,6 @@ class Pipeline(nn.Module):
         # 2. Extra loss
         model_output = outputs["2d_model_output"]
         endecoder = self.endecoder
-        extra_loss_dict = {}
         # mask_reproj = ~inputs["mask"]["spv_incam_only"]  # do not supervise reproj for 3DPW
 
         # Incam FK
@@ -446,7 +398,7 @@ class Pipeline(nn.Module):
         # pred_c_j3d = endecoder.fk_v2(**outputs["pred_smpl_params_incam"])
         # pred_cr_j3d = pred_c_j3d - pred_c_j3d[:, :, :1]  # (B, L, J, 3)
 
-        if self.weights.j2d > 0.0:
+        if self.weights.get('j2d_train2d', 0.0) > 0.0 and not (mode == 'regression' and self.weights.train2d_skip_regression):
             pred_c_j17 = endecoder.smplx_model(**outputs["2d_pred_smpl_params_incam"])[1]
             conf_2d = inputs['conf']
             pred_c_j17[conf_2d < 0.1] = 0.0
@@ -454,17 +406,51 @@ class Pipeline(nn.Module):
             reproj_z_thr = 0.3
             pred_c_j3d_z0_mask = pred_c_j17[..., 2].abs() <= reproj_z_thr
             pred_c_j17[pred_c_j3d_z0_mask] = reproj_z_thr
-            gt_c_j17_2d = inputs["orig_obs"][..., :2]
 
             # project and normalize
             pred_j2d_01 = project_to_bi01(pred_c_j17, inputs["bbx_xys"], inputs["K_fullimg"])
             pred_j2d_01[conf_2d < 0.1] = 0.0
 
+            if self.weights.get('proj_gt_j2d_to_bi01', False):
+                bbx_lurb = convert_bbx_xys_to_lurb(inputs["bbx_xys"])
+                gt_c_j17_2d = cvt_to_bi01_p2d(inputs['obs_kp2d'][:, :, 0], bbx_lurb)
+            else:
+                gt_c_j17_2d = inputs["orig_obs"][..., :2]
+                
+
             j2d_loss = F.mse_loss(pred_j2d_01, gt_c_j17_2d, reduction="none")
             j2d_loss = (j2d_loss * mask[..., None, None] * conf_2d[..., None]).mean()
 
-            total_loss += j2d_loss * self.weights.j2d
-            extra_loss_dict["j2d_loss_2d"] = j2d_loss
+            total_loss += j2d_loss * self.weights.j2d_train2d
+            outputs["j2d_loss_2d"] = j2d_loss
+
+        if self.weights.get('norm_j2d', 0.0) > 0.0 and not (mode == 'regression' and self.weights.train2d_skip_regression):
+            pred_c_j17 = endecoder.smplx_model(**outputs["2d_pred_smpl_params_incam"])[1]
+            conf_2d = inputs['conf']
+            pred_c_j17[conf_2d < 0.1] = 0.0
+            # prevent divide 0 or small value to overflow(fp16)
+            reproj_z_thr = 0.3
+            pred_c_j3d_z0_mask = pred_c_j17[..., 2].abs() <= reproj_z_thr
+            pred_c_j17[pred_c_j3d_z0_mask] = reproj_z_thr
+            
+            kp2d = perspective_projection(pred_c_j17, inputs["K_fullimg"])
+            bbx = get_bbx_xys(kp2d, do_augment=False)
+            kp2d_norm = normalize_kp2d(kp2d, bbx)
+            kp2d_gt = inputs["orig_obs"][..., :2]
+            
+            # vis_ind = 0
+            # mv2d_norm = kp2d_norm.unsqueeze(2)
+            # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
+            # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].detach().cpu() + 1.0) * 500, f"out/debug_vis/kp2d_norm.mp4", coco_joint_parents, 1000, 1000, fps=30)
+            # mv2d_norm = kp2d_gt.unsqueeze(2)
+            # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
+            # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].detach().cpu() + 1.0) * 500, f"out/debug_vis/kp2d_gt.mp4", coco_joint_parents, 1000, 1000, fps=30)
+
+            norm_j2d_loss = F.mse_loss(kp2d_norm, kp2d_gt, reduction="none")
+            norm_j2d_loss = (norm_j2d_loss * mask[..., None, None] * conf_2d[..., None]).mean()
+
+            total_loss += norm_j2d_loss * self.weights.norm_j2d
+            outputs["norm_j2d_loss_2d"] = norm_j2d_loss
 
         outputs["loss_2d"] = total_loss
         return outputs
@@ -474,25 +460,18 @@ class Pipeline(nn.Module):
 def randomly_set_null_condition(f_condition, uncond_prob=0.1):
     """Conditions are in shape (B, L, *)"""
     keys = list(f_condition.keys())
-    f_condition_valid_mask = {}
     for k in keys:
-        if k == "length":
-            continue
-        if f_condition[k] is None:
+        if f_condition[k] is None or type(f_condition[k]) == bool:
             continue
         f_condition[k] = f_condition[k].clone()
         mask = torch.rand(f_condition[k].shape[:2]) < uncond_prob
-        # set this later in the motion mask
-        # f_condition[k][mask] = 0.0
-        f_condition_valid_mask[k] = ~mask
-    return f_condition, f_condition_valid_mask
+        f_condition[k][mask] = 0.0
+    return f_condition
 
 
 def compute_extra_incam_loss(inputs, outputs, ppl):
     model_output = outputs["model_output"]
-    t_weights = model_output["t_weights"]   # (B)
-
-    # decode_dict = outputs["decode_dict"]
+    decode_dict = outputs["decode_dict"]
     endecoder = ppl.endecoder
     weights = ppl.weights
     args = ppl.args
@@ -514,7 +493,7 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
     # Root aligned C-MPJPE Loss
     if weights.cr_j3d > 0.0:
         cr_j3d_loss = F.mse_loss(pred_cr_j3d, gt_cr_j3d, reduction="none")
-        cr_j3d_loss = (cr_j3d_loss * mask[..., None, None] * t_weights[..., None, None, None]).mean()
+        cr_j3d_loss = (cr_j3d_loss * mask[..., None, None]).mean()
         extra_loss += cr_j3d_loss * weights.cr_j3d
         extra_loss_dict["cr_j3d_loss"] = cr_j3d_loss
 
@@ -545,7 +524,7 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
             * (inputs["bbx_xys"][..., 2] > 0)
         )[..., None]
         transl_c_loss = F.mse_loss(pred_cam, gt_pred_cam, reduction="none")
-        transl_c_loss = (transl_c_loss * mask[..., None] * valid_mask * t_weights[:, None, None]).mean()
+        transl_c_loss = (transl_c_loss * mask[..., None] * valid_mask).mean()
 
         extra_loss_dict["transl_c_loss"] = transl_c_loss
         extra_loss += transl_c_loss * weights.transl_c
@@ -571,7 +550,7 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
         )[..., None]
         valid_mask[~mask_reproj] = False  # Do not supervise on 3dpw
         j2d_loss = F.mse_loss(pred_j2d_01, gt_j2d_01, reduction="none")
-        j2d_loss = (j2d_loss * mask[..., None, None] * valid_mask * t_weights[..., None, None, None]).mean()
+        j2d_loss = (j2d_loss * mask[..., None, None] * valid_mask).mean()
 
         extra_loss += j2d_loss * weights.j2d
         extra_loss_dict["j2d_loss"] = j2d_loss
@@ -584,7 +563,7 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
 
         gt_cr_verts437 = inputs["gt_cr_verts437"]  # (B, L, 437, 3)
         cr_vert_loss = F.mse_loss(pred_cr_verts437, gt_cr_verts437, reduction="none")
-        cr_vert_loss = (cr_vert_loss * mask[:, :, None, None] * t_weights[:, None, None, None]).mean()
+        cr_vert_loss = (cr_vert_loss * mask[:, :, None, None]).mean()
         extra_loss += cr_vert_loss * weights.cr_verts
         extra_loss_dict["cr_vert_loss"] = cr_vert_loss
 
@@ -611,7 +590,7 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
         )[..., None]
         valid_mask[~mask_reproj] = False  # Do not supervise on 3dpw
         verts2d_loss = F.mse_loss(pred_verts2d_01, gt_verts2d_01, reduction="none")
-        verts2d_loss = (verts2d_loss * mask[..., None, None] * valid_mask * t_weights[..., None, None, None]).mean()
+        verts2d_loss = (verts2d_loss * mask[..., None, None] * valid_mask).mean()
 
         extra_loss += verts2d_loss * weights.verts2d
         extra_loss_dict["verts2d_loss"] = verts2d_loss

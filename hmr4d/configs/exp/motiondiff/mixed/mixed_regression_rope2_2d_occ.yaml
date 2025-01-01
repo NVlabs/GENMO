@@ -40,9 +40,9 @@ data_name: mocap_mixed_v1
 model_cfg:
     # train_2d_modes: ["sv-diffusion"]
     # infer_mode: "diffusion"
-    train_3d_modes: ["regression", "diffusion"]
+    train_3d_modes: ["regression"]
     # train_3d_modes: ["regression"]
-    train_2d_modes: ["regression", "diffusion"]
+    train_2d_modes: ["regression"]
     infer_mode: "regression"
     num_views: 4
     start_2d_training_steps: 0
@@ -73,6 +73,7 @@ pipeline:
         diffusion_all_regression_outputs: true
         old_f_condition_masking: true
         vis_masking_f_cond: false
+        regression_only: true
         weights:
             cr_j3d: 500.
             transl_c: 1.

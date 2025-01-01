@@ -36,13 +36,18 @@ exp_name_base: ${hydra:runtime.choices.exp}
 exp_name_var: ""
 exp_name: ${exp_name_base}_${exp_name_var}
 data_name: mocap_mixed_v1
+sde:
+    T: 1.0
+    sampling_eps: 0.0
+    sample_N: 100
+    pred_mode: z1_z0
 
 model_cfg:
     # train_2d_modes: ["sv-diffusion"]
     # infer_mode: "diffusion"
-    train_3d_modes: ["regression", "diffusion"]
+    train_3d_modes: ["regression", "rf"]
     # train_3d_modes: ["regression"]
-    train_2d_modes: ["regression", "diffusion"]
+    train_2d_modes: ["regression", "rf"]
     infer_mode: "regression"
     num_views: 4
     start_2d_training_steps: 0
@@ -110,7 +115,7 @@ pipeline:
             # - cam_scale
 
 network:
-    _target_: hmr4d.network.mdm.mdm_2step_rope3.MDM2Step
+    _target_: hmr4d.network.mdm.mdm_rf_rope3.MDMRF
     args: ${pipeline.args}
     model_cfg:
         # pretrained_checkpoint:
@@ -161,6 +166,7 @@ network:
             use_motion_mask: true
             args: ${pipeline.args}
 
+    sde: ${sde}
     motion_rep_dim: 157
     max_len: 120
     cliffcam_dim: 3
