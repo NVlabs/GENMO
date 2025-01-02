@@ -172,18 +172,22 @@ class MV2D(pl.LightningModule):
             has_image = torch.zeros(B, dtype=torch.bool)
         has_text = torch.tensor(batch['has_text'])
         has_text_and_image = has_text & has_image
+        use_text = has_text.clone()
         # only do this for data that has both image and text
-        for i, mode in enumerate(modes):
-            ind = (sampled_mode == i) & has_text_and_image
-            if mode == 'text':
-                batch['encoded_text'][ind] = 0.0
-            elif mode == 'image':
-                if 'f_imgseq' in batch:
-                    batch['f_imgseq'][ind] = 0.0
-            elif mode == 'text+image':
-                batch['encoded_text'][ind] = 0.0
-                if 'f_imgseq' in batch:
-                    batch['f_imgseq'][ind] = 0.0
+        """ Text """
+        ind = (sampled_mode == modes.index('text')) | (sampled_mode == modes.index('text+image'))
+        batch['encoded_text'][(~ind) & has_text_and_image] = 0.0
+        use_text[(~ind) & has_text_and_image] = False
+        """ Image """
+        if 'f_imgseq' in batch:
+            ind = (sampled_mode == modes.index('image')) | (sampled_mode == modes.index('text+image'))
+            batch['f_imgseq'][(~ind) & has_text_and_image] = 0.0
+        mask_obs2d_prob = conditioning_cfg.get("mask_2d_obs_prob", 0.5)
+        mask_cam_angvel_prob = conditioning_cfg.get("mask_cam_angvel_prob", 0.5)
+        if mask_obs2d_prob > 0:
+            batch['obs2d_mask'] = (torch.rand(B) < mask_obs2d_prob) & use_text
+        if mask_cam_angvel_prob > 0:
+            batch['cam_angvel_mask'] = (torch.rand(B) < mask_cam_angvel_prob) & use_text
         return batch
             
     def training_step(self, batch, batch_idx):

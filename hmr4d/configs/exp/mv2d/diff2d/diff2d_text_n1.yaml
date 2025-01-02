@@ -138,7 +138,7 @@ network:
             njoints: ${pipeline.args_denoiser3d.motion_rep_dim}
             use_text_pos_enc: true
             text_encoder_cfg:
-                mode: first
+                mode: all
 
     motion_rep_dim: 157
     max_len: 120

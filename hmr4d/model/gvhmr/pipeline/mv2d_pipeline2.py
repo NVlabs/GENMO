@@ -91,6 +91,12 @@ class Pipeline(nn.Module):
             else:
                 f_condition['f_cam_t_vel'] = inputs["cam_tvel"]
                 
+        if 'obs2d_mask' in inputs:
+            f_condition['obs'][inputs['obs2d_mask']] = 0.0
+            f_condition['f_cliffcam'][inputs['obs2d_mask']] = 0.0
+        if 'cam_angvel_mask' in inputs:
+            f_condition['f_cam_angvel'][inputs['cam_angvel_mask']] = 0.0
+                
         f_condition_valid_mask = {}
         if self.args.get("old_f_condition_masking", False):
             if train:
@@ -252,6 +258,12 @@ class Pipeline(nn.Module):
             f_condition['f_imgseq'] = inputs['f_imgseq']
         f_condition["obs"] = inputs["obs"]  # (B, L, J, 3)
         f_condition_valid_mask = {}
+        if 'obs2d_mask' in inputs:
+            f_condition['obs'][inputs['obs2d_mask']] = 0.0
+            f_condition['f_cliffcam'][inputs['obs2d_mask']] = 0.0
+        if 'cam_angvel_mask' in inputs:
+            f_condition['f_cam_angvel'][inputs['cam_angvel_mask']] = 0.0
+           
         if train:
             if self.args.get("old_f_condition_masking", False):
                 f_condition = randomly_set_null_condition(f_condition, 0.1)

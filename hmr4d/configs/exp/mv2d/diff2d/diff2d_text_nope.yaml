@@ -136,7 +136,7 @@ network:
         denoiser:
             type: hmr4d.network.mv2d.relative_transformer_diff_text.NetworkEncoderRoPE
             njoints: ${pipeline.args_denoiser3d.motion_rep_dim}
-            use_text_pos_enc: true
+            use_text_pos_enc: false
             text_encoder_cfg:
                 mode: first
 
