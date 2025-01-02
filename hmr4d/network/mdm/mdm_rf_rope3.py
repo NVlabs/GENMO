@@ -77,6 +77,7 @@ class MDMBase(nn.Module):
         self,
         model_cfg,
         motion_rep_dim,
+        sde,
         max_len=120,
         # condition
         cliffcam_dim=3,
@@ -103,6 +104,8 @@ class MDMBase(nn.Module):
         super().__init__()
         self.model_cfg = model_cfg
         self.args = args
+        self.sde = sde
+        self.pred_mode = sde.pred_mode
 
         self.motion_rep_dim = motion_rep_dim
         self.max_len = max_len
@@ -248,6 +251,7 @@ class MDMBase(nn.Module):
             if 'f_cliffcam' in f_condition_valid_mask:
                 valid_mask = f_condition_valid_mask["f_cliffcam"]  # (B, L)
                 f_cliffcam = f_cliffcam * valid_mask[..., None] + self.learned_cliffcam_params.repeat(B, L, 1) * ~valid_mask[..., None]
+
             f_cond = f_cond + f_cliffcam
         if "f_cam_angvel" in f_condition:
             f_cam_angvel = f_condition["f_cam_angvel"]  # (B, L, 6)
@@ -318,22 +322,28 @@ class MDMBase(nn.Module):
         denoiser_kwargs = {
             "y": {
                 "text": [""] * B,
-                "f_cond": f_cond,
-                "mask": vis_mask,
-                "length": length,
+                "f_cond": f_cond.clone(),
+                "mask": vis_mask.clone(),
+                "length": length.clone(),
             },
-            "motion_mask": motion_mask,
-            "observed_motion": motion,
+            "motion_mask": motion_mask.clone(),
+            "observed_motion": motion.clone(),
         }
-        
+
+
         valid_mask = batch["mask"]["valid"]
-        
+
         if mode == 'regression':
-            t = (torch.ones(B) * 999).long().to(motion.device)
+            t = torch.rand(motion.shape[0], device=motion.device) * (self.sde.T - self.sde.sampling_eps) + self.sde.sampling_eps
+            t = t * 0.0
             t_weights = torch.ones(B).to(motion.device)
-            x_t = motion * motion_mask
-        elif mode == 'diffusion':
-            t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
+            t_expand = t.view(-1, 1, 1)
+            zt = motion * motion_mask
+            noise = torch.zeros_like(zt)
+
+        elif mode == 'rf':
+            t = torch.rand(motion.shape[0], device=motion.device) * (self.sde.T - self.sde.sampling_eps) + self.sde.sampling_eps
+            t_weights = torch.ones(B).to(motion.device)
             pred_x_start_regression = batch['regression_outputs']['model_output']['pred_x_start'].detach()
             if self.args.get('diffusion_all_regression_outputs', False):
                 x_start = pred_x_start_regression
@@ -344,19 +354,30 @@ class MDMBase(nn.Module):
                 x_start = clean_motion.clone() * inpaint_mask + pred_x_start_regression * (1 - inpaint_mask)
                 x_start = x_start * valid_mask[:, :, None]
             noise = torch.randn_like(x_start)
-            x_t = self.train_diffusion.q_sample(x_start.clone(), t, noise=noise)
+            t_expand = t.view(-1, 1, 1)
+            zt = t_expand * x_start + (1 - t_expand) * noise
+            target_drift = x_start - noise
         
         denoise_out = self.denoiser(
-            x_t, diffusion._scale_timesteps(t), return_aux=False, **denoiser_kwargs
+            zt, (t * 999).long(), return_aux=False, clip_cam=False, **denoiser_kwargs
         )
-
         target_x_start = clean_motion
-        pred_x_start = denoise_out["pred_x_start"]
+
+        if self.pred_mode == "drift":
+            pred_x_start_drift = denoise_out["pred_x_start"]
+            pred_x_start = zt + pred_x_start_drift * (1 - t_expand)
+        elif self.pred_mode == "z1":
+            pred_x_start_drift = denoise_out["pred_x_start"]
+            # pred_x_start = z0 + pred_x_start_drift
+            pred_x_start = zt + pred_x_start_drift * (1 - t_expand)
+        elif self.pred_mode == "z1_z0":
+            pred_x_start_drift = denoise_out["pred_x_start"]
+            pred_x_start = noise + pred_x_start_drift
 
         static_conf_logits = pred_x_start[:, :, self.s_pred_ind : self.s_pred_ind + 6]
         assert pred_x_start.shape[-1] == self.s_pred_ind + 6 + 151
         sample = pred_x_start[:, :, self.s_pred_ind + 6:]
-        
+
         valid_loss_mask = torch.ones_like(pred_x_start)
         valid_loss_mask[batch["mask"]["spv_incam_only"], :, -9:] *= 0
         valid_loss_mask[batch["mask"]["spv_incam_only"], :, self.s_pred_ind :self.s_pred_ind + 6] *= 0
@@ -371,8 +392,13 @@ class MDMBase(nn.Module):
             "t_weights": t_weights,
         }
         for x in self.args.out_attr:
-            output[x] = denoise_out[x]
-        
+            if x == 'pred_cam':
+                pred_cam = denoise_out[x]
+                torch.clamp_min_(pred_cam[..., 0], 0.25)
+                output[x] = pred_cam
+            else:
+                output[x] = denoise_out[x]
+
         return output
 
     def forward_train(self, inputs, train=False, postproc=False, static_cam=False, mode=None):
@@ -380,6 +406,7 @@ class MDMBase(nn.Module):
         outputs = dict()
         length = inputs["length"]  # (B,) effective length of each sample
 
+        # assert self.endecoder.clip_std, "endecoder should be clip_std"
         target_x = self.endecoder.encode(inputs)  # (B, L, C)
 
         # vel_thr = args.static_conf.vel_thr
@@ -428,21 +455,35 @@ class MDMBase(nn.Module):
         }
         # self.denoiser.s_pred_ind = self.s_pred_ind
         if mode == 'regression':
-            t = (torch.ones(B) * 999).long().to(motion.device)
+            t = torch.rand(motion.shape[0], device=motion.device) * (self.sde.T - self.sde.sampling_eps) + self.sde.sampling_eps
+            t = t * 0.0
             t_weights = torch.ones(B).to(motion.device)
-            x_t = torch.rand_like(motion)
-        elif mode == 'diffusion':
-            t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
+            t_expand = t.view(-1, 1, 1)
+            zt = torch.rand_like(motion)
+            noise = torch.zeros_like(zt)
+        elif mode == 'rf':
+            t = torch.rand(motion.shape[0], device=motion.device) * (self.sde.T - self.sde.sampling_eps) + self.sde.sampling_eps
+            t_weights = torch.ones(B).to(motion.device)
             pred_x_start_regression = inputs['regression_outputs']['2d_model_output']['pred_x_start'].detach()
             x_start = pred_x_start_regression
             noise = torch.randn_like(x_start)
-            x_t = self.train_diffusion.q_sample(x_start.clone(), t, noise=noise)
-            
+            t_expand = t.view(-1, 1, 1)
+            zt = t_expand * x_start + (1 - t_expand) * noise
+            target_drift = x_start - noise
         denoise_out = self.denoiser(
-            x_t, diffusion._scale_timesteps(t), return_aux=False, **denoiser_kwargs
+            zt, (t * 999).long(), return_aux=False, clip_cam=False, **denoiser_kwargs
         )
-        
-        pred_x_start = denoise_out["pred_x_start"]
+
+        if self.pred_mode == "drift":
+            pred_x_start_drift = denoise_out["pred_x_start"]
+            pred_x_start = zt + pred_x_start_drift * (1 - t_expand)
+        elif self.pred_mode == "z1":
+            pred_x_start_drift = denoise_out["pred_x_start"]
+            # pred_x_start = z0 + pred_x_start_drift
+            pred_x_start = zt + pred_x_start_drift * (1 - t_expand)
+        elif self.pred_mode == "z1_z0":
+            pred_x_start_drift = denoise_out["pred_x_start"]
+            pred_x_start = noise + pred_x_start_drift
 
         static_conf_logits = pred_x_start[:, :, self.s_pred_ind : self.s_pred_ind + 6]
         assert pred_x_start.shape[-1] == self.s_pred_ind + 6 + 151
@@ -455,7 +496,12 @@ class MDMBase(nn.Module):
             "t_weights": t_weights,
         }
         for x in self.args.out_attr:
-            output[x] = denoise_out[x]
+            if x == "pred_cam":
+                pred_cam = denoise_out[x]
+                torch.clamp_min_(pred_cam[..., 0], 0.25)
+                output[x] = pred_cam
+            else:
+                output[x] = denoise_out[x]
         return output
 
     def forward_test(self, inputs, train=False, postproc=False, static_cam=False, progress=False, mode=None):
@@ -478,98 +524,99 @@ class MDMBase(nn.Module):
         vis_mask = length_to_mask(length, L)  # (B, L)
         if self.args.get("vis_masking_f_cond", True):
             f_cond = f_cond * vis_mask[..., None]
-        if regression_only:
+
+        zt = torch.randn_like(motion)
+        zt = torch.zeros_like(motion)
+        sample_N = self.sde.sample_N
+        dt = (1.0 - self.sde.sampling_eps) / sample_N
+        if "pred_cam" in self.args.out_attr:
+            pred_cam_zt = 0
+        if "pred_cam_t_vel" in self.args.out_attr:
+            pred_cam_t_vel_z1 = 0
+        if 'cam_scale' in self.args.out_attr:
+            pred_cam_scale_z1 = 0
+
+        for i in range(sample_N):
+            num_t = i / sample_N * (self.sde.T - self.sde.sampling_eps) + self.sde.sampling_eps
+            vec_t = torch.ones(B, device=motion.device) * num_t
+
+
             denoiser_kwargs = {
                 "y": {
                     "text": [""] * B,
-                    "f_cond": f_cond,
-                    "mask": vis_mask,
-                    "length": length,
+                    "f_cond": f_cond.clone(),
+                    "mask": vis_mask.clone(),
+                    "length": length.clone(),
                 },
                 "motion_mask": motion_mask,
                 "observed_motion": motion,
-                "guidance_only": True,
-            }
-
-            t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
-            t = (torch.ones_like(t) * 999).long()
-            t_weights = torch.ones_like(t_weights)
-            x_t = motion.clone()
-            x_t = motion * motion_mask
-
-            pred_x_start = self.denoiser(
-                x_t, self.train_diffusion._scale_timesteps(t), return_aux=False, **denoiser_kwargs
-            )['pred_x_start']
-            samples = pred_x_start
-            pred_cam = samples[:, :, self.s_pred_ind:self.s_pred_ind + 3]
-            static_conf_logits = samples[:, :, self.s_pred_ind + 3:self.s_pred_ind + 3 + 6]
-            sample = samples[:, :, -151:]
-
-        else:
-            cond = {
-                "y": {
-                    "text": [""] * B,
-                    "f_cond": f_cond,
-                    "mask": vis_mask,
-                    "length": length,
-                },
-                "motion_mask": motion_mask,
-                "observed_motion": motion,
-                "guidance_only": True,
                 # "encoder": self.endecoder,
                 # "inputs": inputs,
             }
 
-            length = inputs["length"]  # (B,) effective length of each sample
-            batch_size = length.shape[0]
-
-            cond["y"]["scale"] = (
-                torch.ones(batch_size, device=length.device)
-                * self.model_cfg.diffusion.guidance_param
+            denoise_out = self.denoiser(
+                zt, (vec_t * 999).long(), return_aux=False, clip_cam=False, **denoiser_kwargs
             )
-            diff_sampler = self.model_cfg.diffusion.get("sampler", "ddim")
-            if diff_sampler == "ddim":
-                sample_fn = diffusion.ddim_sample_loop_with_aux
-                kwargs = {"eta": self.model_cfg.diffusion.ddim_eta}
+            if self.pred_mode == "drift":
+                drift = denoise_out["pred_x_start"]
+
+                # convert to diffusion models if sampling.sigma_variance > 0.0 while perserving the marginal probability
+                zt = zt + drift * dt
+
+                if "pred_cam" in self.args.out_attr:
+                    drift_cam = denoise_out["pred_cam"]
+                    pred_cam_zt = pred_cam_zt + drift_cam * dt
+                if "cam_t_vel" in self.args.out_attr:
+                    drift_cam_t_vel = denoise_out["pred_cam_t_vel"]
+                    pred_cam_t_vel_z1 = pred_cam_t_vel_z1 + drift_cam_t_vel * dt
+                if 'cam_scale' in self.args.out_attr:
+                    drift_cam_scale = denoise_out["pred_cam_scale"]
+                    pred_cam_scale_z1 = pred_cam_scale_z1 + drift_cam_scale * dt
+
             else:
-                raise NotImplementedError(f"Sampler {diff_sampler} not implemented")
-                # sample_fn = diffusion.p_sample_loop
-                # kwargs = {}
+                drift = denoise_out["pred_x_start"]
+                # drift = (pred_z1 - zt) / (1 - vec_t[:, None, None])
 
-            samples_out = sample_fn(
-                denoiser,
-                (batch_size, self.denoiser.njoints, self.denoiser.nfeats, L),
-                clip_denoised=False,
-                model_kwargs=cond,
-                skip_timesteps=0,  # 0 is the default value - i.e. don't skip any step
-                init_image=None,
-                progress=progress,
-                dump_steps=None,
-                noise=torch.zeros_like(motion),
-                const_noise=False,
-                **kwargs,
-            )
-            if "pred_cam" in self.args.out_attr:
-                pred_cam = samples_out["pred_cam"]
-            if "cam_t_vel" in self.args.out_attr:
-                pred_cam_t_vel = samples_out["pred_cam_t_vel"]
-            if 'cam_scale' in self.args.out_attr:
-                pred_cam_scale = samples_out["pred_cam_scale"]
-            samples = samples_out["pred_xstart"]
+                # convert to diffusion models if sampling.sigma_variance > 0.0 while perserving the marginal probability
+                old_zt = zt.clone()
+                zt = zt + drift * dt
+                # zt = torch.clamp(zt, -20, 20)
 
-            static_conf_logits = samples[:, :, self.s_pred_ind:self.s_pred_ind + 6]
-            sample = samples[:, :, self.s_pred_ind + 6:]
+                if torch.isnan(zt).any():
+                    import ipdb; ipdb.set_trace()
+
+                if "pred_cam" in self.args.out_attr:
+                    pred_cam = denoise_out["pred_cam"]
+                    torch.clamp_min_(pred_cam[..., 0], 0.25)
+                    drift_cam = (pred_cam - pred_cam_zt) / (1 - vec_t[:, None])
+                    pred_cam_zt = pred_cam_zt + drift_cam * dt
+
+                if "cam_t_vel" in self.args.out_attr:
+                    pred_cam_t_vel = denoise_out["pred_cam_t_vel"]
+                    drift_cam_t_vel = (pred_cam_t_vel - pred_cam_t_vel_z1) / (1 - vec_t[:, None])
+                    pred_cam_t_vel_z1 = pred_cam_t_vel_z1 + drift_cam_t_vel * dt
+                if 'cam_scale' in self.args.out_attr:
+                    pred_cam_scale = denoise_out["pred_cam_scale"]
+                    drift_cam_scale = (pred_cam_scale - pred_cam_scale_z1) / (1 - vec_t[:, None])
+                    pred_cam_scale_z1 = pred_cam_scale_z1 + drift_cam_scale * dt
+
+        samples = zt
+        pred_cam_z1 = pred_cam_zt
+        torch.clamp_min_(pred_cam_z1[..., 0], 0.25)
+
+        static_conf_logits = samples[:, :, self.s_pred_ind:self.s_pred_ind + 6]
+        sample = samples[:, :, self.s_pred_ind + 6:]
 
         output = {
             "pred_x": sample,
             "static_conf_logits": static_conf_logits,
         }
         if 'pred_cam' in self.args.out_attr:
-            output["pred_cam"] = pred_cam
+            output["pred_cam"] = pred_cam_z1
         if 'cam_t_vel' in self.args.out_attr:
-            output["pred_cam_t_vel"] = pred_cam_t_vel
+            output["pred_cam_t_vel"] = pred_cam_t_vel_z1
         if 'cam_scale' in self.args.out_attr:
-            output["pred_cam_scale"] = pred_cam_scale
+            output["pred_cam_scale"] = pred_cam_scale_z1
         return output
 
     def forward(self, inputs, train=False, postproc=False, static_cam=False, mode=None):
@@ -579,7 +626,7 @@ class MDMBase(nn.Module):
             return self.forward_test(inputs, train, postproc, static_cam, mode=mode)
 
 
-class MDM2Step(MDMBase):
+class MDMRF(MDMBase):
     def __init__(self, model_cfg, **kwargs):
         super().__init__(model_cfg, **kwargs)
         self.denoiser = import_type_from_str(self.model_cfg.denoiser.type)(

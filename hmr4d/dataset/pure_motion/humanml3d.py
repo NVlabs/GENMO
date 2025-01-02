@@ -47,6 +47,7 @@ class Humanml3dDataset(BaseDataset):
         cam_augmentation="v11",
         random1024=False,  # DEBUG
         limit_size=None,
+        max_text_len=50,
     ):
         self.root = Path("inputs/HumanML3D_SMPL/hmr4d_support")
         self.motion_frames = motion_frames
@@ -62,6 +63,7 @@ class Humanml3dDataset(BaseDataset):
             "female": self.smplx_female,
             "neutral": self.smplx_neutral,
         }
+        self.max_text_len = max_text_len
 
         super().__init__(cam_augmentation, limit_size)
 
@@ -136,6 +138,19 @@ class Humanml3dDataset(BaseDataset):
 
         # Interpolation (vec + r6d)
         data_interpolated = interpolate_smpl_params(data, tgt_len)
+        text_data = np.random.choice(raw_data["text_data"])
+        caption, tokens = text_data["caption"], text_data["tokens"]
+
+        if len(tokens) < self.max_text_len:
+            # pad with "unk"
+            tokens = ["sos/OTHER"] + tokens + ["eos/OTHER"]
+            sent_len = len(tokens)
+            tokens = tokens + ["unk/OTHER"] * (self.max_text_len + 2 - sent_len)
+        else:
+            # crop
+            tokens = tokens[: self.max_text_len]
+            tokens = ["sos/OTHER"] + tokens + ["eos/OTHER"]
+            sent_len = len(tokens)
 
         # AZ -> AY
         data_interpolated["global_orient"], data_interpolated["transl"], _ = get_tgtcoord_rootparam(
@@ -146,6 +161,7 @@ class Humanml3dDataset(BaseDataset):
 
         data_interpolated["data_name"] = "humanml3d"
         data_interpolated["gender"] = raw_data["gender"]
+        data_interpolated["caption"] = caption
         return data_interpolated
 
     def _process_data(self, data, idx):
@@ -165,6 +181,7 @@ class Humanml3dDataset(BaseDataset):
         body_pose = data["body_pose"]
         betas = augment_betas(data["betas"], std=0.1)
         global_orient_w, transl_w = rotate_around_axis(data["global_orient"], data["transl"], axis="y")
+        caption = data["caption"]
         del data
 
         # SMPL_params in world
@@ -261,6 +278,7 @@ class Humanml3dDataset(BaseDataset):
             "cam_tvel": cam_tvel,  # (F, 3),
             "noisy_cam_tvel": noisy_cam_tvel,  # (F, 3),
             "T_w2c": normed_T_w2c,
+            "caption": caption,
             "mask": {
                 "valid": get_valid_mask(length, length),
                 "vitpose": False,
