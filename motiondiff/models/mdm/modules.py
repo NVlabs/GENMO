@@ -18,9 +18,13 @@ class PositionalEncoding(nn.Module):
 
         self.pe = nn.Parameter(pe, requires_grad=False)
 
-    def forward(self, x):
+    def forward(self, x, batch_first=False):
         # not used in the final model
-        x = x + self.pe[:x.shape[0], :]
+        if batch_first:
+            pe = self.pe.transpose(0, 1)
+            x = x + pe[:, :x.shape[1], :]
+        else:
+            x = x + self.pe[:x.shape[0], :]
         return self.dropout(x)
 
 

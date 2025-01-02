@@ -21,7 +21,9 @@ def collate_fn(batch):
     """
     # Assume all keys in the batch are the same
     return_dict = {}
-    for k in batch[0].keys():
+    keys = set(batch[0].keys())
+    keys.add("caption")
+    for k in keys:
         if k.startswith("meta"):  # data information, do not batch
             return_dict[k] = [d[k] for d in batch]
         elif k == "caption":
@@ -29,6 +31,7 @@ def collate_fn(batch):
         else:
             return_dict[k] = default_collate([d[k] for d in batch])
     return_dict["B"] = len(batch)
+    return_dict['has_text'] = [text != '' for text in return_dict['caption']]
     return return_dict
 
 

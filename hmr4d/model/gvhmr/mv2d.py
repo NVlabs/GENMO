@@ -8,6 +8,7 @@ from hydra.utils import instantiate
 from hmr4d.utils.pylogger import Log
 from einops import rearrange, einsum
 from hmr4d.configs import MainStore, builds
+from transformers import T5Tokenizer, T5EncoderModel
 
 from hmr4d.utils.geo_transform import compute_T_ayfz2ay, apply_T_on_points
 from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
@@ -74,12 +75,59 @@ class MV2D(pl.LightningModule):
             self.init_diffusion()
         else:
             self.train_diffusion = self.test_diffusion = self.schedule_sampler = None
+            
+        if 'text_encoder' in model_cfg:
+            self.use_text_encoder = True
+            llm_version = model_cfg.text_encoder.llm_version
+            self.max_text_len = model_cfg.text_encoder.max_text_len
+            self.text_enocder, self.tokenizer = self.load_and_freeze_llm(llm_version)
         
     def init_diffusion(self):
         self.train_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=True)
         self.test_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=False)
         self.schedule_sampler = create_named_schedule_sampler(self.model_cfg.diffusion.schedule_sampler_type, self.train_diffusion)
         return
+    
+    def load_and_freeze_llm(self, llm_version):
+        tokenizer = T5Tokenizer.from_pretrained(llm_version)
+        model = T5EncoderModel.from_pretrained(llm_version)
+        # Freeze llm weights
+        model.eval()
+        for p in model.parameters():
+            p.requires_grad = False
+        return model, tokenizer
+    
+    def encode_text(self, raw_text, has_text):
+        # raw_text - list (batch_size length) of strings with input text prompts
+        no_text = ~torch.tensor(has_text)
+        device = next(self.parameters()).device
+        with torch.no_grad():
+            with torch.cuda.amp.autocast(enabled=False):
+                max_text_len = self.max_text_len
+
+                encoded = self.tokenizer.batch_encode_plus(
+                    raw_text,
+                    return_tensors="pt",
+                    padding="max_length",
+                    max_length=max_text_len,
+                    truncation=True
+                )
+                # We expect all the processing is done in GPU.
+                input_ids = encoded.input_ids.to(device)
+                attn_mask = encoded.attention_mask.to(device)
+
+                with torch.no_grad():
+                    output = self.text_enocder(input_ids=input_ids, attention_mask=attn_mask)
+                    encoded_text = output.last_hidden_state.detach()
+
+                encoded_text = encoded_text[:, :max_text_len]
+                attn_mask = attn_mask[:, :max_text_len]
+                encoded_text *= attn_mask.unsqueeze(-1)
+                # for bnum in range(encoded_text.shape[0]):
+                #     nvalid_elem = attn_mask[bnum].sum().item()
+                #     encoded_text[bnum][nvalid_elem:] = 0
+        encoded_text[no_text] = 0
+        return encoded_text
         
     def obtain_mv2d(self, batch, gt_j3d):
         gt_j3d = gt_j3d.float()
@@ -109,6 +157,35 @@ class MV2D(pl.LightningModule):
         # draw_motion_2d(mv2d[vis_id].cpu(), f"out/debug_vis/{batch['meta'][vis_id]['data_name']}.mp4", coco_joint_parents, 1000, 1000, fps=30)
         return mv2d
     
+    def choose_conditioning(self, batch):
+        B = batch['B']
+        conditioning_cfg = self.model_cfg.get("conditioning", {})
+        enabled = conditioning_cfg.get("enabled", False)
+        if not enabled:
+            return
+        modes = conditioning_cfg.get("modes", [])
+        mode_probs = conditioning_cfg.get("mode_probs", [])
+        sampled_mode = torch.tensor(mode_probs).multinomial(B, replacement=True)
+        if 'f_imgseq' in batch:
+            has_image = (batch['f_imgseq'].view(B, -1) != 0).any(dim=-1).cpu()
+        else:
+            has_image = torch.zeros(B, dtype=torch.bool)
+        has_text = torch.tensor(batch['has_text'])
+        has_text_and_image = has_text & has_image
+        # only do this for data that has both image and text
+        for i, mode in enumerate(modes):
+            ind = (sampled_mode == i) & has_text_and_image
+            if mode == 'text':
+                batch['encoded_text'][ind] = 0.0
+            elif mode == 'image':
+                if 'f_imgseq' in batch:
+                    batch['f_imgseq'][ind] = 0.0
+            elif mode == 'text+image':
+                batch['encoded_text'][ind] = 0.0
+                if 'f_imgseq' in batch:
+                    batch['f_imgseq'][ind] = 0.0
+        return batch
+            
     def training_step(self, batch, batch_idx):
         if not ('3d' in batch or '2d' in batch):
             if 'is_2d' in batch and batch['is_2d'][0]:
@@ -127,6 +204,9 @@ class MV2D(pl.LightningModule):
         outputs = {'loss': 0}
         if '3d' in batch:
             with Timer("train_3d_step", enabled=self.timing):
+                if self.use_text_encoder:
+                    batch['3d']['encoded_text'] = self.encode_text(batch['3d']['caption'], batch['3d']['has_text'])
+                self.choose_conditioning(batch['3d'])
                 for mode in self.train_3d_modes:
                     outputs_3d = self.train_3d_step(batch['3d'], batch_idx, mode=mode)
                     outputs['loss'] += outputs_3d['loss']
@@ -139,6 +219,9 @@ class MV2D(pl.LightningModule):
         start_2d_training_steps = self.model_cfg.get("start_2d_training_steps", 0)
         if '2d' in batch and self.trainer.global_step >= start_2d_training_steps:
             with Timer("train_2d_step", enabled=self.timing):
+                if self.use_text_encoder:
+                    batch['2d']['encoded_text'] = self.encode_text(batch['2d']['caption'], batch['3d']['has_text'])
+                self.choose_conditioning(batch['2d'])
                 for mode in self.train_2d_modes:
                     outputs_2d = self.train_2d_step(batch['2d'], batch_idx, mode=mode)
                     outputs['loss'] += outputs_2d['loss_2d']
@@ -619,6 +702,8 @@ class MV2D(pl.LightningModule):
             "cam_angvel": batch["cam_angvel"],
             "f_imgseq": batch["f_imgseq"],
         }
+        if self.use_text_encoder:
+            batch_['encoded_text'] = self.encode_text(batch['caption'], batch['has_text'])
         outputs = self.pipeline.forward(batch_, train=False, postproc=do_postproc_not_flip_test, global_step=self.trainer.global_step)
         outputs["pred_smpl_params_global"] = {k: v[0] for k, v in outputs["pred_smpl_params_global"].items()}
         outputs["pred_smpl_params_incam"] = {k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()}
@@ -637,6 +722,8 @@ class MV2D(pl.LightningModule):
                 "cam_angvel": flip_test["cam_angvel"],
                 "f_imgseq": flip_test["f_imgseq"],
             }
+            if self.use_text_encoder:
+                batch_['encoded_text'] = self.encode_text(batch['caption'], batch['has_text'])
             flipped_outputs = self.pipeline.forward(batch_, train=False, global_step=self.trainer.global_step)
 
             # First update incam results

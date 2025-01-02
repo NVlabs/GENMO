@@ -324,6 +324,8 @@ class MDMBase(nn.Module):
             "motion_mask": motion_mask,
             "observed_motion": motion,
         }
+        if 'encoded_text' in batch:
+            denoiser_kwargs['y']['encoded_text'] = batch['encoded_text']
         
         valid_mask = batch["mask"]["valid"]
         
@@ -425,6 +427,8 @@ class MDMBase(nn.Module):
                 "length": length,
             }
         }
+        if 'encoded_text' in inputs:
+            denoiser_kwargs['y']['encoded_text'] = inputs['encoded_text']
         
         if mode == 'regression':
             t = (torch.ones(B) * 999).long().to(motion.device)
@@ -489,6 +493,8 @@ class MDMBase(nn.Module):
                 "observed_motion": motion,
                 "guidance_only": True,
             }
+            if 'encoded_text' in inputs:
+                denoiser_kwargs['y']['encoded_text'] = inputs['encoded_text']
 
             t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
             t = (torch.ones_like(t) * 999).long()
@@ -518,6 +524,8 @@ class MDMBase(nn.Module):
                 # "encoder": self.endecoder,
                 # "inputs": inputs,
             }
+            if 'encoded_text' in inputs:
+                cond['y']['encoded_text'] = inputs['encoded_text']
 
             length = inputs["length"]  # (B,) effective length of each sample
             batch_size = length.shape[0]
