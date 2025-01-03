@@ -50,6 +50,7 @@ class Humanml3dDataset(BaseDataset):
         max_text_len=50,
     ):
         self.root = Path("inputs/HumanML3D_SMPL/hmr4d_support")
+        self.text_embed_file = Path("inputs/HumanML3D_SMPL_ye/t5_embeddings_v1/all_text_embed.pth") # TODO: USE THE STANDARD PATH
         self.motion_frames = motion_frames
         self.l_factor = l_factor
         self.random1024 = random1024
@@ -84,6 +85,7 @@ class Humanml3dDataset(BaseDataset):
                 torch.save(self.motion_files, self.root / "humanml3d_smplhpose_random1024.pth")
         else:
             self.motion_files = torch.load(filename)
+        self.text_embed_dict = torch.load(self.text_embed_file)
         self.seqs = list(self.motion_files.keys())
         Log.info(f"[{self.dataset_name}] {len(self.seqs)} sequences. Elapsed: {Log.time() - tic:.2f}s")
 
@@ -116,6 +118,7 @@ class Humanml3dDataset(BaseDataset):
         # Load original data
         mid, start_id = self.idx2meta[idx]
         raw_data = self.motion_files[mid]
+        text_embed_data = self.text_embed_dict[mid]
         raw_len = raw_data["pose"].shape[0] - start_id
         data = {
             "body_pose": raw_data["pose"][start_id:, 3:],  # (F, 63)
@@ -138,7 +141,11 @@ class Humanml3dDataset(BaseDataset):
 
         # Interpolation (vec + r6d)
         data_interpolated = interpolate_smpl_params(data, tgt_len)
-        text_data = np.random.choice(raw_data["text_data"])
+        # text_data = np.random.choice(raw_data["text_data"])
+        text_ind = np.random.randint(0, len(raw_data["text_data"]))
+        text_data = raw_data["text_data"][text_ind]
+        text_embed = text_embed_data[text_ind]
+        
         caption, tokens = text_data["caption"], text_data["tokens"]
 
         if len(tokens) < self.max_text_len:
@@ -162,6 +169,7 @@ class Humanml3dDataset(BaseDataset):
         data_interpolated["data_name"] = "humanml3d"
         data_interpolated["gender"] = raw_data["gender"]
         data_interpolated["caption"] = caption
+        data_interpolated["text_embed"] = text_embed
         return data_interpolated
 
     def _process_data(self, data, idx):
@@ -182,6 +190,7 @@ class Humanml3dDataset(BaseDataset):
         betas = augment_betas(data["betas"], std=0.1)
         global_orient_w, transl_w = rotate_around_axis(data["global_orient"], data["transl"], axis="y")
         caption = data["caption"]
+        text_embed = data["text_embed"]
         del data
 
         # SMPL_params in world
@@ -279,6 +288,7 @@ class Humanml3dDataset(BaseDataset):
             "noisy_cam_tvel": noisy_cam_tvel,  # (F, 3),
             "T_w2c": normed_T_w2c,
             "caption": caption,
+            "text_embed": text_embed,
             "mask": {
                 "valid": get_valid_mask(length, length),
                 "vitpose": False,

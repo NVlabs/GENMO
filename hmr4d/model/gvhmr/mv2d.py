@@ -80,7 +80,7 @@ class MV2D(pl.LightningModule):
             self.use_text_encoder = True
             llm_version = model_cfg.text_encoder.llm_version
             self.max_text_len = model_cfg.text_encoder.max_text_len
-            self.text_enocder, self.tokenizer = self.load_and_freeze_llm(llm_version)
+            self.text_encoder, self.tokenizer = self.load_and_freeze_llm(llm_version)
         
     def init_diffusion(self):
         self.train_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=True)
@@ -117,7 +117,7 @@ class MV2D(pl.LightningModule):
                 attn_mask = encoded.attention_mask.to(device)
 
                 with torch.no_grad():
-                    output = self.text_enocder(input_ids=input_ids, attention_mask=attn_mask)
+                    output = self.text_encoder(input_ids=input_ids, attention_mask=attn_mask)
                     encoded_text = output.last_hidden_state.detach()
 
                 encoded_text = encoded_text[:, :max_text_len]
@@ -209,7 +209,10 @@ class MV2D(pl.LightningModule):
         if '3d' in batch:
             with Timer("train_3d_step", enabled=self.timing):
                 if self.use_text_encoder:
-                    batch['3d']['encoded_text'] = self.encode_text(batch['3d']['caption'], batch['3d']['has_text'])
+                    if 'text_embed' in batch['3d']:
+                        batch['3d']['encoded_text'] = batch['3d']['text_embed'].cuda()
+                    else:
+                        batch['3d']['encoded_text'] = self.encode_text(batch['3d']['caption'], batch['3d']['has_text'])
                 self.choose_conditioning(batch['3d'])
                 for mode in self.train_3d_modes:
                     outputs_3d = self.train_3d_step(batch['3d'], batch_idx, mode=mode)
@@ -224,7 +227,10 @@ class MV2D(pl.LightningModule):
         if '2d' in batch and self.trainer.global_step >= start_2d_training_steps:
             with Timer("train_2d_step", enabled=self.timing):
                 if self.use_text_encoder:
-                    batch['2d']['encoded_text'] = self.encode_text(batch['2d']['caption'], batch['3d']['has_text'])
+                    if 'text_embed' in batch['2d']:
+                        batch['2d']['encoded_text'] = batch['2d']['text_embed'].cuda()
+                    else:
+                        batch['2d']['encoded_text'] = self.encode_text(batch['2d']['caption'], batch['2d']['has_text'])
                 self.choose_conditioning(batch['2d'])
                 for mode in self.train_2d_modes:
                     outputs_2d = self.train_2d_step(batch['2d'], batch_idx, mode=mode)

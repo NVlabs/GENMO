@@ -1,3 +1,4 @@
+import torch
 import pytorch_lightning as pl
 from pytorch_lightning.utilities.combined_loader import CombinedLoader
 from hydra.utils import instantiate
@@ -23,11 +24,14 @@ def collate_fn(batch):
     return_dict = {}
     keys = set(batch[0].keys())
     keys.add("caption")
+    keys.add("text_embed")
     for k in keys:
         if k.startswith("meta"):  # data information, do not batch
             return_dict[k] = [d[k] for d in batch]
         elif k == "caption":
             return_dict[k] = [d[k] if k in d else "" for d in batch]
+        elif k == "text_embed":
+            return_dict[k] = torch.stack([d[k] if k in d else torch.zeros(50, 1024) for d in batch])
         else:
             return_dict[k] = default_collate([d[k] for d in batch])
     return_dict["B"] = len(batch)
