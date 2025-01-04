@@ -121,6 +121,8 @@ class MDMBase(nn.Module):
         self.dropout = dropout
         self.zero_unknown_motion = zero_unknown_motion
         self.pred_2dkpt = pred_2dkpt
+        
+        self.regression_input_type = self.args.get('regression_input_type', 'zero')
 
         assert 'obs' in self.args.in_attr, "obs (kp2d) must be in in_attr"
         self.learned_pos_linear = nn.Linear(2, 32)
@@ -332,7 +334,12 @@ class MDMBase(nn.Module):
         if mode == 'regression':
             t = (torch.ones(B) * 999).long().to(motion.device)
             t_weights = torch.ones(B).to(motion.device)
-            x_t = motion * motion_mask
+            if self.regression_input_type == 'zero':
+                x_t = torch.zeros_like(motion)
+            elif self.regression_input_type == 'normal':
+                x_t = torch.randn_like(motion)
+            else:
+                raise ValueError(f"Unsupported regression_input_type: {self.regression_input_type}")
         elif mode == 'diffusion':
             t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
             pred_x_start_regression = batch['regression_outputs']['model_output']['pred_x_start'].detach()
@@ -437,7 +444,12 @@ class MDMBase(nn.Module):
         if mode == 'regression':
             t = (torch.ones(B) * 999).long().to(motion.device)
             t_weights = torch.ones(B).to(motion.device)
-            x_t = torch.rand_like(motion)
+            if self.regression_input_type == 'zero':
+                x_t = torch.zeros_like(motion)
+            elif self.regression_input_type == 'normal':
+                x_t = torch.randn_like(motion)
+            else:
+                raise ValueError(f"Unsupported regression_input_type: {self.regression_input_type}")
         elif mode == 'diffusion':
             t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
             pred_x_start_regression = inputs['regression_outputs']['2d_model_output']['pred_x_start'].detach()
