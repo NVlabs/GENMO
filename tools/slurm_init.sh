@@ -41,11 +41,7 @@ if [[ -n "$LOCAL_RANK" && "$LOCAL_RANK" -ne 0 ]]; then
     sleep 30
 fi
 
-pip install transformers==4.41.2
-pip install moviepy imageio
-pip install einops
-pip install dnspython
-pip install numpy==1.23.5
+pip install transformers==4.41.2 moviepy imageio einops dnspython numpy==1.23.5 pyvista scenepic
 
 # pip install -e third-party/DPVO
 pip install -e .
