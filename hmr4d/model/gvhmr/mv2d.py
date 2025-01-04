@@ -187,9 +187,9 @@ class MV2D(pl.LightningModule):
         mask_obs2d_prob = conditioning_cfg.get("mask_2d_obs_prob", 0.5)
         mask_cam_angvel_prob = conditioning_cfg.get("mask_cam_angvel_prob", 0.5)
         if mask_obs2d_prob > 0:
-            batch['obs2d_mask'] = (torch.rand(B) < mask_obs2d_prob) | (~use_text)
+            batch['obs2d_mask'] = (torch.rand(B) < mask_obs2d_prob) & use_text
         if mask_cam_angvel_prob > 0:
-            batch['cam_angvel_mask'] = (torch.rand(B) < mask_cam_angvel_prob) | (~use_text)
+            batch['cam_angvel_mask'] = (torch.rand(B) < mask_cam_angvel_prob) & use_text
         return batch
             
     def training_step(self, batch, batch_idx):
