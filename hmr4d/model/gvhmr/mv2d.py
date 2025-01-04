@@ -81,6 +81,8 @@ class MV2D(pl.LightningModule):
             llm_version = model_cfg.text_encoder.llm_version
             self.max_text_len = model_cfg.text_encoder.max_text_len
             self.text_encoder, self.tokenizer = self.load_and_freeze_llm(llm_version)
+        else:
+            self.use_text_encoder = False
         
     def init_diffusion(self):
         self.train_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=True)

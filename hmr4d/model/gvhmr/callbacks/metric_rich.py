@@ -31,11 +31,14 @@ import cv2
 from smplx.joint_names import JOINT_NAMES
 from hmr4d.utils.net_utils import repeat_to_max_len, gaussian_smooth
 from hmr4d.utils.geo.hmr_global import rollout_vel, get_static_joint_mask
+from hmr4d.model.gvhmr.utils.vis_utils import visualize_smpl_scene
 
 
 class MetricMocap(pl.Callback):
-    def __init__(self):
+    def __init__(self, vis_every_n_val=10):
         super().__init__()
+        self.vis_every_n_val = vis_every_n_val
+        self.num_val = 0
         # vid->result
         self.metric_aggregator = {
             "pa_mpjpe": {},
@@ -117,12 +120,18 @@ class MetricMocap(pl.Callback):
         pred_c_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in smpl_out.vertices])
         pred_c_j3d = einsum(self.J_regressor, pred_c_verts, "j v, l v i -> l j i")
         offset = pred_c_j3d[..., [1, 2], :].mean(-2, keepdim=True)  # (L, 1, 3)
+        pred_cr_j3d = pred_c_j3d - offset
 
         # 2. ay
         pred_smpl_params_global = outputs["pred_smpl_params_global"]
         smpl_out = self.smplx_model["neutral"](**pred_smpl_params_global)
         pred_ay_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in smpl_out.vertices])
         pred_ay_j3d = einsum(self.J_regressor, pred_ay_verts, "j v, l v i -> l j i")
+        
+        # Visualize
+        if self.num_val % self.vis_every_n_val == 0:
+            visualize_smpl_scene('vis_rich_global', batch_idx, vid, pred_ay_j3d, target_ay_j3d, pl_module.logger, transform_mode='global')
+            visualize_smpl_scene('vis_rich_incam', batch_idx, vid, pred_cr_j3d, target_cr_j3d, pl_module.logger, transform_mode='local')
 
         # Metric of current sequence
         batch_eval = {
@@ -337,6 +346,8 @@ class MetricMocap(pl.Callback):
 
     # ================== Epoch Summary  ================== #
     def on_predict_epoch_end(self, trainer, pl_module):
+        self.num_val += 1
+        
         """Without logger"""
         local_rank, world_size = trainer.local_rank, trainer.world_size
         monitor_metric = "mpjpe"

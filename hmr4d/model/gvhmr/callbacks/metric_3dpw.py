@@ -17,11 +17,14 @@ from hmr4d.utils.video_io_utils import read_video_np, get_video_lwh, save_video
 from hmr4d.utils.geo_transform import apply_T_on_points
 from hmr4d.utils.seq_utils import rearrange_by_mask
 from hmr4d.model.gvhmr.utils.mv2d_utils import draw_motion_2d, coco_joint_parents, draw_mv_imgs, images_to_video
+from hmr4d.model.gvhmr.utils.vis_utils import visualize_smpl_scene
 
 
 class MetricMocap(pl.Callback):
-    def __init__(self):
+    def __init__(self, vis_every_n_val=10):
         super().__init__()
+        self.vis_every_n_val = vis_every_n_val
+        self.num_val = 0
         # vid->result
         self.metric_aggregator = {
             "pa_mpjpe": {},
@@ -130,12 +133,21 @@ class MetricMocap(pl.Callback):
         target_w_verts = target_w_output.vertices
         target_c_verts = apply_T_on_points(target_w_verts, T_w2c)
         target_c_j3d = torch.matmul(self.J_regressor, target_c_verts)
+        target_c_j3d24 = torch.matmul(self.J_regressor24, target_c_verts)
+        offset = target_c_j3d24[..., [1, 2], :].mean(-2, keepdim=True)  # (L, 1, 3)
+        target_cr_j3d24 = target_c_j3d24 - offset
 
         # + Prediction -> Metric
         smpl_out = self.smplx(**outputs["pred_smpl_params_incam"])
         pred_c_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in smpl_out.vertices])
         pred_c_j3d = einsum(self.J_regressor, pred_c_verts, "j v, l v i -> l j i")
+        pred_c_j3d24 = einsum(self.J_regressor24, pred_c_verts, "j v, l v i -> l j i")
+        offset = pred_c_j3d24[..., [1, 2], :].mean(-2, keepdim=True)  # (L, 1, 3)
+        pred_cr_j3d24 = pred_c_j3d24 - offset
         del smpl_out  # Prevent OOM
+        
+        if self.num_val % self.vis_every_n_val == 0:
+            visualize_smpl_scene('vis_3dpw_incam', batch_idx, vid, pred_cr_j3d24, target_cr_j3d24, pl_module.logger, transform_mode='local')
 
         # Metric of current sequence
         batch_eval = {
@@ -196,6 +208,8 @@ class MetricMocap(pl.Callback):
 
     # ================== Epoch Summary  ================== #
     def on_predict_epoch_end(self, trainer, pl_module):
+        self.num_val += 1
+        
         """Without logger"""
         local_rank, world_size = trainer.local_rank, trainer.world_size
         monitor_metric = "pa_mpjpe"

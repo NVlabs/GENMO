@@ -28,14 +28,18 @@ from pathlib import Path
 import numpy as np
 import cv2
 
+from hmr4d.model.gvhmr.utils.vis_utils import visualize_smpl_scene
+
 
 class MetricMocap(pl.Callback):
-    def __init__(self, emdb_split=1):
+    def __init__(self, emdb_split=1, vis_every_n_val=10):
         """
         Args:
             emdb_split: 1 to evaluate incam, 2 to evaluate global
         """
         super().__init__()
+        self.vis_every_n_val = vis_every_n_val
+        self.num_val = 0
         # vid->result
         if emdb_split == 1:
             self.target_dataset_id = "EMDB_1"
@@ -100,6 +104,8 @@ class MetricMocap(pl.Callback):
         target_w_j3d = torch.matmul(self.J_regressor, target_w_verts)
         target_c_verts = apply_T_on_points(target_w_verts, T_w2c)
         target_c_j3d = apply_T_on_points(target_w_j3d, T_w2c)
+        offset = target_c_j3d[..., [1, 2], :].mean(-2, keepdim=True)  # (L, 1, 3)
+        target_cr_j3d = target_c_j3d - offset
 
         # + Prediction -> Metric
         if self.target_dataset_id == "EMDB_1":  # in camera metrics
@@ -108,8 +114,13 @@ class MetricMocap(pl.Callback):
             smpl_out = self.smplx(**pred_smpl_params_incam)
             pred_c_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in smpl_out.vertices])
             pred_c_j3d = einsum(self.J_regressor, pred_c_verts, "j v, l v i -> l j i")
+            offset = pred_c_j3d[..., [1, 2], :].mean(-2, keepdim=True)  # (L, 1, 3)
+            pred_cr_j3d = pred_c_j3d - offset
             del smpl_out  # Prevent OOM
-
+            
+            if self.num_val % self.vis_every_n_val == 0:
+                visualize_smpl_scene('vis_emdb1_incam', batch_idx, vid, pred_cr_j3d, target_cr_j3d, pl_module.logger, transform_mode='local')
+            
             batch_eval = {
                 "pred_j3d": pred_c_j3d,
                 "target_j3d": target_c_j3d,
@@ -127,6 +138,9 @@ class MetricMocap(pl.Callback):
             pred_ay_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in smpl_out.vertices])
             pred_ay_j3d = einsum(self.J_regressor, pred_ay_verts, "j v, l v i -> l j i")
             del smpl_out  # Prevent OOM
+            
+            if self.num_val % self.vis_every_n_val == 0:
+                visualize_smpl_scene('vis_emdb2_global', batch_idx, vid, pred_ay_j3d, target_w_j3d, pl_module.logger, transform_mode='global')
 
             batch_eval = {
                 "pred_j3d_glob": pred_ay_j3d,
@@ -265,6 +279,8 @@ class MetricMocap(pl.Callback):
 
     # ================== Epoch Summary  ================== #
     def on_predict_epoch_end(self, trainer, pl_module):
+        self.num_val += 1
+        
         """Without logger"""
         local_rank, world_size = trainer.local_rank, trainer.world_size
         if "mpjpe" in self.metric_aggregator:

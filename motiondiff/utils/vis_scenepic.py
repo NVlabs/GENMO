@@ -107,7 +107,7 @@ class ScenepicVisualizer:
 
     def load_default_camera(self):
         return sp.Camera(center=(5, 0, 1.5), look_at=(0, 0, 0.8), up_dir=(0, 0, 1), 
-                         fov_y_degrees=45.0, aspect_ratio=1.0)
+                         fov_y_degrees=45.0, aspect_ratio=1.0, far_crop_distance=1000.0)
 
 
     def vis_smpl_scene(self, smpl_seq=None, html_path=None, window_size=(400, 400)):
@@ -183,16 +183,6 @@ class ScenepicVisualizer:
                     pose_dict['skeleton_fk'].add_mesh_to_frames(main_frame, pose_dict['joints_fk'][ind].cpu().numpy())
                 if 'skeleton_jpos' in pose_dict:
                     ind = min(fr, pose_dict['joints_pos'].shape[0] - 1)
-                    if skel_name == 'pred' and pose_dict['is_unknown_t']:
-                        target_jpos = pose_dict['target_jpos'].clone()
-                        if 'offset' in pose_dict:
-                            target_jpos += pose_dict['offset'].to(self.device)
-                        if 'skeleton_keyframe_jpos_unknownt' in pose_dict:
-                            pose_dict['skeleton_keyframe_jpos_unknownt'].add_mesh_to_frames(main_frame, target_jpos.cpu().numpy())
-                        if 'unknownt_local_joints_mask' in pose_dict:
-                            joint_mask = pose_dict['unknownt_local_joints_mask'].view(-1, 3)
-                            if joint_mask.any():
-                                pose_dict['skeleton_keyframe_jpos_unknownt'].add_joint_constr_meshes_to_frames(main_frame, target_jpos[:-2].cpu().numpy(), joint_mask.cpu().numpy())
 
                     if pose_dict.get('keyframe_idx', None) is not None and any([ind+i in pose_dict['keyframe_idx'] for i in [-1, 0, 1]]):
                         pose_dict['skeleton_keyframe_jpos'].add_mesh_to_frames(main_frame, pose_dict['joints_pos'][ind].cpu().numpy())
@@ -209,15 +199,6 @@ class ScenepicVisualizer:
                         if joint_mask.any():
                             pose_dict['skeleton_jpos'].add_joint_constr_meshes_to_frames(main_frame, joint_pos.cpu().numpy(), joint_mask.cpu().numpy())
                     
-                    if 'global_joint_constr' in pose_dict:
-                        joint_constr = pose_dict['global_joint_constr'][:66, 0, ind].view(-1, 3).clone()
-                        if 'offset' in pose_dict:
-                            joint_constr += pose_dict['offset'].to(self.device)
-                        joint_mask = sum([pose_dict['global_joint_mask'][max(0, min(ind+i, pose_dict['global_joint_mask'].shape[0] - 1))] for i in [-1, 0, 1]]) > 0.0
-                        joint_mask = joint_mask.view(-1, 3)
-                        if joint_mask.any():
-                            pose_dict['skeleton_jpos'].add_joint_constr_meshes_to_frames(main_frame, joint_constr.cpu().numpy(), joint_mask.cpu().numpy())
-
                     if "T_w2c" in pose_dict:
                         if skel_name not in cam_list:
                             cam_list[skel_name] = []

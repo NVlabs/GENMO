@@ -129,7 +129,8 @@ exclude_str = ' '.join([f'--exclude="{f}"' for f in exclude_files])
 
 rsync_cmd = f'rsync -az --partial -m --chmod=775 {exclude_str} {include_str} --exclude="*/*" {repo_folder}/ {args.user}@cs-oci-ord-dc-02:{exp_folder}/'
 print(rsync_cmd)
-subprocess_run(rsync_cmd, shell=True)
+if not args.debug:
+    subprocess_run(rsync_cmd, shell=True)
 
 for cmd, tag in slurm_cmds:
     job_cmd = f"cd {exp_folder}; tools/slurm_job.sh {args.user} {args.branch} {cmd}"
