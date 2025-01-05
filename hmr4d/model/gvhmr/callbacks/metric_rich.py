@@ -129,9 +129,10 @@ class MetricMocap(pl.Callback):
         pred_ay_j3d = einsum(self.J_regressor, pred_ay_verts, "j v, l v i -> l j i")
         
         # Visualize
-        if self.num_val % self.vis_every_n_val == 0:
-            visualize_smpl_scene('vis_rich_global', batch_idx, vid, pred_ay_j3d, target_ay_j3d, pl_module.logger, transform_mode='global')
+        if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
             visualize_smpl_scene('vis_rich_incam', batch_idx, vid, pred_cr_j3d, target_cr_j3d, pl_module.logger, transform_mode='local')
+            if trainer.state.stage == "test":
+                visualize_smpl_scene('vis_rich_global', batch_idx, vid, pred_ay_j3d, target_ay_j3d, pl_module.logger, transform_mode='global')
 
         # Metric of current sequence
         batch_eval = {

@@ -48,6 +48,10 @@ class Humanml3dDataset(BaseDataset):
         random1024=False,  # DEBUG
         limit_size=None,
         max_text_len=50,
+        eval_text_only=False,
+        use_random_subset=False,
+        random_subset_size=32,
+        random_subset_seed=7
     ):
         self.root = Path("inputs/HumanML3D_SMPL/hmr4d_support")
         self.text_embed_file = Path("inputs/HumanML3D_SMPL_ye/t5_embeddings_v1/all_text_embed.pth") # TODO: USE THE STANDARD PATH
@@ -66,8 +70,14 @@ class Humanml3dDataset(BaseDataset):
         }
         self.max_text_len = max_text_len
 
+        self.eval_text_only = eval_text_only
+        self.use_random_subset = use_random_subset
+        self.random_subset_seed = random_subset_seed
+        self.random_subset_size = random_subset_size
         super().__init__(cam_augmentation, limit_size)
-
+        return
+        
+        
     def _load_dataset(self):
         filename = self.root / "humanml3d_smplhpose.pth"
         Log.info(f"[{self.dataset_name}] Loading from {filename} ...")
@@ -104,9 +114,18 @@ class Humanml3dDataset(BaseDataset):
             if seq_length < 25:  # Skip clips that are too short
                 continue
             num_samples = max(seq_length // self.motion_frames, 1)
+            if self.use_random_subset:
+                num_samples = 1
             seq_lengths.append(seq_length)
             self.idx2meta.extend([(vid, start_id)] * num_samples)
             assert start_id == 0, f"start_id is not 0 for {vid}"
+            
+        if self.use_random_subset:
+            rng = np.random.RandomState(self.random_subset_seed)
+            shuffle_ind = np.arange(len(self.idx2meta))
+            rng.shuffle(shuffle_ind)
+            self.idx2meta = [self.idx2meta[i] for i in shuffle_ind[:self.random_subset_size]]
+            seq_lengths = [seq_lengths[i] for i in shuffle_ind[:self.random_subset_size]]
         hours = sum(seq_lengths) / 30 / 3600
         Log.info(f"[{self.dataset_name}] has {hours:.1f} hours motion -> Resampled to {len(self.idx2meta)} samples.")
 
@@ -142,7 +161,10 @@ class Humanml3dDataset(BaseDataset):
         # Interpolation (vec + r6d)
         data_interpolated = interpolate_smpl_params(data, tgt_len)
         # text_data = np.random.choice(raw_data["text_data"])
-        text_ind = np.random.randint(0, len(raw_data["text_data"]))
+        if self.use_random_subset:
+            text_ind = 0
+        else:
+            text_ind = np.random.randint(0, len(raw_data["text_data"]))
         text_data = raw_data["text_data"][text_ind]
         text_embed = text_embed_data[text_ind]
         
@@ -273,7 +295,7 @@ class Humanml3dDataset(BaseDataset):
         # NOTE: bbx_xys and f_imgseq will be added later
         max_len = length
         return_data = {
-            "meta": {"data_name": data_name, "idx": idx, "T_w2c": T_w2c},
+            "meta": {"data_name": data_name, "dataset_id": 'humanml3d', "idx": idx, "T_w2c": T_w2c, "eval_text_only": self.eval_text_only},
             "length": length,
             "smpl_params_c": smpl_params_c,
             "smpl_params_w": smpl_params_w,

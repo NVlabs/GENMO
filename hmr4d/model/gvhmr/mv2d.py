@@ -80,7 +80,8 @@ class MV2D(pl.LightningModule):
             self.use_text_encoder = True
             llm_version = model_cfg.text_encoder.llm_version
             self.max_text_len = model_cfg.text_encoder.max_text_len
-            self.text_encoder, self.tokenizer = self.load_and_freeze_llm(llm_version)
+            text_encoder, self.tokenizer = self.load_and_freeze_llm(llm_version)
+            self.text_encoder = [text_encoder.cuda()]
         else:
             self.use_text_encoder = False
         
@@ -99,9 +100,8 @@ class MV2D(pl.LightningModule):
             p.requires_grad = False
         return model, tokenizer
     
-    def encode_text(self, raw_text, has_text):
+    def encode_text(self, raw_text, has_text=None):
         # raw_text - list (batch_size length) of strings with input text prompts
-        no_text = ~torch.tensor(has_text)
         device = next(self.parameters()).device
         with torch.no_grad():
             with torch.cuda.amp.autocast(enabled=False):
@@ -119,7 +119,7 @@ class MV2D(pl.LightningModule):
                 attn_mask = encoded.attention_mask.to(device)
 
                 with torch.no_grad():
-                    output = self.text_encoder(input_ids=input_ids, attention_mask=attn_mask)
+                    output = self.text_encoder[0](input_ids=input_ids, attention_mask=attn_mask)
                     encoded_text = output.last_hidden_state.detach()
 
                 encoded_text = encoded_text[:, :max_text_len]
@@ -128,7 +128,9 @@ class MV2D(pl.LightningModule):
                 # for bnum in range(encoded_text.shape[0]):
                 #     nvalid_elem = attn_mask[bnum].sum().item()
                 #     encoded_text[bnum][nvalid_elem:] = 0
-        encoded_text[no_text] = 0
+        if has_text is not None:
+            no_text = ~torch.tensor(has_text)
+            encoded_text[no_text] = 0
         return encoded_text
         
     def obtain_mv2d(self, batch, gt_j3d):
@@ -210,12 +212,12 @@ class MV2D(pl.LightningModule):
         outputs = {'loss': 0}
         if '3d' in batch:
             with Timer("train_3d_step", enabled=self.timing):
-                if self.use_text_encoder:
+                if len(self.train_3d_modes) > 0:
                     if 'text_embed' in batch['3d']:
                         batch['3d']['encoded_text'] = batch['3d']['text_embed'].cuda()
-                    else:
+                    elif self.use_text_encoder:
                         batch['3d']['encoded_text'] = self.encode_text(batch['3d']['caption'], batch['3d']['has_text'])
-                self.choose_conditioning(batch['3d'])
+                    self.choose_conditioning(batch['3d'])
                 for mode in self.train_3d_modes:
                     outputs_3d = self.train_3d_step(batch['3d'], batch_idx, mode=mode)
                     outputs['loss'] += outputs_3d['loss']
@@ -228,12 +230,12 @@ class MV2D(pl.LightningModule):
         start_2d_training_steps = self.model_cfg.get("start_2d_training_steps", 0)
         if '2d' in batch and self.trainer.global_step >= start_2d_training_steps:
             with Timer("train_2d_step", enabled=self.timing):
-                if self.use_text_encoder:
+                if len(self.train_2d_modes) > 0:
                     if 'text_embed' in batch['2d']:
                         batch['2d']['encoded_text'] = batch['2d']['text_embed'].cuda()
-                    else:
+                    elif self.use_text_encoder:
                         batch['2d']['encoded_text'] = self.encode_text(batch['2d']['caption'], batch['2d']['has_text'])
-                self.choose_conditioning(batch['2d'])
+                    self.choose_conditioning(batch['2d'])
                 for mode in self.train_2d_modes:
                     outputs_2d = self.train_2d_step(batch['2d'], batch_idx, mode=mode)
                     outputs['loss'] += outputs_2d['loss_2d']
@@ -680,7 +682,10 @@ class MV2D(pl.LightningModule):
         # ROPE inference
         obs = normalize_kp2d(batch["kp2d"], batch["bbx_xys"])
         if "mask" in batch:
-            obs[0, ~batch["mask"][0]] = 0
+            mask = batch["mask"]
+            if isinstance(mask, dict):
+                mask = mask["valid"]
+            obs[0, ~mask[0]] = 0
 
         if self.validate_2d_in_3d:
             batch_2d = {
@@ -706,6 +711,7 @@ class MV2D(pl.LightningModule):
             else:
                 outputs_2d = self.validation_2d(batch_2d, batch_idx, dataloader_idx)
             
+        eval_text_only = batch['meta'][0].get('eval_text_only', False)
         batch_ = {
             "length": batch["length"],
             "obs": obs,
@@ -713,12 +719,16 @@ class MV2D(pl.LightningModule):
             "K_fullimg": batch["K_fullimg"],
             "cam_angvel": batch["cam_angvel"],
             "f_imgseq": batch["f_imgseq"],
+            "eval_text_only" : eval_text_only
         }
-        if self.use_text_encoder:
+        if 'text_embed' in batch:
+            batch_['encoded_text'] = batch['text_embed'].cuda()
+        elif self.use_text_encoder:
             batch_['encoded_text'] = self.encode_text(batch['caption'], batch['has_text'])
         outputs = self.pipeline.forward(batch_, train=False, postproc=do_postproc_not_flip_test, global_step=self.trainer.global_step)
         outputs["pred_smpl_params_global"] = {k: v[0] for k, v in outputs["pred_smpl_params_global"].items()}
         outputs["pred_smpl_params_incam"] = {k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()}
+        outputs['eval_text_only'] = eval_text_only
 
         if do_flip_test:
             flip_test = batch["flip_test"]

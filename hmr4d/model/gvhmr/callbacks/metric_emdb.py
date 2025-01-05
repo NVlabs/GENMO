@@ -118,7 +118,7 @@ class MetricMocap(pl.Callback):
             pred_cr_j3d = pred_c_j3d - offset
             del smpl_out  # Prevent OOM
             
-            if self.num_val % self.vis_every_n_val == 0:
+            if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
                 visualize_smpl_scene('vis_emdb1_incam', batch_idx, vid, pred_cr_j3d, target_cr_j3d, pl_module.logger, transform_mode='local')
             
             batch_eval = {
@@ -139,7 +139,7 @@ class MetricMocap(pl.Callback):
             pred_ay_j3d = einsum(self.J_regressor, pred_ay_verts, "j v, l v i -> l j i")
             del smpl_out  # Prevent OOM
             
-            if self.num_val % self.vis_every_n_val == 0:
+            if trainer.state.stage == "test" and trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
                 visualize_smpl_scene('vis_emdb2_global', batch_idx, vid, pred_ay_j3d, target_w_j3d, pl_module.logger, transform_mode='global')
 
             batch_eval = {

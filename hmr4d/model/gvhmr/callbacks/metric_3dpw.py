@@ -146,7 +146,7 @@ class MetricMocap(pl.Callback):
         pred_cr_j3d24 = pred_c_j3d24 - offset
         del smpl_out  # Prevent OOM
         
-        if self.num_val % self.vis_every_n_val == 0:
+        if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
             visualize_smpl_scene('vis_3dpw_incam', batch_idx, vid, pred_cr_j3d24, target_cr_j3d24, pl_module.logger, transform_mode='local')
 
         # Metric of current sequence

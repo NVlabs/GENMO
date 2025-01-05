@@ -115,6 +115,10 @@ class Pipeline(nn.Module):
                 else:
                     f_condition_valid_mask[k] = torch.rand(f_condition[k].shape[:2], device=f_condition[k].device) > -1
 
+        if inputs.get('eval_text_only', False):
+            for k in f_condition.keys():
+                f_condition[k] = torch.zeros_like(f_condition[k])
+        
         inputs["f_condition_valid_mask"] = f_condition_valid_mask
 
         inputs["f_condition"] = f_condition
@@ -254,8 +258,6 @@ class Pipeline(nn.Module):
             # "detach_j3d_for_mv2d": self.args.get('train2d_detach_j3d_for_mv2d', False),
             # "detach_cam_for_mv2d": self.args.get('train2d_detach_cam_for_mv2d', False)
         }
-        if 'f_imgseq' in inputs:
-            f_condition['f_imgseq'] = inputs['f_imgseq']
         f_condition["obs"] = inputs["obs"]  # (B, L, J, 3)
         f_condition_valid_mask = {}
         if 'obs2d_mask' in inputs:

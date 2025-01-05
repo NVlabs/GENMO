@@ -342,7 +342,10 @@ class MDMBase(nn.Module):
                 raise ValueError(f"Unsupported regression_input_type: {self.regression_input_type}")
         elif mode == 'diffusion':
             t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
-            pred_x_start_regression = batch['regression_outputs']['model_output']['pred_x_start'].detach()
+            if 'regression_outputs' in batch:
+                pred_x_start_regression = batch['regression_outputs']['model_output']['pred_x_start'].detach()
+            else:
+                pred_x_start_regression = torch.zeros_like(clean_motion)
             x_start_reg = pred_x_start_regression
             inpaint_mask = torch.ones_like(pred_x_start_regression)
             inpaint_mask = inpaint_mask * valid_mask[:, :, None]
