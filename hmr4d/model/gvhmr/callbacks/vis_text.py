@@ -43,9 +43,9 @@ class VisText(pl.Callback):
 
         # SMPL
         self.smplx_model = {
-            "male": make_smplx("rich-smplx", gender="male"),
-            "female": make_smplx("rich-smplx", gender="female"),
-            "neutral": make_smplx("rich-smplx", gender="neutral"),
+            "male": make_smplx("supermotion_smpl24_male"),
+            "female": make_smplx("supermotion_smpl24_female"),
+            "neutral": make_smplx("supermotion_smpl24"),
         }
         self.J_regressor = torch.load("hmr4d/utils/body_model/smpl_neutral_J_regressor.pt")
         self.smplx2smpl = torch.load("hmr4d/utils/body_model/smplx2smpl_sparse.pt")
@@ -79,15 +79,15 @@ class VisText(pl.Callback):
 
         # Groundtruth (world, cam)
         target_w_params = {k: v[0] for k, v in batch["smpl_params_w"].items()}
-        target_w_output = self.smplx_model[gender](**target_w_params)
-        target_w_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in target_w_output.vertices])
-        target_w_j3d = torch.matmul(self.J_regressor, target_w_verts)
+        target_w_j3d = self.smplx_model[gender](**target_w_params)
+        # target_w_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in target_w_output.vertices])
+        # target_w_j3d = torch.matmul(self.J_regressor, target_w_verts)
 
         # 2. ay
         pred_smpl_params_global = outputs["pred_smpl_params_global"]
-        smpl_out = self.smplx_model["neutral"](**pred_smpl_params_global)
-        pred_ay_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in smpl_out.vertices])
-        pred_ay_j3d = einsum(self.J_regressor, pred_ay_verts, "j v, l v i -> l j i")
+        pred_ay_j3d = self.smplx_model["neutral"](**pred_smpl_params_global)
+        # pred_ay_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in smpl_out.vertices])
+        # pred_ay_j3d = einsum(self.J_regressor, pred_ay_verts, "j v, l v i -> l j i")
         
         # Visualize
         if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
