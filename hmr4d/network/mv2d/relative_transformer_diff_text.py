@@ -137,9 +137,7 @@ class NetworkEncoderRoPE(nn.Module):
         if self.static_conf_head:
             self.static_conf_head = Mlp(self.latent_dim, out_features=static_conf_dim)
             
-        xt_dim = 157
-        if self.input_remove_static_conf:
-            xt_dim -= 6
+        xt_dim = 151
         if self.input_remove_global:
             xt_dim -= 15
         self.add_cond_linear = nn.Linear(xt_dim + self.latent_dim, self.latent_dim)
@@ -184,11 +182,8 @@ class NetworkEncoderRoPE(nn.Module):
         L = xt.size(1)
         B = xt.size(0)
         
-        if self.input_remove_condition:
-            x = torch.zeros_like(x)
+        x = torch.zeros_like(x)
         
-        if self.input_remove_static_conf:
-            xt = xt[..., 6:]
         if self.input_remove_global:
             xt = xt[..., :-15]
         
@@ -225,10 +220,10 @@ class NetworkEncoderRoPE(nn.Module):
 
         # Output
         sample = self.final_layer(x)  # (B, L, C)
-        if self.avgbeta:
-            betas = (sample[..., 126:136] * (~pmask[..., None])).sum(1) / length[:, None]  # (B, C)
-            betas = repeat(betas, "b c -> b l c", l=L)
-            sample = torch.cat([sample[..., :126], betas, sample[..., 136:]], dim=-1)
+        # if self.avgbeta:
+        #     betas = (sample[..., 126:136] * (~pmask[..., None])).sum(1) / length[:, None]  # (B, C)
+        #     betas = repeat(betas, "b c -> b l c", l=L)
+        #     sample = torch.cat([sample[..., :126], betas, sample[..., 136:]], dim=-1)
 
         # Output (extra)
         pred_cam = None
@@ -244,7 +239,7 @@ class NetworkEncoderRoPE(nn.Module):
         output = {
             "pred_context": x,
             "pred_x": sample,
-            "pred_x_start": torch.cat([static_conf_logits, sample], dim=-1),
+            "pred_x_start": sample,
             "pred_cam": pred_cam,
             "static_conf_logits": static_conf_logits,
         }

@@ -280,8 +280,10 @@ class MDMBase(nn.Module):
         pmask = ~vis_mask  # (B, L)
 
         # 6 + 151
-        motion = torch.cat([static_gt, target_x], dim=-1)
-        clean_motion = torch.cat([static_gt, target_x], dim=-1)
+        # motion = torch.cat([static_gt, target_x], dim=-1)
+        # clean_motion = torch.cat([static_gt, target_x], dim=-1)
+        motion = target_x.clone()
+        clean_motion = target_x.clone()
         motion_mask = torch.zeros_like(motion)
         motion_mask = motion_mask * vis_mask[..., None]
 
@@ -301,10 +303,6 @@ class MDMBase(nn.Module):
     def get_diffusion_pred_target(self, batch, target_x, static_gt, mode):
         diffusion = self.train_diffusion if self.training else self.test_diffusion
 
-        outputs = dict()
-        f_condition = batch["f_condition"]
-        clean_f_condition = batch["clean_f_condition"]
-        f_condition_valid_mask = batch["f_condition_valid_mask"]
         length = batch["length"]
 
         f_cond, motion, motion_mask, clean_motion = self.generate_motion_rep(
@@ -342,22 +340,7 @@ class MDMBase(nn.Module):
                 raise ValueError(f"Unsupported regression_input_type: {self.regression_input_type}")
         elif mode == 'diffusion':
             t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
-            if 'regression_outputs' in batch:
-                pred_x_start_regression = batch['regression_outputs']['model_output']['pred_x_start'].detach()
-            else:
-                pred_x_start_regression = torch.zeros_like(clean_motion)
-            x_start_reg = pred_x_start_regression
-            inpaint_mask = torch.ones_like(pred_x_start_regression)
-            inpaint_mask = inpaint_mask * valid_mask[:, :, None]
-            inpaint_mask = inpaint_mask * vis_mask[:, :, None]
-            x_start_gt = clean_motion.clone() * inpaint_mask + pred_x_start_regression * (1 - inpaint_mask)
-            if self.args.get('diffusion_all_regression_outputs', False):
-                regression_mask = torch.ones(B).to(motion.device)
-            else:
-                regression_mask = torch.zeros(B).to(motion.device)
-            if 'use_regression_outputs_prob' in self.args:
-                regression_mask = (torch.rand(B).to(motion.device) < self.args.use_regression_outputs_prob).float()
-            x_start = x_start_reg * regression_mask[:, None, None] + x_start_gt * (1 - regression_mask[:, None, None])
+            x_start = clean_motion.clone()
             noise = torch.randn_like(x_start)
             x_t = self.train_diffusion.q_sample(x_start.clone(), t, noise=noise)
         
@@ -368,13 +351,10 @@ class MDMBase(nn.Module):
         target_x_start = clean_motion
         pred_x_start = denoise_out["pred_x_start"]
 
-        static_conf_logits = pred_x_start[:, :, self.s_pred_ind : self.s_pred_ind + 6]
-        assert pred_x_start.shape[-1] == self.s_pred_ind + 6 + 151
-        sample = pred_x_start[:, :, self.s_pred_ind + 6:]
+        static_conf_logits = denoise_out['static_conf_logits']
+        sample = pred_x_start
         
         valid_loss_mask = torch.ones_like(pred_x_start)
-        valid_loss_mask[batch["mask"]["spv_incam_only"], :, -9:] *= 0
-        valid_loss_mask[batch["mask"]["spv_incam_only"], :, self.s_pred_ind :self.s_pred_ind + 6] *= 0
         valid_loss_mask = valid_loss_mask * valid_mask[:, :, None]
         
         output = {

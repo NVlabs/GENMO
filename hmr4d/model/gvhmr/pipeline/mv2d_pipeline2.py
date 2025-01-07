@@ -165,54 +165,6 @@ class Pipeline(nn.Module):
         total_loss = 0
         mask = inputs["mask"]["valid"]  # (B, L)
         
-        # 0. MV2D loss
-        if self.weights.get('mv2d', 0.0) > 0.0 and global_step >= self.weights.get("mv2d_start_step", 0):
-            mv2d = model_output["mv2d"]
-            target_mv2d = inputs["mv2d_norm"]
-            mv2d_loss = F.mse_loss(mv2d, target_mv2d[..., :2], reduction="none")
-            mv2d_loss *= target_mv2d[..., [2]]  # weight by confidence
-            mv2d_loss = (mv2d_loss * mask[..., None, None, None]).mean()
-            total_loss += self.weights.mv2d * mv2d_loss
-            outputs["mv2d_loss"] = mv2d_loss
-        # vis_ind = 0
-        # mv2d_norm = mv2d.detach()
-        # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
-        # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 128, f"out/debug_vis/loss_mv2d.mp4", coco_joint_parents, 256, 256, fps=30)
-        # mv2d_norm = target_mv2d.detach()
-        # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
-        # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 128, f"out/debug_vis/loss_mv2d_target.mp4", coco_joint_parents, 256, 256, fps=30)
-        
-        # 0.1 MV2D cam loss
-        if self.weights.get("cam_elevation_loss", 0.0) > 0.0:
-            elevations = torch.deg2rad(model_output["mv2d_cam_params"]["elevations"])
-            target_elevations = inputs["cam_elevations"]
-            elevation_loss = F.mse_loss(elevations, target_elevations, reduction="none")
-            elevation_loss = (elevation_loss * mask)[inputs['cam_param_valid']].mean()
-            total_loss += self.weights.cam_elevation_loss * elevation_loss
-            outputs["cam_elevation_loss"] = elevation_loss
-            
-        if self.weights.get("cam_tilt_loss", 0.0) > 0.0:
-            tilt = torch.deg2rad(model_output["mv2d_cam_params"]["tilt"])
-            target_tilt = inputs["cam_tilt"]
-            tilt_loss = F.mse_loss(tilt, target_tilt, reduction="none")
-            tilt_loss = (tilt_loss * mask)[inputs['cam_param_valid']].mean()
-            total_loss += self.weights.cam_tilt_loss * tilt_loss
-            outputs["cam_tilt_loss"] = tilt_loss
-            
-        if self.weights.get("cam_elevation_reg", 0.0) > 0.0:
-            elevations = torch.deg2rad(model_output["mv2d_cam_params"]["elevations"])
-            elevation_reg = elevations ** 2
-            elevation_reg = (elevation_reg * mask)[inputs['cam_param_valid']].mean()
-            total_loss += self.weights.cam_elevation_reg * elevation_reg
-            outputs["cam_elevation_reg_loss"] = elevation_reg
-            
-        if self.weights.get("cam_tilt_reg", 0.0) > 0.0:
-            tilt = torch.deg2rad(model_output["mv2d_cam_params"]["tilt"])
-            tilt_reg = tilt ** 2
-            tilt_reg = (tilt_reg * mask)[inputs['cam_param_valid']].mean()
-            total_loss += self.weights.cam_tilt_reg * tilt_reg
-            outputs["cam_tilt_reg_loss"] = tilt_reg
-
         # 1. Simple loss: MSE
         pred_x = model_output["pred_x"]  # (B, L, C)
         target_x = self.endecoder.encode(inputs)  # (B, L, C)
@@ -225,16 +177,6 @@ class Pipeline(nn.Module):
         simple_loss = (simple_loss * mask_simple * valid_loss_mask).mean()
         total_loss += simple_loss * self.weights.get("simple", 1.0)
         outputs["simple_loss"] = simple_loss
-
-        # 2. Extra loss
-        extra_funcs = [
-            compute_extra_incam_loss,
-            compute_extra_global_loss,
-        ]
-        for extra_func in extra_funcs:
-            extra_loss, extra_loss_dict = extra_func(inputs, outputs, self)
-            total_loss += extra_loss
-            outputs.update(extra_loss_dict)
 
         outputs["loss"] = total_loss
         return outputs
