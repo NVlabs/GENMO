@@ -160,12 +160,18 @@ class MFMHMR(pl.LightningModule):
 
         # noisy_j3d -> project to i_j2d -> compute a bbx -> normalized kp2d [-1, 1]
 
+        use_det_kp = batch["use_det_kp"] > 0
         noisy_j3d = gt_j3d + get_wham_aug_kp3d(gt_j3d.shape[:2])
         if True:
             noisy_j3d = randomly_modify_hands_legs(noisy_j3d)
         obs_i_j2d = perspective_projection(noisy_j3d, batch["K_fullimg"])  # (B, L, J, 2)
         j2d_visible_mask = get_visible_mask(gt_j3d.shape[:2]).cuda()  # (B, L, J)
         j2d_visible_mask[noisy_j3d[..., 2] < 0.3] = False  # Set close-to-image-plane points as invisible
+        det_obs_i_j2d = normalize_kp2d(batch["kp2d"], batch["bbx_xys"])[..., :2].to(obs_i_j2d)
+        det_j2d_visible_mask = batch["kp2d"][..., 2] > 0.5
+        obs_i_j2d[use_det_kp] = det_obs_i_j2d[use_det_kp]
+        j2d_visible_mask[use_det_kp] = det_j2d_visible_mask[use_det_kp]
+
         if True:  # Set both legs as invisible for a period
             legs_invisible_mask = get_invisible_legs_mask(gt_j3d.shape[:2]).cuda()  # (B, L, J)
             j2d_visible_mask[legs_invisible_mask] = False
@@ -176,7 +182,8 @@ class MFMHMR(pl.LightningModule):
             mask = self.generate_mask(self.model_cfg.body_mask_cfg, j2d_visible_mask, batch["length"])
             j2d_visible_mask = j2d_visible_mask & mask
         if self.model_cfg.get("mask_occluded_imgfeats", False) and 'f_imgseq' in batch:
-            occluded_img_mask = (~j2d_visible_mask).all(dim=-1)
+            # occluded_img_mask = (~j2d_visible_mask).all(dim=-1)
+            occluded_img_mask = (j2d_visible_mask.sum(dim=-1) <= 3)
             batch['f_imgseq'][occluded_img_mask] = 0
 
         obs_kp2d = torch.cat([obs_i_j2d, j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
@@ -429,8 +436,13 @@ class MFMHMR(pl.LightningModule):
 
         # ROPE inference
         obs = normalize_kp2d(batch["kp2d"], batch["bbx_xys"])
+        j2d_visible_mask = batch["kp2d"][..., 2] > 0.5
         if "mask" in batch:
             obs[0, ~batch["mask"][0]] = 0
+
+        # occluded_img_mask = (~j2d_visible_mask).all(dim=-1)
+        occluded_img_mask = (j2d_visible_mask.sum(dim=-1) <= 3)
+        batch["f_imgseq"][occluded_img_mask] = 0
 
         if self.validate_2d_in_3d:
             batch_2d = {

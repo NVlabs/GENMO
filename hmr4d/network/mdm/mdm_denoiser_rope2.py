@@ -344,7 +344,7 @@ class MDMDenoiserROPE(nn.Module):
             pose_start_ind += emb_text.shape[1]
 
         xseq_start = xseq[:, :pose_start_ind, :]
-        xseq_start = self.sequence_pos_encoder(xseq_start)  # [bs, seqlen+1, 2d]
+        xseq_start = self.sequence_pos_encoder(xseq_start, batch_first=True)  # [bs, seqlen+1, 2d]
         xseq[:, :pose_start_ind, :] = xseq_start
         # xseq[pose_start_ind:] = xseq[pose_start_ind:] + self.motion_pe
         # xseq = self.sequence_pos_encoder(xseq)  # [seqlen+1, bs, 2d]

@@ -179,6 +179,7 @@ class Bones2DDatasetV2SingleView(Bones2DDatasetV2):
         if self.precompute:
             outputs = self.get_precompute_data(item)
             outputs['K_fullimg'] = self.cam_intrinsics.repeat(self.num_frames, 1, 1)
+            outputs['f_imgseq'] = torch.zeros((self.num_frames, 1024))
             return outputs
         else:
             target = self.get_motion(item)
@@ -191,10 +192,10 @@ class Bones2DDatasetV2SingleView(Bones2DDatasetV2):
             conf = mask[:, None].repeat(self.num_keypoints, axis=-1)
             outputs = {
                 'idx': self.split_index[item],
-                'obs_kp2d': target['obs_kp2d'].astype(np.float32),
+                'obs_kp2d': target['obs_kp2d'].astype(np.float32),  # (F, 1, 17, 2)
                 "K_fullimg": self.cam_intrinsics.repeat(self.num_frames, 1, 1),  # (F, 3, 3)
-                'mask': mask.astype(np.bool8),
-                'conf': conf,
+                'mask': mask.astype(np.bool8),  # (F,)
+                'conf': conf,  # (F, 17)
                 'length': m_length,
                 'is_2d': True,
                 'meta': {

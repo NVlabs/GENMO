@@ -73,11 +73,11 @@ def get_batch_vimo(input_path, bbx_xys, img_ds=0.5, img_dst_size=256, path_type=
 
 
 class Extractor:
-    def __init__(self, tqdm_leave=True):
-        self.extractor: HMR2 = load_hmr2().cuda().eval()
+    def __init__(self, device='cuda:0', tqdm_leave=True):
+        self.extractor: HMR2 = load_hmr2().to(device).eval()
         self.tqdm_leave = tqdm_leave
 
-    def extract_video_features(self, video_path, bbx_xys, img_ds=0.5):
+    def extract_video_features(self, video_path, bbx_xys, img_ds=0.5, batch_size=16):
         """
         img_ds makes the image smaller, which is useful for faster processing
         """
@@ -91,9 +91,10 @@ class Extractor:
         # Inference
         F, _, H, W = imgs.shape  # (F, 3, H, W)
         imgs = imgs.cuda()
-        batch_size = 16  # 5GB GPU memory, occupies all CUDA cores of 3090
+        # batch_size = 16  # 5GB GPU memory, occupies all CUDA cores of 3090
         features = []
-        for j in tqdm(range(0, F, batch_size), desc="HMR2 Feature", leave=self.tqdm_leave):
+        # for j in tqdm(range(0, F, batch_size), desc="HMR2 Feature", leave=self.tqdm_leave):
+        for j in range(0, F, batch_size):
             imgs_batch = imgs[j : j + batch_size]
 
             with torch.no_grad():

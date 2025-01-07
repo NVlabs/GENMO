@@ -9,6 +9,7 @@ import hmr4d.dataset.threedpw.threedpw_occ_motion_train
 import hmr4d.dataset.threedpw.threedpw_occ_motion_test
 import hmr4d.dataset.bedlam.bedlam
 import hmr4d.dataset.h36m.h36m
+import hmr4d.dataset.motionx.motionx
 
 # Trainer: Model Optimizer Loss
 import hmr4d.model.gvhmr.gvhmr_pl
