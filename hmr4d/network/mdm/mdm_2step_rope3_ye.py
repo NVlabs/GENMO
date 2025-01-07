@@ -561,10 +561,10 @@ class MDMBase(nn.Module):
                 pred_cam_t_vel = samples_out["pred_cam_t_vel"]
             if 'cam_scale' in self.args.out_attr:
                 pred_cam_scale = samples_out["pred_cam_scale"]
-            samples = samples_out["pred_xstart"]
+            samples = samples_out["pred_x"]
 
-            static_conf_logits = samples[:, :, self.s_pred_ind:self.s_pred_ind + 6]
-            sample = samples[:, :, self.s_pred_ind + 6:]
+            static_conf_logits = samples_out['static_conf_logits']
+            sample = samples
 
         output = {
             "pred_x": sample,
