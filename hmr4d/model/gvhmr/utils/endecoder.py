@@ -204,6 +204,11 @@ MainStore.store(
     node=cfg_base(stats_name="MM_V1_AMASS_LOCAL_BEDLAM_CAM", clip_std=True),
     group=group_name,
 )
+MainStore.store(
+    name="v1_humanml3d",
+    node=cfg_base(stats_name="HUMANML3D_V1"),
+    group=group_name,
+)
 
 MainStore.store(name="v2", node=cfg_base(stats_name="MM_V2"), group=group_name)
 MainStore.store(name="v2_1", node=cfg_base(stats_name="MM_V2_1"), group=group_name)

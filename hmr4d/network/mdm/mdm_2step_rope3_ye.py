@@ -564,7 +564,7 @@ class MDMBase(nn.Module):
 
             samples_out = sample_fn(
                 denoiser,
-                (batch_size, self.denoiser.njoints, self.denoiser.nfeats, L),
+                motion.shape,
                 clip_denoised=False,
                 model_kwargs=cond,
                 skip_timesteps=0,  # 0 is the default value - i.e. don't skip any step

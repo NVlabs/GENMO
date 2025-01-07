@@ -57,6 +57,9 @@ class NetworkEncoderRoPE(nn.Module):
         encoded_text_dim=1024,
         use_text_pos_enc=True,
         text_encoder_cfg={},
+        input_remove_static_conf=False,
+        input_remove_global=False,
+        input_remove_condition=False,
         **kwargs,
     ):
         super().__init__()
@@ -79,6 +82,9 @@ class NetworkEncoderRoPE(nn.Module):
         self.nfeats = 1
         self.encoded_text_dim = encoded_text_dim
         self.use_text_pos_enc = use_text_pos_enc
+        self.input_remove_static_conf = input_remove_static_conf
+        self.input_remove_global = input_remove_global
+        self.input_remove_condition = input_remove_condition
 
         # ===== build model ===== #
         # Input (Kp2d)
@@ -131,7 +137,12 @@ class NetworkEncoderRoPE(nn.Module):
         if self.static_conf_head:
             self.static_conf_head = Mlp(self.latent_dim, out_features=static_conf_dim)
             
-        self.add_cond_linear = nn.Linear(157 + self.latent_dim, self.latent_dim)
+        xt_dim = 157
+        if self.input_remove_static_conf:
+            xt_dim -= 6
+        if self.input_remove_global:
+            xt_dim -= 15
+        self.add_cond_linear = nn.Linear(xt_dim + self.latent_dim, self.latent_dim)
 
         self.avgbeta = avgbeta
 
@@ -172,6 +183,14 @@ class NetworkEncoderRoPE(nn.Module):
         length = y['length']
         L = xt.size(1)
         B = xt.size(0)
+        
+        if self.input_remove_condition:
+            x = torch.zeros_like(x)
+        
+        if self.input_remove_static_conf:
+            xt = xt[..., 6:]
+        if self.input_remove_global:
+            xt = xt[..., :-15]
         
         emb = self.embed_timestep(timesteps)  # [1, bs, d]
         x = x + emb

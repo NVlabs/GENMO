@@ -221,7 +221,8 @@ class Pipeline(nn.Module):
         mask_simple[inputs["mask"]["spv_incam_only"], :, 142:] = False  # 3dpw training
         if self.weights.get('simple_loss_local_only', False):
             mask_simple[..., 142:] = False
-        simple_loss = (simple_loss * mask_simple).mean()
+        valid_loss_mask = model_output["valid_loss_mask"][:, :, -151:]  # (B, L, C)
+        simple_loss = (simple_loss * mask_simple * valid_loss_mask).mean()
         total_loss += simple_loss * self.weights.get("simple", 1.0)
         outputs["simple_loss"] = simple_loss
 
