@@ -12,7 +12,6 @@ defaults:
           - imgfeat_h36m/v1
           - imgfeat_3dpw/v1
           - imgfeat_3dpw_occ/v1
-          - imgfeat_motionx/vlocal
     - override /train_2d_datasets:
           - bones_2d
     - override /test_datasets:
@@ -75,6 +74,7 @@ pipeline:
         diffusion_all_regression_outputs: true
         old_f_condition_masking: true
         vis_masking_f_cond: false
+        regression_only: true
         weights:
             cr_j3d: 500.
             transl_c: 1.
@@ -151,10 +151,10 @@ data:
 
 pl_trainer:
     precision: 16-mixed
-    log_every_n_steps: 1
+    log_every_n_steps: 10
     gradient_clip_val: 0.5
     max_epochs: 1000
-    check_val_every_n_epoch: 1
+    check_val_every_n_epoch: 10
     devices: 1
     strategy: ddp_find_unused_parameters_true
 
