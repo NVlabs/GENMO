@@ -138,7 +138,7 @@ network:
         denoiser:
             type: motiondiff.models.mdm.mdm_denoiser_t5.MDMDenoiser
             modeltype: ''
-            njoints: 151
+            njoints: 157
             nfeats: 1
             num_actions: 1
             translation: true
@@ -191,9 +191,9 @@ pl_trainer:
     precision: 16-mixed
     log_every_n_steps: 10
     gradient_clip_val: 0.5
-    max_epochs: 1000
-    check_val_every_n_epoch: 10
-    # val_check_interval: 1
+    max_epochs: 3000
+    # check_val_every_n_epoch: 10
+    val_check_interval: 1
     devices: 1
     strategy: ddp_find_unused_parameters_true
 

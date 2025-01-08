@@ -100,7 +100,7 @@ class MDMDenoiser(nn.Module):
                 # text = ["translate English to German: The house is wonderful."]
                 # encoded_text = self.encode_text(text)
 
-        self.output_process = OutputProcess(self.data_rep, self.input_feats + 9, self.latent_dim, self.njoints + 9,
+        self.output_process = OutputProcess(self.data_rep, self.input_feats + 3, self.latent_dim, self.njoints + 3,
                                             self.nfeats)
 
     def load_model_wo_llm(self, state_dict):
@@ -215,12 +215,13 @@ class MDMDenoiser(nn.Module):
         output = self.output_process(output)  # [bs, njoints, nfeats, nframes]
         output = output.squeeze(2).transpose(1, 2)  # [bs, nfeats, njoints, nframes]
 
-        pred_x = output[..., :-9]
-        static_conf_logits = output[..., -9:-3]
+        pred_x_start = output[..., :-3]
+        static_conf_logits = pred_x_start[..., :6]
+        pred_x = pred_x_start[..., 6:]
         pred_cam = output[..., -3:]
 
         return {
-            'pred_x_start': pred_x,
+            'pred_x_start': pred_x_start,
             "pred_x": pred_x,
             'static_conf_logits': static_conf_logits,
             'pred_cam': pred_cam,

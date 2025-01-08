@@ -280,10 +280,8 @@ class MDMBase(nn.Module):
         pmask = ~vis_mask  # (B, L)
 
         # 6 + 151
-        # motion = torch.cat([static_gt, target_x], dim=-1)
-        # clean_motion = torch.cat([static_gt, target_x], dim=-1)
-        motion = target_x.clone()
-        clean_motion = target_x.clone()
+        motion = torch.cat([static_gt, target_x], dim=-1)
+        clean_motion = torch.cat([static_gt, target_x], dim=-1)
         motion_mask = torch.zeros_like(motion)
         motion_mask = motion_mask * vis_mask[..., None]
 
@@ -351,8 +349,9 @@ class MDMBase(nn.Module):
         target_x_start = clean_motion
         pred_x_start = denoise_out["pred_x_start"]
 
-        static_conf_logits = denoise_out['static_conf_logits']
-        sample = pred_x_start
+        static_conf_logits = pred_x_start[:, :, self.s_pred_ind : self.s_pred_ind + 6]
+        assert pred_x_start.shape[-1] == self.s_pred_ind + 6 + 151
+        sample = pred_x_start[:, :, self.s_pred_ind + 6:]
         
         valid_loss_mask = torch.ones_like(pred_x_start)
         valid_loss_mask = valid_loss_mask * valid_mask[:, :, None]
@@ -541,6 +540,12 @@ class MDMBase(nn.Module):
                 raise NotImplementedError(f"Sampler {diff_sampler} not implemented")
                 # sample_fn = diffusion.p_sample_loop
                 # kwargs = {}
+                
+                
+            if inputs.get('eval_text_only', False):
+                noise = torch.randn_like(motion)
+            else:
+                noise = torch.zeros_like(motion)
 
             samples_out = sample_fn(
                 denoiser,
@@ -551,7 +556,7 @@ class MDMBase(nn.Module):
                 init_image=None,
                 progress=progress,
                 dump_steps=None,
-                noise=torch.zeros_like(motion),
+                noise=noise,
                 const_noise=False,
                 **kwargs,
             )
@@ -561,10 +566,10 @@ class MDMBase(nn.Module):
                 pred_cam_t_vel = samples_out["pred_cam_t_vel"]
             if 'cam_scale' in self.args.out_attr:
                 pred_cam_scale = samples_out["pred_cam_scale"]
-            samples = samples_out["pred_x"]
+            samples = samples_out["pred_xstart"]
 
-            static_conf_logits = samples_out['static_conf_logits']
-            sample = samples
+            static_conf_logits = samples[:, :, self.s_pred_ind:self.s_pred_ind + 6]
+            sample = samples[:, :, self.s_pred_ind + 6:]
 
         output = {
             "pred_x": sample,

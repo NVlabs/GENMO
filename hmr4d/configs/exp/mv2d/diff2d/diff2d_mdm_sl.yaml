@@ -91,13 +91,13 @@ pipeline:
         old_f_condition_masking: true
         vis_masking_f_cond: false
         weights:
-            cr_j3d: 500.
-            transl_c: 1.
-            cr_verts: 500.
-            j2d: 1000.
-            verts2d: 1000.
+            cr_j3d: 0.
+            transl_c: 0.
+            cr_verts: 0.
+            j2d: 0.
+            verts2d: 0.
 
-            j2d_train2d: 1000.
+            j2d_train2d: 0.
             # norm_j2d: 1000.
             train2d_skip_regression: false
 
@@ -138,7 +138,7 @@ network:
         denoiser:
             type: motiondiff.models.mdm.mdm_denoiser_t5.MDMDenoiser
             modeltype: ''
-            njoints: 151
+            njoints: 157
             nfeats: 1
             num_actions: 1
             translation: true
@@ -191,7 +191,7 @@ pl_trainer:
     precision: 16-mixed
     log_every_n_steps: 10
     gradient_clip_val: 0.5
-    max_epochs: 1000
+    max_epochs: 3000
     check_val_every_n_epoch: 10
     # val_check_interval: 1
     devices: 1

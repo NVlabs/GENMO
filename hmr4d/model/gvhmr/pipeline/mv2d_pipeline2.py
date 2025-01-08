@@ -178,6 +178,16 @@ class Pipeline(nn.Module):
         total_loss += simple_loss * self.weights.get("simple", 1.0)
         outputs["simple_loss"] = simple_loss
 
+        # 2. Extra loss
+        extra_funcs = [
+            compute_extra_incam_loss,
+            compute_extra_global_loss,
+        ]
+        for extra_func in extra_funcs:
+            extra_loss, extra_loss_dict = extra_func(inputs, outputs, self)
+            total_loss += extra_loss
+            outputs.update(extra_loss_dict)
+
         outputs["loss"] = total_loss
         return outputs
     
