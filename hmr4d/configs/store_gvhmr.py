@@ -2,7 +2,9 @@
 import hmr4d.dataset.pure_motion.amass
 import hmr4d.dataset.pure_motion.humanml3d
 import hmr4d.dataset.emdb.emdb_motion_test
+import hmr4d.dataset.emdb.emdb_occ_motion_test
 import hmr4d.dataset.rich.rich_motion_test
+import hmr4d.dataset.rich.rich_occ_motion_test
 import hmr4d.dataset.threedpw.threedpw_motion_test
 import hmr4d.dataset.threedpw.threedpw_motion_train
 import hmr4d.dataset.threedpw.threedpw_occ_motion_train

@@ -35,10 +35,11 @@ from hmr4d.model.gvhmr.utils.vis_utils import visualize_smpl_scene
 
 
 class MetricMocap(pl.Callback):
-    def __init__(self, vis_every_n_val=10):
+    def __init__(self, vis_every_n_val=10, occ=False):
         super().__init__()
         self.vis_every_n_val = vis_every_n_val
         self.num_val = 0
+        self.occ = occ
         # vid->result
         self.metric_aggregator = {
             "pa_mpjpe": {},
@@ -85,8 +86,10 @@ class MetricMocap(pl.Callback):
         """The behaviour is the same for val/test/predict"""
         assert batch["B"] == 1
         dataset_id = batch["meta"][0]["dataset_id"]
-        if dataset_id != "RICH":
+        if self.occ and dataset_id != "RICH-OCC":
             return
+        elif (not self.occ) and dataset_id != "RICH":
+                return
 
         # Move to cuda if not
         for g in ["male", "female", "neutral"]:
@@ -130,9 +133,11 @@ class MetricMocap(pl.Callback):
         
         # Visualize
         if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
-            visualize_smpl_scene('vis_rich_incam', batch_idx, vid, pred_cr_j3d, target_cr_j3d, pl_module.logger, transform_mode='local')
+            vis_type = 'vis_rich_occ_incam' if self.occ else 'vis_rich_incam'
+            visualize_smpl_scene(vis_type, batch_idx, vid, pred_cr_j3d, target_cr_j3d, pl_module.logger, transform_mode='local')
             if trainer.state.stage == "test":
-                visualize_smpl_scene('vis_rich_global', batch_idx, vid, pred_ay_j3d, target_ay_j3d, pl_module.logger, transform_mode='global')
+                vis_type = "vis_rich_occ_global" if self.occ else "vis_rich_global"
+                visualize_smpl_scene(vis_type, batch_idx, vid, pred_ay_j3d, target_ay_j3d, pl_module.logger, transform_mode='global')
 
         # Metric of current sequence
         batch_eval = {
@@ -384,13 +389,13 @@ class MetricMocap(pl.Callback):
         # average over all batches
         metrics_avg = {k: np.concatenate(list(v.values())).mean() for k, v in self.metric_aggregator.items()}
         if local_rank == 0:
-            Log.info(f"[Metrics] RICH:\n" + "\n".join(f"{k}: {v:.1f}" for k, v in metrics_avg.items()) + "\n------")
+            Log.info(f"[Metrics] RICH {'OCC' if self.occ else ''}:\n" + "\n".join(f"{k}: {v:.1f}" for k, v in metrics_avg.items()) + "\n------")
 
         # save to logger if available
         if pl_module.logger is not None:
             cur_epoch = pl_module.current_epoch
             for k, v in metrics_avg.items():
-                pl_module.logger.log_metrics({f"val_metric_RICH/{k}": v}, step=cur_epoch)
+                pl_module.logger.log_metrics({f"val_metric_RICH{'-OCC' if self.occ else ''}/{k}": v}, step=cur_epoch)
 
         # reset
         for k in self.metric_aggregator:
@@ -398,4 +403,6 @@ class MetricMocap(pl.Callback):
 
 
 rich_node = builds(MetricMocap)
+rich_occ_node = builds(MetricMocap, occ=True)
 MainStore.store(name="metric_rich", node=rich_node, group="callbacks", package="callbacks.metric_rich")
+MainStore.store(name="metric_rich_occ", node=rich_occ_node, group="callbacks", package="callbacks.metric_rich_occ")

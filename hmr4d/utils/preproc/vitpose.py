@@ -11,30 +11,35 @@ from hmr4d.utils.geo.flip_utils import flip_heatmap_coco17
 
 
 class VitPoseExtractor:
-    def __init__(self, tqdm_leave=True):
+    def __init__(self, device='cuda:0', tqdm_leave=True):
         ckpt_path = "inputs/checkpoints/vitpose/vitpose-h-multi-coco.pth"
         self.pose = build_model("ViTPose_huge_coco_256x192", ckpt_path)
-        self.pose.cuda().eval()
+        self.pose.to(device).eval()
+        self.device = device
 
         self.flip_test = True
         self.tqdm_leave = tqdm_leave
 
     @torch.no_grad()
-    def extract(self, video_path, bbx_xys, img_ds=0.5):
+    def extract(self, video_path, bbx_xys, img_ds=0.5, batch_size=16, path_type="video"):
         # Get the batch
-        if isinstance(video_path, str):
-            imgs, bbx_xys = get_batch(video_path, bbx_xys, img_ds=img_ds)
+        if isinstance(video_path, str) or isinstance(video_path, list):
+            imgs, bbx_xys = get_batch(video_path, bbx_xys, img_ds=img_ds, path_type=path_type)
         else:
             assert isinstance(video_path, torch.Tensor)
             imgs = video_path
 
+        imgs_dict = {img_ds: imgs}
         # Inference
         L, _, H, W = imgs.shape  # (L, 3, H, W)
-        batch_size = 16
         vitpose = []
-        for j in tqdm(range(0, L, batch_size), desc="ViTPose", leave=self.tqdm_leave):
+        if self.tqdm_leave:
+            bar = tqdm(range(0, L, batch_size), desc="ViTPose", leave=self.tqdm_leave)
+        else:
+            bar = range(0, L, batch_size)
+        for j in bar:
             # Heat map
-            imgs_batch = imgs[j : j + batch_size, :, :, 32:224].cuda()
+            imgs_batch = imgs[j : j + batch_size, :, :, 32:224].to(self.device)
             if self.flip_test:
                 heatmap, heatmap_flipped = self.pose(torch.cat([imgs_batch, imgs_batch.flip(3)], dim=0)).chunk(2)
                 heatmap_flipped = flip_heatmap_coco17(heatmap_flipped)
@@ -69,7 +74,7 @@ class VitPoseExtractor:
             vitpose.append(kp2d.detach().cpu().clone())
 
         vitpose = torch.cat(vitpose, dim=0).clone()  # (F, 17, 3)
-        return vitpose
+        return vitpose, imgs_dict
 
 
 def get_heatmap_preds(heatmap, normalize_keypoints=True, thr=0.0, soft=False):
