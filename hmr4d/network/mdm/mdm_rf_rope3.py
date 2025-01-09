@@ -373,6 +373,8 @@ class MDMBase(nn.Module):
         elif self.pred_mode == "z1_z0":
             pred_x_start_drift = denoise_out["pred_x_start"]
             pred_x_start = noise + pred_x_start_drift
+        elif self.pred_mode == "z1_abs":
+            pred_x_start = denoise_out["pred_x_start"]
 
         static_conf_logits = pred_x_start[:, :, self.s_pred_ind : self.s_pred_ind + 6]
         assert pred_x_start.shape[-1] == self.s_pred_ind + 6 + 151
@@ -484,6 +486,8 @@ class MDMBase(nn.Module):
         elif self.pred_mode == "z1_z0":
             pred_x_start_drift = denoise_out["pred_x_start"]
             pred_x_start = noise + pred_x_start_drift
+        elif self.pred_mode == "z1_abs":
+            pred_x_start = denoise_out["pred_x_start"]
 
         static_conf_logits = pred_x_start[:, :, self.s_pred_ind : self.s_pred_ind + 6]
         assert pred_x_start.shape[-1] == self.s_pred_ind + 6 + 151
@@ -573,7 +577,7 @@ class MDMBase(nn.Module):
                     drift_cam_scale = denoise_out["pred_cam_scale"]
                     pred_cam_scale_z1 = pred_cam_scale_z1 + drift_cam_scale * dt
 
-            else:
+            elif self.pred_mode == "z1" or self.pred_mode == "z1_z0":
                 drift = denoise_out["pred_x_start"]
                 # drift = (pred_z1 - zt) / (1 - vec_t[:, None, None])
 
@@ -584,6 +588,25 @@ class MDMBase(nn.Module):
 
                 if torch.isnan(zt).any():
                     import ipdb; ipdb.set_trace()
+
+                if "pred_cam" in self.args.out_attr:
+                    pred_cam = denoise_out["pred_cam"]
+                    torch.clamp_min_(pred_cam[..., 0], 0.25)
+                    drift_cam = (pred_cam - pred_cam_zt) / (1 - vec_t[:, None])
+                    pred_cam_zt = pred_cam_zt + drift_cam * dt
+
+                if "cam_t_vel" in self.args.out_attr:
+                    pred_cam_t_vel = denoise_out["pred_cam_t_vel"]
+                    drift_cam_t_vel = (pred_cam_t_vel - pred_cam_t_vel_z1) / (1 - vec_t[:, None])
+                    pred_cam_t_vel_z1 = pred_cam_t_vel_z1 + drift_cam_t_vel * dt
+                if 'cam_scale' in self.args.out_attr:
+                    pred_cam_scale = denoise_out["pred_cam_scale"]
+                    drift_cam_scale = (pred_cam_scale - pred_cam_scale_z1) / (1 - vec_t[:, None])
+                    pred_cam_scale_z1 = pred_cam_scale_z1 + drift_cam_scale * dt
+            elif self.pred_mode == "z1_abs":
+                pred_z1 = denoise_out["pred_x_start"]
+                drift = (pred_z1 - zt) / (1 - vec_t[:, None, None])
+                zt = zt + drift * dt
 
                 if "pred_cam" in self.args.out_attr:
                     pred_cam = denoise_out["pred_cam"]

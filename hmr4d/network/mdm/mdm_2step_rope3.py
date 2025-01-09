@@ -497,13 +497,18 @@ class MDMBase(nn.Module):
             x_t = motion.clone()
             x_t = motion * motion_mask
 
-            pred_x_start = self.denoiser(
+            out = self.denoiser(
                 x_t, self.train_diffusion._scale_timesteps(t), return_aux=False, **denoiser_kwargs
-            )['pred_x_start']
-            samples = pred_x_start
-            pred_cam = samples[:, :, self.s_pred_ind:self.s_pred_ind + 3]
-            static_conf_logits = samples[:, :, self.s_pred_ind + 3:self.s_pred_ind + 3 + 6]
-            sample = samples[:, :, -151:]
+            )
+            if "pred_cam" in self.args.out_attr:
+                pred_cam = out["pred_cam"]
+            if "cam_t_vel" in self.args.out_attr:
+                pred_cam_t_vel = out["pred_cam_t_vel"]
+            if "cam_scale" in self.args.out_attr:
+                pred_cam_scale = out["pred_cam_scale"]
+            samples = out["pred_x_start"]
+            static_conf_logits = samples[:, :, self.s_pred_ind:self.s_pred_ind + 6]
+            sample = samples[:, :, self.s_pred_ind + 6:]
 
         else:
             cond = {

@@ -8,11 +8,30 @@ import numpy as np
 
 from hmr4d.network.hmr2.utils.preproc import crop_and_resize, IMAGE_MEAN, IMAGE_STD
 from tqdm import tqdm
+import time
+from multiprocessing import Pool
+
+
+def read_image(path, scale=1.0):
+    img = cv2.imread(str(path))[..., ::-1]
+    img = cv2.resize(img, (0, 0), fx=scale, fy=scale)
+    return img
+
+def read_images_mp(image_paths, scale=1.0):
+    tic = time.time()
+    # with Pool() as pool:
+    #     imgs = pool.starmap(read_image, [(path, scale) for path in image_paths])
+    imgs = [read_image(path, scale) for path in image_paths]
+    toc = time.time()
+    print(f"read_images_mp: {toc - tic:.2f}s")
+    return np.stack(imgs)
 
 
 def get_batch(input_path, bbx_xys, img_ds=0.5, img_dst_size=256, path_type="video"):
     if path_type == "video":
         imgs = read_video_np(input_path, scale=img_ds)
+    elif path_type == "image_list":
+        imgs = read_images_mp(input_path, scale=img_ds)
     elif path_type == "image":
         imgs = cv2.imread(str(input_path))[..., ::-1]
         imgs = cv2.resize(imgs, (0, 0), fx=img_ds, fy=img_ds)
@@ -73,30 +92,41 @@ def get_batch_vimo(input_path, bbx_xys, img_ds=0.5, img_dst_size=256, path_type=
 
 
 class Extractor:
-    def __init__(self, tqdm_leave=True):
-        self.extractor: HMR2 = load_hmr2().cuda().eval()
+    def __init__(self, device='cuda:0', tqdm_leave=True):
+        self.extractor: HMR2 = load_hmr2().to(device).eval()
+        self.device = device
         self.tqdm_leave = tqdm_leave
 
-    def extract_video_features(self, video_path, bbx_xys, img_ds=0.5):
+    def extract_video_features(self, video_path, bbx_xys, img_ds=0.5, batch_size=16, path_type='video', imgs_dict=None, flip=False):
         """
         img_ds makes the image smaller, which is useful for faster processing
         """
-        # Get the batch
-        if isinstance(video_path, str):
-            imgs, bbx_xys = get_batch(video_path, bbx_xys, img_ds=img_ds)
+        if imgs_dict is not None and img_ds in imgs_dict:
+            imgs = imgs_dict[img_ds]
         else:
-            assert isinstance(video_path, torch.Tensor)
-            imgs = video_path
+            # Get the batch
+            if isinstance(video_path, str) or isinstance(video_path, list):
+                imgs, bbx_xys = get_batch(video_path, bbx_xys, img_ds=img_ds, path_type=path_type)
+            else:
+                assert isinstance(video_path, torch.Tensor)
+                imgs = video_path
 
         # Inference
         F, _, H, W = imgs.shape  # (F, 3, H, W)
-        imgs = imgs.cuda()
-        batch_size = 16  # 5GB GPU memory, occupies all CUDA cores of 3090
+        imgs = imgs.to(self.device)
+        # batch_size = 16  # 5GB GPU memory, occupies all CUDA cores of 3090
         features = []
-        for j in tqdm(range(0, F, batch_size), desc="HMR2 Feature", leave=self.tqdm_leave):
+        if self.tqdm_leave:
+            bar = tqdm(range(0, F, batch_size), desc="HMR2 Feature", leave=self.tqdm_leave)
+        else:
+            bar = range(0, F, batch_size)
+        # for j in tqdm(range(0, F, batch_size), desc="HMR2 Feature", leave=self.tqdm_leave):
+        for j in bar:
             imgs_batch = imgs[j : j + batch_size]
 
             with torch.no_grad():
+                if flip:
+                    imgs_batch = torch.flip(imgs_batch, dims=[3])
                 feature = self.extractor({"img": imgs_batch})
                 features.append(feature.detach().cpu())
 

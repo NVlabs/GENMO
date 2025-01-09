@@ -32,7 +32,7 @@ from hmr4d.model.gvhmr.utils.vis_utils import visualize_smpl_scene
 
 
 class MetricMocap(pl.Callback):
-    def __init__(self, emdb_split=1, vis_every_n_val=10):
+    def __init__(self, emdb_split=1, vis_every_n_val=10, occ=False):
         """
         Args:
             emdb_split: 1 to evaluate incam, 2 to evaluate global
@@ -40,9 +40,10 @@ class MetricMocap(pl.Callback):
         super().__init__()
         self.vis_every_n_val = vis_every_n_val
         self.num_val = 0
+        self.occ = occ
         # vid->result
         if emdb_split == 1:
-            self.target_dataset_id = "EMDB_1"
+            self.target_dataset_id = "EMDB_1" if not self.occ else "EMDB_1-OCC"
             self.metric_aggregator = {
                 "pa_mpjpe": {},
                 "mpjpe": {},
@@ -50,7 +51,7 @@ class MetricMocap(pl.Callback):
                 "accel": {},
             }
         elif emdb_split == 2:
-            self.target_dataset_id = "EMDB_2"
+            self.target_dataset_id = "EMDB_2" if not self.occ else "EMDB_2-OCC"
             self.metric_aggregator = {
                 "wa2_mpjpe": {},
                 "waa_mpjpe": {},
@@ -108,7 +109,7 @@ class MetricMocap(pl.Callback):
         target_cr_j3d = target_c_j3d - offset
 
         # + Prediction -> Metric
-        if self.target_dataset_id == "EMDB_1":  # in camera metrics
+        if self.target_dataset_id in ["EMDB_1", "EMDB_1-OCC"]:  # in camera metrics
             # 1. cam
             pred_smpl_params_incam = outputs["pred_smpl_params_incam"]
             smpl_out = self.smplx(**pred_smpl_params_incam)
@@ -119,7 +120,8 @@ class MetricMocap(pl.Callback):
             del smpl_out  # Prevent OOM
             
             if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
-                visualize_smpl_scene('vis_emdb1_incam', batch_idx, vid, pred_cr_j3d, target_cr_j3d, pl_module.logger, transform_mode='local')
+                vis_type = 'vis_emdb1_incam' if not self.occ else 'vis_emdb1_occ_incam'
+                visualize_smpl_scene(vis_type, batch_idx, vid, pred_cr_j3d, target_cr_j3d, pl_module.logger, transform_mode='local')
             
             batch_eval = {
                 "pred_j3d": pred_c_j3d,
@@ -131,7 +133,7 @@ class MetricMocap(pl.Callback):
             for k in camcoord_metrics:
                 self.metric_aggregator[k][vid] = as_np_array(camcoord_metrics[k])
 
-        elif self.target_dataset_id == "EMDB_2":  # global metrics
+        elif self.target_dataset_id in ["EMDB_2", "EMDB_2-OCC"]:  # global metrics
             # 2. global (align-y axis)
             pred_smpl_params_global = outputs["pred_smpl_params_global"]
             smpl_out = self.smplx(**pred_smpl_params_global)
@@ -140,7 +142,8 @@ class MetricMocap(pl.Callback):
             del smpl_out  # Prevent OOM
             
             if trainer.state.stage == "test" and trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
-                visualize_smpl_scene('vis_emdb2_global', batch_idx, vid, pred_ay_j3d, target_w_j3d, pl_module.logger, transform_mode='global')
+                vis_type = 'vis_emdb2_global' if not self.occ else 'vis_emdb2_occ_global'
+                visualize_smpl_scene(vis_type, batch_idx, vid, pred_ay_j3d, target_w_j3d, pl_module.logger, transform_mode='global')
 
             batch_eval = {
                 "pred_j3d_glob": pred_ay_j3d,
@@ -335,5 +338,9 @@ class MetricMocap(pl.Callback):
 
 emdb1_node = builds(MetricMocap, emdb_split=1)
 emdb2_node = builds(MetricMocap, emdb_split=2)
+emdb1_occ_node = builds(MetricMocap, emdb_split=1, occ=True)
+emdb2_occ_node = builds(MetricMocap, emdb_split=2, occ=True)
 MainStore.store(name="metric_emdb1", node=emdb1_node, group="callbacks", package="callbacks.metric_emdb1")
 MainStore.store(name="metric_emdb2", node=emdb2_node, group="callbacks", package="callbacks.metric_emdb2")
+MainStore.store(name="metric_emdb1_occ", node=emdb1_occ_node, group="callbacks", package="callbacks.metric_emdb1_occ")
+MainStore.store(name="metric_emdb2_occ", node=emdb2_occ_node, group="callbacks", package="callbacks.metric_emdb2_occ")

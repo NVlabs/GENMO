@@ -25,6 +25,7 @@ def collate_fn(batch):
     keys = set(batch[0].keys())
     keys.add("caption")
     keys.add("text_embed")
+    keys.add("use_det_kp")
     for k in keys:
         if k.startswith("meta"):  # data information, do not batch
             return_dict[k] = [d[k] for d in batch]
@@ -32,6 +33,8 @@ def collate_fn(batch):
             return_dict[k] = [d[k] if k in d else "" for d in batch]
         elif k == "text_embed":
             return_dict[k] = torch.stack([d[k] if k in d else torch.zeros(50, 1024) for d in batch])
+        elif k == 'use_det_kp':
+            return_dict[k] = default_collate([d[k] if k in d else torch.zeros(d["K_fullimg"].shape[0]) for d in batch])
         else:
             return_dict[k] = default_collate([d[k] for d in batch])
     return_dict["B"] = len(batch)

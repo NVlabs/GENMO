@@ -136,6 +136,7 @@ class ThreedpwOccSmplDataset(ImgfeatMotionDatasetBase):
                 "f_imgseq": True,
                 "spv_incam_only": True,
             },
+            'use_det_kp': torch.ones(length),     # default: False
         }
 
         if False:  # Debug, render incam
@@ -173,6 +174,7 @@ class ThreedpwOccSmplDataset(ImgfeatMotionDatasetBase):
         return_data["cam_tvel"] = repeat_to_max_len(return_data["cam_tvel"], max_len)
         return_data["noisy_cam_tvel"] = repeat_to_max_len(return_data["noisy_cam_tvel"], max_len)
         return_data["T_w2c"] = repeat_to_max_len(return_data["T_w2c"], max_len)
+        return_data["use_det_kp"] = repeat_to_max_len(return_data["use_det_kp"], max_len)
 
         return return_data
 
