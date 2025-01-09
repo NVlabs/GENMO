@@ -301,10 +301,6 @@ class MDMBase(nn.Module):
     def get_diffusion_pred_target(self, batch, target_x, static_gt, mode):
         diffusion = self.train_diffusion if self.training else self.test_diffusion
 
-        outputs = dict()
-        f_condition = batch["f_condition"]
-        clean_f_condition = batch["clean_f_condition"]
-        f_condition_valid_mask = batch["f_condition_valid_mask"]
         length = batch["length"]
 
         f_cond, motion, motion_mask, clean_motion = self.generate_motion_rep(
@@ -369,12 +365,10 @@ class MDMBase(nn.Module):
         pred_x_start = denoise_out["pred_x_start"]
 
         static_conf_logits = pred_x_start[:, :, self.s_pred_ind : self.s_pred_ind + 6]
-        assert pred_x_start.shape[-1] == self.s_pred_ind + 6 + 151
+        # assert pred_x_start.shape[-1] == self.s_pred_ind + 6 + 151
         sample = pred_x_start[:, :, self.s_pred_ind + 6:]
         
         valid_loss_mask = torch.ones_like(pred_x_start)
-        valid_loss_mask[batch["mask"]["spv_incam_only"], :, -9:] *= 0
-        valid_loss_mask[batch["mask"]["spv_incam_only"], :, self.s_pred_ind :self.s_pred_ind + 6] *= 0
         valid_loss_mask = valid_loss_mask * valid_mask[:, :, None]
         
         output = {
@@ -488,10 +482,16 @@ class MDMBase(nn.Module):
         regression_only = self.args.get('regression_only', False)
 
         f_condition = inputs["f_condition"]
+        # L = 240
+        # length[0] = L
+        # for k in f_condition:
+        #     f_condition[k] = torch.cat([f_condition[k], f_condition[k][:, [-1]].repeat_interleave(L-f_condition[k].shape[1], dim=1)], dim=1)
+        
         cliff_cam = f_condition["f_cliffcam"]
         B, L = cliff_cam.shape[:2]
 
-        target_x = torch.zeros(B, L, 151).to(cliff_cam)
+        mdim = self.endecoder.get_motion_dim()
+        target_x = torch.zeros(B, L, mdim).to(cliff_cam)
         static_gt = torch.zeros(B, L, 6).to(cliff_cam)
         f_cond, motion, motion_mask, clean_motion = self.generate_motion_rep(
             inputs, target_x, static_gt
@@ -561,6 +561,12 @@ class MDMBase(nn.Module):
                 raise NotImplementedError(f"Sampler {diff_sampler} not implemented")
                 # sample_fn = diffusion.p_sample_loop
                 # kwargs = {}
+                
+                
+            if inputs.get('eval_text_only', False):
+                noise = torch.randn_like(motion)
+            else:
+                noise = torch.zeros_like(motion)
 
             samples_out = sample_fn(
                 denoiser,
@@ -571,7 +577,7 @@ class MDMBase(nn.Module):
                 init_image=None,
                 progress=progress,
                 dump_steps=None,
-                noise=torch.zeros_like(motion),
+                noise=noise,
                 const_noise=False,
                 **kwargs,
             )
@@ -585,6 +591,8 @@ class MDMBase(nn.Module):
 
             static_conf_logits = samples[:, :, self.s_pred_ind:self.s_pred_ind + 6]
             sample = samples[:, :, self.s_pred_ind + 6:]
+            # sample = inputs['gt']
+            # static_conf_logits = inputs['static_gt']
 
         output = {
             "pred_x": sample,

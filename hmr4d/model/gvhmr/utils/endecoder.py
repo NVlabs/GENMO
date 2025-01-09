@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 from motiondiff.models.mdm.rotation_conversions import (
     rotation_6d_to_matrix,
     matrix_to_axis_angle,
@@ -13,12 +14,15 @@ from hmr4d.utils.geo.augment_noisy_pose import gaussian_augment
 import hmr4d.utils.matrix as matrix
 from hmr4d.utils.pylogger import Log
 from hmr4d.utils.geo.hmr_global import get_local_transl_vel, rollout_local_transl_vel
+from hmr4d.utils.geo.quaternion import qinv_np, quaternion_to_cont6d, cont6d_to_matrix
 from hmr4d.utils.smplx_utils import make_smplx
 from . import stats_compose
 
+from motiondiff.utils.torch_transform import angle_axis_to_quaternion, quaternion_to_angle_axis, quat_mul, quat_conjugate, get_y_heading_q, quat_apply
+
 
 class EnDecoder(nn.Module):
-    def __init__(self, stats_name="DEFAULT_01", noise_pose_k=10, clip_std=False):
+    def __init__(self, stats_name="DEFAULT_01", encode_type='gvhmr', noise_pose_k=10, clip_std=False):
         super().__init__()
         # Load mean, std
         stats = getattr(stats_compose, stats_name)
@@ -31,6 +35,7 @@ class EnDecoder(nn.Module):
 
         # option
         self.noise_pose_k = noise_pose_k
+        self.encode_type = encode_type
 
         # smpl
         self.smplx_model = make_smplx("supermotion_v437coco17")
@@ -101,8 +106,72 @@ class EnDecoder(nn.Module):
         local_skeleton = skeleton - skeleton[:, :, self.parents_tensor]
         local_skeleton = torch.cat([skeleton[:, :, :1], local_skeleton[:, :, 1:]], dim=2)
         return local_skeleton
-
+    
     def encode(self, inputs):
+        if self.encode_type == 'gvhmr':
+            return self.encode_gvhmr(inputs)
+        elif self.encode_type == 'humanml3d':
+            return self.encode_humanml3d(inputs)
+        
+    def encode_humanml3d(self, inputs):
+        """
+        definition: {
+                body_pose_r6d,  # (B, L, (J-1)*6) -> 0:126
+                betas, # (B, L, 10) -> 126:136
+                root_data,  # (B, L, 10) -> 136:143
+            }
+        """
+        B, L = inputs["smpl_params_w"]["body_pose"].shape[:2]
+        # cam
+        smpl_params_w = inputs["smpl_params_w"]
+        body_pose = smpl_params_w["body_pose"].reshape(B, L, 21, 3)
+        body_pose_r6d = matrix_to_rotation_6d(axis_angle_to_matrix(body_pose)).flatten(-2)
+        betas = smpl_params_w["betas"]
+        global_orient = smpl_params_w["global_orient"]
+        trans = smpl_params_w["transl"].clone()
+        
+        root_quat = angle_axis_to_quaternion(global_orient)
+        heading_quat = get_y_heading_q(root_quat)
+        heading_quat_inv = quat_conjugate(heading_quat)
+        root_quat_wo_heading = quat_mul(heading_quat_inv, root_quat)
+        # root_quat_wo_heading = quaternion_to_cont6d(root_quat_wo_heading)
+        root_quat_wo_heading = quaternion_to_angle_axis(root_quat_wo_heading)
+        
+        init_heading_quat_inv = heading_quat_inv[:, [0]].repeat(1, L, 1)
+        
+        '''XZ at origin'''
+        root_y = trans[..., [1]]
+        root_pos_init = trans[:, [0]]
+        root_pose_init_xz = root_pos_init * torch.tensor([1, 0, 1]).to(root_pos_init)
+        trans = trans - root_pose_init_xz
+        
+        '''All initially face Z+'''
+        trans = quat_apply(init_heading_quat_inv, trans)
+        heading_quat = quat_mul(heading_quat, init_heading_quat_inv)  # normalize heading coordiante, so the heading is 0 for the first frame
+        heading_quat_inv = quat_conjugate(heading_quat)
+        
+        '''Root Linear Velocity'''
+        # (seq_len - 1, 3)
+        velocity = trans[:, 1:] - trans[:, :-1]
+        velocity = torch.cat([velocity, velocity[:, [-1]]], axis=1)
+        #     print(r_rot.shape, velocity.shape)
+        velocity = quat_apply(heading_quat_inv, velocity)
+        l_velocity = velocity[..., [0, 2]]
+        '''Root Angular Velocity'''
+        # (seq_len - 1, 4)
+        r_angles = torch.arctan2(heading_quat[..., 2:3], heading_quat[..., :1]) * 2
+        r_velocity = r_angles[:, 1:] - r_angles[:, :-1]
+        r_velocity[r_velocity > np.pi] -= 2 * np.pi
+        r_velocity[r_velocity < -np.pi] += 2 * np.pi
+        r_velocity = torch.cat([r_velocity, r_velocity[:, [-1]]], axis=1)
+        
+        root_data = torch.cat([r_velocity, l_velocity, root_y, root_quat_wo_heading], axis=-1)
+    
+        x = torch.cat([body_pose_r6d, betas, root_data], dim=-1)
+        x_norm = (x - self.mean) / self.std
+        return x_norm
+
+    def encode_gvhmr(self, inputs):
         """
         definition: {
                 body_pose_r6d,  # (B, L, (J-1)*6) -> 0:126
@@ -162,6 +231,58 @@ class EnDecoder(nn.Module):
         return x_norm * self.std[-3:] + self.mean[-3:]
 
     def decode(self, x_norm):
+        if self.encode_type == 'gvhmr':
+            return self.decode_gvhmr(x_norm)
+        elif self.encode_type == 'humanml3d':
+            return self.decode_humanml3d(x_norm)
+        
+    def decode_humanml3d(self, x_norm):
+        """x_norm: (B, L, C)"""
+        B, L, C = x_norm.shape
+        x = (x_norm * self.std) + self.mean
+        # x = x_norm
+
+        body_pose_r6d = x[:, :, :126]
+        betas = x[:, :, 126:136]
+        root_data = x[:, :, 136:143]
+        
+        body_pose = matrix_to_axis_angle(rotation_6d_to_matrix(body_pose_r6d.reshape(B, L, -1, 6)))
+        body_pose = body_pose.flatten(-2)
+        offset = self.smplx_model.get_skeleton(betas)[:, :, 0]
+        
+        rot_vel = root_data[..., 0]
+        r_rot_ang = torch.zeros_like(rot_vel).to(root_data.device)
+        '''Get Y-axis rotation from rotation velocity'''
+        r_rot_ang[..., 1:] = rot_vel[..., :-1]
+        r_rot_ang = torch.cumsum(r_rot_ang, dim=-1)
+        r_rot_quat = torch.zeros(root_data.shape[:-1] + (4,)).to(root_data)
+        r_rot_quat[..., 0] = torch.cos(r_rot_ang / 2)
+        r_rot_quat[..., 2] = torch.sin(r_rot_ang / 2)
+
+        r_pos = torch.zeros(root_data.shape[:-1] + (3,)).to(root_data)
+        r_pos[..., 1:, [0, 2]] = root_data[..., :-1, 1:3]
+        '''Add Y-axis rotation to root position'''
+        r_pos = quat_apply(r_rot_quat, r_pos)
+        r_pos = torch.cumsum(r_pos, dim=-2)
+        r_pos[..., 1] = root_data[..., 3]
+        # return r_rot_quat, r_pos, r_rot_ang
+        # root_rot_wo_heading = rotation_6d_to_matrix(root_data[..., 4:])
+        # root_rot_wo_heading = cont6d_to_matrix(root_data[..., 4:])
+        # root_rot = quaternion_to_matrix(r_rot_quat) @ root_rot_wo_heading
+        # global_orient_w = matrix_to_axis_angle(root_rot)
+        global_orient_w = quaternion_to_angle_axis(quat_mul(r_rot_quat, angle_axis_to_quaternion(root_data[..., 4:])))
+        
+        output = {
+            "body_pose": body_pose,
+            "betas": betas,
+            "global_orient_w": global_orient_w,
+            "transl_w": r_pos,
+            "offset": offset
+        }
+
+        return output
+
+    def decode_gvhmr(self, x_norm):
         """x_norm: (B, L, C)"""
         B, L, C = x_norm.shape
         x = (x_norm * self.std) + self.mean
@@ -188,6 +309,12 @@ class EnDecoder(nn.Module):
         }
 
         return output
+    
+    def get_motion_dim(self):
+        if self.encode_type == 'gvhmr':
+            return 151
+        elif self.encode_type == 'humanml3d':
+            return 143
 
 
 group_name = "endecoder/gvhmr"
@@ -197,6 +324,11 @@ MainStore.store(name="v1", node=cfg_base(stats_name="MM_V1"), group=group_name)
 MainStore.store(
     name="v1_amass_local_bedlam_cam",
     node=cfg_base(stats_name="MM_V1_AMASS_LOCAL_BEDLAM_CAM"),
+    group=group_name,
+)
+MainStore.store(
+    name="v2_humanml3d",
+    node=cfg_base(stats_name="HUMANML3D_V2", encode_type='humanml3d'),
     group=group_name,
 )
 MainStore.store(

@@ -34,6 +34,7 @@ class NetworkEncoderRoPE(nn.Module):
         self,
         # x
         output_dim=151,
+        xt_dim = 157,
         max_len=120,
         # condition
         cliffcam_dim=3,
@@ -137,7 +138,6 @@ class NetworkEncoderRoPE(nn.Module):
         if self.static_conf_head:
             self.static_conf_head = Mlp(self.latent_dim, out_features=static_conf_dim)
             
-        xt_dim = 157
         if self.input_remove_static_conf:
             xt_dim -= 6
         if self.input_remove_global:
