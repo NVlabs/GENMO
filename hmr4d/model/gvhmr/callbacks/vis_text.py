@@ -80,12 +80,16 @@ class VisText(pl.Callback):
         # Groundtruth (world, cam)
         target_w_params = {k: v[0] for k, v in batch["smpl_params_w"].items()}
         target_w_j3d = self.smplx_model[gender](**target_w_params)
+        offset = batch["smpl_params_w"]["transl"][0, :, None] - target_w_j3d[:, [0]]
+        target_w_j3d = target_w_j3d + offset
         # target_w_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in target_w_output.vertices])
         # target_w_j3d = torch.matmul(self.J_regressor, target_w_verts)
 
         # 2. ay
         pred_smpl_params_global = outputs["pred_smpl_params_global"]
         pred_ay_j3d = self.smplx_model["neutral"](**pred_smpl_params_global)
+        offset = pred_smpl_params_global["transl"][:, None] - pred_ay_j3d[:, [0]]
+        pred_ay_j3d = pred_ay_j3d + offset
         # pred_ay_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in smpl_out.vertices])
         # pred_ay_j3d = einsum(self.J_regressor, pred_ay_verts, "j v, l v i -> l j i")
         

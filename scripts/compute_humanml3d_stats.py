@@ -11,7 +11,7 @@ torch.autograd.set_grad_enabled(False)
 
 dataset = Humanml3dDataset(cam_augmentation="v11")
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=64, shuffle=False, num_workers=8, collate_fn=collate_fn)
-encoder = EnDecoder(stats_name='DEFAULT_01').cuda()
+encoder = EnDecoder(stats_name='DEFAULT_01', encode_type='humanml3d').cuda()
 
 
 count = 0

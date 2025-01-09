@@ -91,13 +91,13 @@ pipeline:
         old_f_condition_masking: true
         vis_masking_f_cond: false
         weights:
-            cr_j3d: 500.
-            transl_c: 1.
-            cr_verts: 500.
-            j2d: 1000.
-            verts2d: 1000.
+            cr_j3d: 0.
+            transl_c: 0.
+            cr_verts: 0.
+            j2d: 0.
+            verts2d: 0.
 
-            j2d_train2d: 1000.
+            j2d_train2d: 0.
             # norm_j2d: 1000.
             train2d_skip_regression: false
 

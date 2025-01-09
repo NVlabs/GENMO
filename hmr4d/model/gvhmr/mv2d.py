@@ -26,6 +26,7 @@ from hmr4d.utils.video_io_utils import save_video
 from hmr4d.utils.vis.cv2_utils import draw_bbx_xys_on_image_batch
 from hmr4d.utils.geo.flip_utils import flip_smplx_params, avg_smplx_aa
 from hmr4d.model.gvhmr.utils.postprocess import pp_static_joint, pp_static_joint_cam, process_ik
+from hmr4d.utils.geo.hmr_global import rollout_vel, get_static_joint_mask
 from motiondiff.utils.torch_transform import angle_axis_to_rotation_matrix, make_transform, transform_trans, inverse_transform
 from motiondiff.utils.tools import Timer
 from motiondiff.utils.torch_utils import interp_tensor_with_scipy
@@ -721,13 +722,24 @@ class MV2D(pl.LightningModule):
             "f_imgseq": batch["f_imgseq"],
             "eval_text_only" : eval_text_only
         }
+        
+        batch_['gt'] = self.pipeline.endecoder.encode(batch)
+        vel_thr = self.pipeline.args.static_conf.vel_thr
+        assert vel_thr > 0
+        joint_ids = [7, 10, 8, 11, 20, 21]  # [L_Ankle, L_foot, R_Ankle, R_foot, L_wrist, R_wrist]
+        gt_w_j3d = self.pipeline.endecoder.fk_v2(**batch["smpl_params_w"])  # (B, L, J=22, 3)
+        static_gt = get_static_joint_mask(gt_w_j3d, vel_thr=vel_thr, repeat_last=True)  # (B, L, J)
+        static_gt = static_gt[:, :, joint_ids].float()  # (B, L, J')
+        batch_['static_gt'] = static_gt
+        
         if 'text_embed' in batch:
             batch_['encoded_text'] = batch['text_embed'].cuda()
         elif self.use_text_encoder:
             batch_['encoded_text'] = self.encode_text(batch['caption'], batch['has_text'])
         outputs = self.pipeline.forward(batch_, train=False, postproc=do_postproc_not_flip_test, global_step=self.trainer.global_step)
         outputs["pred_smpl_params_global"] = {k: v[0] for k, v in outputs["pred_smpl_params_global"].items()}
-        outputs["pred_smpl_params_incam"] = {k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()}
+        if 'pred_smpl_params_incam' in outputs:
+            outputs["pred_smpl_params_incam"] = {k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()}
         outputs['eval_text_only'] = eval_text_only
 
         if do_flip_test:

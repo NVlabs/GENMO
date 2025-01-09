@@ -115,7 +115,8 @@ class Pipeline(nn.Module):
                 else:
                     f_condition_valid_mask[k] = torch.rand(f_condition[k].shape[:2], device=f_condition[k].device) > -1
 
-        if inputs.get('eval_text_only', False):
+        eval_text_only = inputs.get('eval_text_only', False)
+        if eval_text_only:
             for k in f_condition.keys():
                 f_condition[k] = torch.zeros_like(f_condition[k])
         
@@ -129,27 +130,39 @@ class Pipeline(nn.Module):
         outputs.update({"model_output": model_output, "decode_dict": decode_dict})
 
         # Post-processing
-        outputs["pred_smpl_params_incam"] = {
-            "body_pose": decode_dict["body_pose"],  # (B, L, 63)
-            "betas": decode_dict["betas"],  # (B, L, 10)
-            "global_orient": decode_dict["global_orient"],  # (B, L, 3)
-            "transl": compute_transl_full_cam(model_output["pred_cam"], inputs["bbx_xys"], inputs["K_fullimg"]),
-        }
-        if not train:
-            pred_smpl_params_global = get_smpl_params_w_Rt_v2(  # This function has for-loop
-                global_orient_gv=decode_dict["global_orient_gv"],
-                local_transl_vel=decode_dict["local_transl_vel"],
-                global_orient_c=decode_dict["global_orient"],
-                cam_angvel=inputs["cam_angvel"],
-            )
-            outputs["pred_smpl_params_global"] = {
-                "body_pose": decode_dict["body_pose"],
-                "betas": decode_dict["betas"],
-                **pred_smpl_params_global,
+        if self.endecoder.encode_type == 'gvhmr':
+            outputs["pred_smpl_params_incam"] = {
+                "body_pose": decode_dict["body_pose"],  # (B, L, 63)
+                "betas": decode_dict["betas"],  # (B, L, 10)
+                "global_orient": decode_dict["global_orient"],  # (B, L, 3)
+                "transl": compute_transl_full_cam(model_output["pred_cam"], inputs["bbx_xys"], inputs["K_fullimg"]),
             }
+        
+        if not train:
+            # if eval_text_only:
+            #     inputs["cam_angvel"] = torch.zeros(decode_dict["global_orient_gv"].shape[:2] + (6,), device=decode_dict["global_orient_gv"].device)
+            if self.endecoder.encode_type == 'gvhmr':
+                pred_smpl_params_global = get_smpl_params_w_Rt_v2(  # This function has for-loop
+                    global_orient_gv=decode_dict["global_orient_gv"],
+                    local_transl_vel=decode_dict["local_transl_vel"],
+                    global_orient_c=decode_dict["global_orient"],
+                    cam_angvel=inputs["cam_angvel"],
+                )
+                outputs["pred_smpl_params_global"] = {
+                    "body_pose": decode_dict["body_pose"],
+                    "betas": decode_dict["betas"],
+                    **pred_smpl_params_global,
+                }
+            else:
+                outputs["pred_smpl_params_global"] = {
+                    "body_pose": decode_dict["body_pose"],
+                    "betas": decode_dict["betas"],
+                    "global_orient": decode_dict["global_orient_w"],
+                    "transl": decode_dict["transl_w"],
+                }
             outputs["static_conf_logits"] = model_output["static_conf_logits"]
 
-            if postproc:  # apply post-processing
+            if postproc and self.endecoder.encode_type == 'gvhmr':  # apply post-processing
                 if static_cam:  # extra post-processing to utilize static camera prior
                     outputs["pred_smpl_params_global"]["transl"] = pp_static_joint_cam(outputs, self.endecoder)
                 else:
@@ -173,20 +186,21 @@ class Pipeline(nn.Module):
         mask_simple[inputs["mask"]["spv_incam_only"], :, 142:] = False  # 3dpw training
         if self.weights.get('simple_loss_local_only', False):
             mask_simple[..., 142:] = False
-        valid_loss_mask = model_output["valid_loss_mask"][:, :, -151:]  # (B, L, C)
+        valid_loss_mask = model_output["valid_loss_mask"][:, :, 6:]  # (B, L, C)
         simple_loss = (simple_loss * mask_simple * valid_loss_mask).mean()
         total_loss += simple_loss * self.weights.get("simple", 1.0)
         outputs["simple_loss"] = simple_loss
 
         # 2. Extra loss
-        extra_funcs = [
-            compute_extra_incam_loss,
-            compute_extra_global_loss,
-        ]
-        for extra_func in extra_funcs:
-            extra_loss, extra_loss_dict = extra_func(inputs, outputs, self)
-            total_loss += extra_loss
-            outputs.update(extra_loss_dict)
+        if self.endecoder.encode_type == 'gvhmr':
+            extra_funcs = [
+                compute_extra_incam_loss,
+                compute_extra_global_loss,
+            ]
+            for extra_func in extra_funcs:
+                extra_loss, extra_loss_dict = extra_func(inputs, outputs, self)
+                total_loss += extra_loss
+                outputs.update(extra_loss_dict)
 
         outputs["loss"] = total_loss
         return outputs
