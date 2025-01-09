@@ -16,9 +16,10 @@ from motiondiff.utils.tools import are_arrays_equal
 class MDMDenoiser(nn.Module):
     def __init__(self, pl_module, modeltype, njoints, nfeats, num_actions, translation, pose_rep, glob, glob_rot,
                  latent_dim=256, ff_size=1024, num_layers=8, num_heads=4, dropout=0.1,
-                 activation="gelu", padding_mask=False, legacy=False, data_rep='rot', dataset='amass', llm_dim=512, max_text_len=20,
-                 arch='trans_enc', emb_trans_dec=False, add_x_to_memory=False, autoregressive=False, llm_type="t5", llm_version="t5-small", text_enc_mode='mean',
-                 use_motion_mask=False, obs_motion_constraints='hard', use_obs_diff=False, **kargs):
+                 ablation=None, activation="gelu", padding_mask=False, legacy=False, data_rep='rot', dataset='amass', llm_dim=512, max_text_len=20,
+                 arch='trans_enc', emb_trans_dec=False, add_x_to_memory=False, autoregressive=False, llm_type="t5", llm_version="t5-small", text_enc_mode='mean', pretrained_checkpoint=None, 
+                 use_precomp_text_embed=False, llm_embed_lmdb_path=None, use_motion_mask=False, obs_motion_constraints='hard', use_obs_diff=False, use_global_constraints=False, 
+                 global_feat_type=['g_motion_l_joints', 'l_joints_diff', 'global_joint_mask'], **kargs):
         super().__init__()
 
         self.ext_models = dict()
@@ -45,6 +46,7 @@ class MDMDenoiser(nn.Module):
         self.dropout = dropout
         self.padding_mask = padding_mask
 
+        self.ablation = ablation
         self.activation = activation
         self.llm_dim = llm_dim
         self.max_text_len = max_text_len
@@ -60,10 +62,15 @@ class MDMDenoiser(nn.Module):
         self.arch = arch
         self.gru_emb_dim = self.latent_dim if self.arch == 'gru' else 0
         self.use_motion_mask = use_motion_mask
+        self.use_global_constraints = use_global_constraints
+        self.global_feat_type = global_feat_type
 
         input_dim = (self.input_feats * 2 if use_motion_mask else self.input_feats) + self.gru_emb_dim
         if use_obs_diff:
             input_dim += 67
+        if use_global_constraints:
+            self.global_feat_dims = 66 * len(global_feat_type)
+            input_dim += self.global_feat_dims
         self.input_process = InputProcess(self.data_rep, input_dim, self.latent_dim)
 
         self.sequence_pos_encoder = PositionalEncoding(self.latent_dim, self.dropout)
@@ -72,6 +79,12 @@ class MDMDenoiser(nn.Module):
         self.autoregressive = autoregressive
         self.last_text = None
         self.last_encoded_text = None
+        self.use_precomp_text_embed = use_precomp_text_embed
+        self.llm_embed_lmdb_path = llm_embed_lmdb_path
+        if self.use_precomp_text_embed:
+            self.env = lmdb.open(self.llm_embed_lmdb_path, readonly=True)
+            self.txn = self.env.begin()
+            atexit.register(self.cleanup)
         self.obs_motion_constraints = obs_motion_constraints
         self.use_obs_diff = use_obs_diff
         
@@ -86,6 +99,20 @@ class MDMDenoiser(nn.Module):
 
             self.seqTransEncoder = nn.TransformerEncoder(seqTransEncoderLayer,
                                                          num_layers=self.num_layers)
+        elif self.arch == 'trans_dec':
+            print("TRANS_DEC init")
+            seqTransDecoderLayer = nn.TransformerDecoderLayer(d_model=self.latent_dim,
+                                                              nhead=self.num_heads,
+                                                              dim_feedforward=self.ff_size,
+                                                              dropout=self.dropout,
+                                                              activation=activation)
+            self.seqTransDecoder = nn.TransformerDecoder(seqTransDecoderLayer,
+                                                         num_layers=self.num_layers)
+        elif self.arch == 'gru':
+            print("GRU init")
+            self.gru = nn.GRU(self.latent_dim, self.latent_dim, num_layers=self.num_layers, batch_first=True)
+        else:
+            raise ValueError('Please choose correct architecture [trans_enc, trans_dec, gru]')
 
         self.embed_timestep = TimestepEmbedder(self.latent_dim, self.sequence_pos_encoder)
 
@@ -99,9 +126,29 @@ class MDMDenoiser(nn.Module):
                 self.ext_models['llm'], self.tokenizer = self.load_and_freeze_llm(llm_version)
                 # text = ["translate English to German: The house is wonderful."]
                 # encoded_text = self.encode_text(text)
+            if 'action' in self.cond_mode:
+                if self.action_emb == 'scalar':
+                    self.embed_action = EmbedActionScalar(in_features=1, out_features=self.latent_dim,
+                                                          activation=self.activation)
+                elif self.action_emb == 'tensor':
+                    self.embed_action = EmbedActionTensor(self.num_actions, self.latent_dim)
+                else:
+                    raise Exception(f'Unknown action embedding {self.action_emb}.')
+                print('EMBED ACTION')
 
-        self.output_process = OutputProcess(self.data_rep, self.input_feats + 3, self.latent_dim, self.njoints + 3,
+        self.output_process = OutputProcess(self.data_rep, self.input_feats, self.latent_dim, self.njoints,
                                             self.nfeats)
+
+        self.rot2xyz = Rotation2xyz(dataset=self.dataset)
+        if pretrained_checkpoint is not None:
+            state_dict = torch.load(pretrained_checkpoint, map_location='cpu')
+            if 'state_dict' in state_dict.keys():
+                state_dict = state_dict['state_dict']
+            self.load_model_wo_llm(state_dict)
+
+    def cleanup(self):
+        if self.use_precomp_text_embed:
+            self.env.close()
 
     def load_model_wo_llm(self, state_dict):
         missing_keys, unexpected_keys = self.load_state_dict(state_dict, strict=False)
@@ -139,6 +186,20 @@ class MDMDenoiser(nn.Module):
         if are_arrays_equal(raw_text, self.last_text):
             return self.last_encoded_text
         
+        try:
+            if self.use_precomp_text_embed:
+                encoded_text = []
+                for text in raw_text:
+                    data = self.txn.get(text.encode())
+                    if data is None:
+                        raise Exception(f'No data for text {text}')
+                    embed = np.frombuffer(data, dtype=np.float32).reshape(-1, self.llm_dim)
+                    encoded_text.append(embed)
+                encoded_text = torch.tensor(encoded_text, device=device)
+                return encoded_text
+        except:
+            pass
+
         with torch.cuda.amp.autocast(enabled=False):
             move_module_dict_to_device(self.ext_models, device)
             max_text_len = self.max_text_len
@@ -176,22 +237,56 @@ class MDMDenoiser(nn.Module):
         """
         assert (y is not None) == (self.cond_mode != 'no_cond'
                                    ), "must specify y if and only if the model is class-conditional"
-        x = x.transpose(1, 2).unsqueeze(2)
         bs, njoints, nfeats, nframes = x.shape
         emb = self.embed_timestep(timesteps)  # [1, bs, d]
-        
-        emb_text = y['encoded_text']
 
-        # if 'text' in self.cond_mode:
-        #     if 'enc_text' not in y:
-        #         enc_text = self.encode_text(y['text'])  # enc_text: [B, max_text_len, llm_dim], emb: [1, B, d]
-        #     else:
-        #         enc_text = y['enc_text']
-        #     force_mask = y.get('uncond', False)
-        #     emb_text = self.embed_text(self.mask_cond(enc_text, force_mask=force_mask, rm_text_flag=rm_text_flag))
-        #     if self.text_enc_mode == 'mean':
-        #         emb_text = emb_text.mean(dim=1)
-        #         emb += emb_text
+        if global_joint_func is not None:
+            g_motion_l_joints, l_joints_diff = global_joint_func(x, global_motion, global_joint_mask)
+
+        if 'text' in self.cond_mode:
+            if 'enc_text' not in y:
+                enc_text = self.encode_text(y['text'])  # enc_text: [B, max_text_len, llm_dim], emb: [1, B, d]
+            else:
+                enc_text = y['enc_text']
+            force_mask = y.get('uncond', False)
+            emb_text = self.embed_text(self.mask_cond(enc_text, force_mask=force_mask, rm_text_flag=rm_text_flag))
+            if self.text_enc_mode == 'mean':
+                emb_text = emb_text.mean(dim=1)
+                emb += emb_text
+        if 'action' in self.cond_mode:
+            if not (y['action'] == -1).any():  # FIXME - a hack so we can use already trained models
+                action_emb = self.embed_action(y['action'])
+                emb += self.mask_cond(action_emb)
+
+        if self.arch == 'gru':
+            x_reshaped = x.reshape(bs, njoints*nfeats, 1, nframes)
+            emb_gru = emb.repeat(nframes, 1, 1)     #[#frames, bs, d]
+            emb_gru = emb_gru.permute(1, 2, 0)      #[bs, d, #frames]
+            emb_gru = emb_gru.reshape(bs, self.latent_dim, 1, nframes)  #[bs, d, 1, #frames]
+            x = torch.cat((x_reshaped, emb_gru), axis=1)  #[bs, d+joints*feat, 1, #frames]
+
+        if self.use_motion_mask:
+            if motion_mask is not None:
+                assert observed_motion is not None
+                x_orig = x
+                x = x * (1 - motion_mask) + observed_motion * motion_mask
+                if self.use_obs_diff:
+                    motion_diff = ((observed_motion - x_orig) * motion_mask)[:, :67]
+                    x = torch.cat([x, motion_mask, motion_diff], axis=1)
+                else:
+                    x = torch.cat([x, motion_mask], axis=1)
+            else:
+                if self.use_obs_diff:
+                    x = torch.cat([x, torch.zeros_like(x), torch.zeros_like(x[:, :67])], axis=1)
+                else:
+                    x = torch.cat([x, torch.zeros_like(x)], axis=1)
+        if self.use_global_constraints:
+            if global_motion is not None:
+                local_vars = locals()
+                global_feat = torch.cat([local_vars[feat] for feat in self.global_feat_type], dim=-1)
+                x = torch.cat([x, global_feat.transpose(1, 2).unsqueeze(2)], axis=1)
+            else:
+                x = torch.cat([x, torch.zeros((x.shape[0], self.global_feat_dims, *x.shape[2:]), device=x.device, dtype=x.dtype)], axis=1)
 
         x = self.input_process(x)
 
@@ -212,17 +307,48 @@ class MDMDenoiser(nn.Module):
                 src_mask = generate_ar_mask(xseq.shape[0], xseq.shape[0], tgt_start_dim=pose_start_ind, src_start_dim=pose_start_ind).to(x.device)
             output = self.seqTransEncoder(xseq, mask=src_mask, src_key_padding_mask=src_key_padding_mask)[pose_start_ind:]  # , src_key_padding_mask=~maskseq)  # [seqlen, bs, d]
 
+        elif self.arch == 'trans_dec':
+            xseq = x
+            pose_start_ind = 0
+            memory = emb
+            if self.text_enc_mode == 'seq_concat':
+                memory = [emb_text.transpose(0, 1), emb]
+                if self.add_x_to_memory:
+                    memory.append(x)
+                memory = torch.cat(memory, axis=0)
+            if self.emb_trans_dec:
+                xseq = torch.cat((emb, x), axis=0)
+                pose_start_ind += 1
+            xseq = self.sequence_pos_encoder(xseq)  # [seqlen+1, bs, d]
+            memory = self.sequence_pos_encoder(memory)  # [seqlen+1, bs, d]
+            tgt_mask = memory_mask = None
+            if self.autoregressive:
+                tgt_mask = generate_ar_mask(xseq.shape[0], xseq.shape[0], tgt_start_dim=pose_start_ind, src_start_dim=pose_start_ind).to(x.device)
+                if self.add_x_to_memory:
+                    memory_mask = generate_ar_mask(xseq.shape[0], memory.shape[0], tgt_start_dim=pose_start_ind, src_start_dim=emb_text.shape[1] + 1).to(x.device)
+
+            output = self.seqTransDecoder(tgt=xseq, memory=memory, tgt_mask=tgt_mask, memory_mask=memory_mask)[pose_start_ind:] # [seqlen, bs, d] # FIXME - maybe add a causal mask
+        elif self.arch == 'gru':
+            xseq = x
+            xseq = self.sequence_pos_encoder(xseq)  # [seqlen, bs, d]
+            output, _ = self.gru(xseq)
+
         output = self.output_process(output)  # [bs, njoints, nfeats, nframes]
-        output = output.squeeze(2).transpose(1, 2)  # [bs, nfeats, njoints, nframes]
+        if self.use_motion_mask and motion_mask is not None:
+            if self.obs_motion_constraints == 'hard':
+                output = output * (1 - motion_mask) + observed_motion * motion_mask
+        return output
 
-        pred_x_start = output[..., :-3]
-        static_conf_logits = pred_x_start[..., :6]
-        pred_x = pred_x_start[..., 6:]
-        pred_cam = output[..., -3:]
 
-        return {
-            'pred_x_start': pred_x_start,
-            "pred_x": pred_x,
-            'static_conf_logits': static_conf_logits,
-            'pred_cam': pred_cam,
-        }
+    def to(self, *args, **kwargs):
+        super().to(*args, **kwargs)
+        self.rot2xyz.smpl_model.to(*args, **kwargs)
+
+
+    def eval(self, *args, **kwargs):
+        super().eval(*args, **kwargs)
+        self.rot2xyz.smpl_model.eval(*args, **kwargs)
+
+
+    def get_excluded_keys(self):
+        return ['llm_model']

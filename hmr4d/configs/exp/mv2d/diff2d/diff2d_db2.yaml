@@ -136,7 +136,7 @@ network:
         #     try_load: true
         diffusion: ${model_cfg.diffusion}
         denoiser:
-            type: motiondiff.models.mdm.mdm_denoiser_t5.MDMDenoiser
+            type: hmr4d.network.mdm.mdm_denoiser_t5.MDMDenoiser
             modeltype: ''
             njoints: 151
             nfeats: 1
