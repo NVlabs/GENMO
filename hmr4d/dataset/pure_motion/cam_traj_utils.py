@@ -330,7 +330,7 @@ class CameraAugmentorV11:
 
         return R_new, T_new
 
-    def __call__(self, w_j3d, length=120):
+    def __call__(self, w_j3d, length=120, camera_type=None):
         """
         Args:
             w_j3d: (L, J, 3)
@@ -357,7 +357,8 @@ class CameraAugmentorV11:
             "trackpull": 0.05,
             "static": 0.4,
         }
-        camera_type = np.random.choice(list(camera_type_prob.keys()), p=list(camera_type_prob.values()))
+        if camera_type is None:
+            camera_type = np.random.choice(list(camera_type_prob.keys()), p=list(camera_type_prob.values()))
         if camera_type == "random":  # random move + add noise on cam
             R_w2c = create_rotation_move(R0_w2c, length, self.r_xyz_w_std)
             t_w2c = create_translation_move(R0_w2c, t0_w2c, length, self.t_xyz_w_std)

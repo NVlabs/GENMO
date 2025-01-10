@@ -334,3 +334,4 @@ class Humanml3dDataset(BaseDataset):
 
 group_name = "train_datasets/pure_motion_humanml3d"
 MainStore.store(name="v11", node=builds(Humanml3dDataset, cam_augmentation="v11"), group=group_name)
+MainStore.store(name="static", node=builds(Humanml3dDataset, cam_augmentation="static"), group=group_name)
