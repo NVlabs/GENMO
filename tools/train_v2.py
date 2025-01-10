@@ -1,6 +1,7 @@
 import hydra
 import pytorch_lightning as pl
 import os
+import torch
 import torch.distributed as dist
 from datetime import datetime
 from omegaconf import DictConfig, OmegaConf
@@ -52,6 +53,7 @@ def train(cfg: DictConfig) -> None:
     if 'bones_2d' in cfg.test_datasets:
         cfg.test_datasets.bones_2d.num_data *= cfg.pl_trainer.devices
     pl.seed_everything(cfg.seed)
+    torch.cuda.set_device(int(os.environ.get('LOCAL_RANK', '0')))   # for tinycudann default memory
     wandb_run = None
     version = None
     

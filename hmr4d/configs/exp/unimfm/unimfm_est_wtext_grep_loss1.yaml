@@ -54,6 +54,7 @@ model_cfg:
         guidance_param: 2.5
 
     text_encoder:
+        load_llm: false
         llm_version: 't5-3b'
         max_text_len: 50
 
@@ -140,7 +141,7 @@ pl_trainer:
     gradient_clip_val: 0.5
     max_epochs: null
     check_val_every_n_epoch: null
-    val_check_interval: 1000
+    val_check_interval: 3000
     max_steps: 200000
     devices: 1
     strategy: ddp_find_unused_parameters_true

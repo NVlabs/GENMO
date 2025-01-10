@@ -9,7 +9,7 @@ defaults:
     - override /scheduler_cfg: epoch_half_200_350
     - override /train_datasets:
           - pure_motion_amass/v11
-        #   - pure_motion_humanml3d/v11
+          - pure_motion_humanml3d/static
           - imgfeat_bedlam/v2
           - imgfeat_h36m/v1
           - imgfeat_3dpw/v1
@@ -17,7 +17,7 @@ defaults:
     - override /train_2d_datasets:
           - bones_2d
     - override /test_datasets:
-        # - humanml3d_eval
+          - humanml3d_eval
           - emdb1/v1_fliptest
           - emdb2/v1_fliptest
           - rich/all
@@ -29,7 +29,7 @@ defaults:
           - prog_bar/prog_reporter_every0.1
           - train_speed_timer/base
           - lr_monitor/pl
-        #   - vis_text
+          - vis_text
           - metric_emdb1
           - metric_emdb2
           - metric_rich
@@ -58,6 +58,9 @@ model_cfg:
         llm_version: 't5-3b'
         max_text_len: 50
 
+    # condition_mask:
+    #     mask_img_prob: 0.5
+
     mask_cfg:
         drop_prob: 0.75
         max_num_drops: 3
@@ -76,7 +79,7 @@ pipeline:
     args:
         endecoder_opt: ${endecoder}
         normalize_cam_angvel: true
-        use_regression_outputs_prob: 0.
+        use_regression_outputs_prob: 1.
         use_cfg_sampler_for_text: true
         weights:
             cr_j3d: 500.

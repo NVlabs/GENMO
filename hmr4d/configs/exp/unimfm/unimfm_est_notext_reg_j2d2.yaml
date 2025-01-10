@@ -76,7 +76,7 @@ pipeline:
     args:
         endecoder_opt: ${endecoder}
         normalize_cam_angvel: true
-        use_regression_outputs_prob: 0.
+        use_regression_outputs_prob: 1.
         use_cfg_sampler_for_text: true
         weights:
             cr_j3d: 500.
@@ -86,6 +86,7 @@ pipeline:
             verts2d: 1000.
 
             j2d_train2d: 1000.
+            proj_gt_j2d_to_bi01: true
             # norm_j2d: 1000.
             train2d_skip_regression: false
 

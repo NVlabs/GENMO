@@ -74,10 +74,13 @@ class UNIMFM(pl.LightningModule):
 
         if 'text_encoder' in model_cfg:
             self.use_text_encoder = True
-            llm_version = model_cfg.text_encoder.llm_version
-            self.max_text_len = model_cfg.text_encoder.max_text_len
-            text_encoder, self.tokenizer = self.load_and_freeze_llm(llm_version)
-            self.text_encoder = [text_encoder.cuda()]
+            if model_cfg.text_encoder.get('load_llm', False):
+                llm_version = model_cfg.text_encoder.llm_version
+                self.max_text_len = model_cfg.text_encoder.max_text_len
+                text_encoder, self.tokenizer = self.load_and_freeze_llm(llm_version)
+                self.text_encoder = [text_encoder.cuda()]
+            else:
+                self.text_encoder = self.tokenizer = None
         else:
             self.use_text_encoder = False
         

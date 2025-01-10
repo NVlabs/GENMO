@@ -207,7 +207,7 @@ class UNIMFMDiffusion(nn.Module):
             inpaint_mask = inpaint_mask * valid_mask[:, :, None]
             x_start_gt = motion.clone() * inpaint_mask + pred_x_start_regression * (1 - inpaint_mask)
             regression_mask = (torch.rand(B).to(motion.device) < self.args.use_regression_outputs_prob).float()
-            if 'text_only' in batch:
+            if 'text_only' in batch and self.args.get('use_gt_for_text_only', True):
                 regression_mask[batch['text_only']] = 0
             x_start = x_start_reg * regression_mask[:, None, None] + x_start_gt * (1 - regression_mask[:, None, None])
             noise = torch.randn_like(x_start)
