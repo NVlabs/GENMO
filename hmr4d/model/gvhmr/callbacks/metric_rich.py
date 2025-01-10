@@ -80,6 +80,7 @@ class MetricMocap(pl.Callback):
 
         # Only validation record the metrics with logger
         self.on_test_epoch_end = self.on_validation_epoch_end = self.on_predict_epoch_end
+        self.on_test_epoch_start = self.on_validation_epoch_start = self.on_predict_epoch_start
 
     # ================== Batch-based Computation  ================== #
     def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
@@ -134,11 +135,13 @@ class MetricMocap(pl.Callback):
         # Visualize
         if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
             vis_type = 'vis_rich_occ_incam' if self.occ else 'vis_rich_incam'
-            visualize_smpl_scene(vis_type, batch_idx, vid, pred_cr_j3d, target_cr_j3d, pl_module.logger, transform_mode='local')
+            wandb_dict = visualize_smpl_scene(vis_type, batch_idx, vid, pred_cr_j3d, target_cr_j3d, transform_mode='local')
+            self.wandb_html_dict.update(wandb_dict)
             if trainer.state.stage == "test":
                 vis_type = "vis_rich_occ_global" if self.occ else "vis_rich_global"
-                visualize_smpl_scene(vis_type, batch_idx, vid, pred_ay_j3d, target_ay_j3d, pl_module.logger, transform_mode='global')
-
+                wandb_dict = visualize_smpl_scene(vis_type, batch_idx, vid, pred_ay_j3d, target_ay_j3d, transform_mode='global')
+                self.wandb_html_dict.update(wandb_dict)
+                
         # Metric of current sequence
         batch_eval = {
             "pred_j3d": pred_c_j3d,
@@ -350,9 +353,13 @@ class MetricMocap(pl.Callback):
                 writer.write_frame(img)
             writer.close()
 
+    def on_predict_epoch_start(self, trainer, pl_module):
+        self.wandb_html_dict = {}
+    
     # ================== Epoch Summary  ================== #
     def on_predict_epoch_end(self, trainer, pl_module):
         self.num_val += 1
+        pl_module.logger.log_metrics(self.wandb_html_dict)
         
         """Without logger"""
         local_rank, world_size = trainer.local_rank, trainer.world_size

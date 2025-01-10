@@ -48,6 +48,7 @@ class MetricMocap(pl.Callback):
 
         # Only validation record the metrics with logger
         self.on_test_epoch_end = self.on_validation_epoch_end = self.on_predict_epoch_end
+        self.on_test_epoch_start = self.on_validation_epoch_start = self.on_predict_epoch_start
         
             
     def log_2d(self, trainer, pl_module, batch_idx, results):
@@ -147,7 +148,8 @@ class MetricMocap(pl.Callback):
         del smpl_out  # Prevent OOM
         
         if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
-            visualize_smpl_scene('vis_3dpw_incam', batch_idx, vid, pred_cr_j3d24, target_cr_j3d24, pl_module.logger, transform_mode='local')
+            wandb_dict = visualize_smpl_scene('vis_3dpw_incam', batch_idx, vid, pred_cr_j3d24, target_cr_j3d24, transform_mode='local')
+            self.wandb_html_dict.update(wandb_dict)
 
         # Metric of current sequence
         batch_eval = {
@@ -206,9 +208,13 @@ class MetricMocap(pl.Callback):
             output_dir.mkdir(exist_ok=True, parents=True)
             save_video(img_overlay, output_dir / f"{vid}.mp4", crf=24)
 
+    def on_predict_epoch_start(self, trainer, pl_module):
+        self.wandb_html_dict = {}
+    
     # ================== Epoch Summary  ================== #
     def on_predict_epoch_end(self, trainer, pl_module):
         self.num_val += 1
+        pl_module.logger.log_metrics(self.wandb_html_dict)
         
         """Without logger"""
         local_rank, world_size = trainer.local_rank, trainer.world_size

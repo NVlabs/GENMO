@@ -10,7 +10,7 @@ from motiondiff.utils.tools import wandb_run_exists
 sp_visualizer = ScenepicVisualizer("inputs/smpl_data", device='cuda')
 
 
-def visualize_smpl_scene(vis_type, index, vid, j3d, gt_j3d, logger, transform_mode=None):
+def visualize_smpl_scene(vis_type, index, vid, j3d, gt_j3d, transform_mode=None):
     if transform_mode == 'global':
         global_rot = axis_angle_to_matrix(torch.tensor([np.pi / 2, 0, 0])).cuda()
         j3d = (global_rot @ j3d.transpose(1, 2)).transpose(1, 2)
@@ -37,6 +37,8 @@ def visualize_smpl_scene(vis_type, index, vid, j3d, gt_j3d, logger, transform_mo
     sp_visualizer.vis_smpl_scene(smpl_seq, html_file)
     
     if wandb_run_exists():
-        logger.log_metrics({f'{vis_type}/{fname}': wandb.Html(html_file)})
+        # pl_module.logger.log_metrics({f'{vis_type}/{fname}': wandb.Html(html_file)}, step=pl_module.global_step)
+        return {f'{vis_type}/{fname}': wandb.Html(html_file)}
+    return {}   
 
 # Example usage withi

@@ -17,6 +17,7 @@ import hmr4d.dataset.motionx.motionx
 import hmr4d.model.gvhmr.gvhmr_pl
 import hmr4d.model.gvhmr.mv2d
 import hmr4d.model.gvhmr.mfm_hmr
+import hmr4d.model.gvhmr.unimfm
 import hmr4d.model.gvhmr.utils.endecoder
 import hmr4d.model.common_utils.optimizer
 import hmr4d.model.common_utils.scheduler_cfg

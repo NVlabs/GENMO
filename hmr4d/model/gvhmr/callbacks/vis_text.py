@@ -57,6 +57,9 @@ class VisText(pl.Callback):
 
         # Only validation record the metrics with logger
         self.on_test_epoch_end = self.on_validation_epoch_end = self.on_predict_epoch_end
+        
+        # Only validation record the metrics with logger
+        self.on_test_epoch_start = self.on_validation_epoch_start = self.on_predict_epoch_start
 
     # ================== Batch-based Computation  ================== #
     def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
@@ -95,10 +98,16 @@ class VisText(pl.Callback):
         
         # Visualize
         if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
-            visualize_smpl_scene('vis_text_global', batch_idx, vid, pred_ay_j3d, target_w_j3d, pl_module.logger, transform_mode='global')
+            wandb_dict = visualize_smpl_scene('vis_text_global', batch_idx, vid, pred_ay_j3d, target_w_j3d, transform_mode='global')
+            self.wandb_html_dict.update(wandb_dict)
         return
 
+
+    def on_predict_epoch_start(self, trainer, pl_module):
+        self.wandb_html_dict = {}
+        
 
     # ================== Epoch Summary  ================== #
     def on_predict_epoch_end(self, trainer, pl_module):
         self.num_val += 1
+        pl_module.logger.log_metrics(self.wandb_html_dict)

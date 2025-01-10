@@ -27,7 +27,7 @@ parser.add_argument('-exc', '--exclude', nargs='+', default=[], help='exclude cf
 parser.add_argument('-s', '--stage', default='opt')
 parser.add_argument('-l', '--local', action="store_true")
 parser.add_argument('-u', '--user', help='cluster username', required=True)
-parser.add_argument('-a', '--account', help='cluster account/team', default='nvr_torontoai_humanmotionfm')
+parser.add_argument('-a', '--account', help='cluster account/team (nvr_torontoai_humanmotionfm|nvr_lpr_digitalhuman)', default='nvr_torontoai_humanmotionfm')
 parser.add_argument('-b', '--branch', default='main', help='git branch of the code base to run on cluster')
 parser.add_argument('-p', '--push_changes', action="store_true")
 parser.add_argument('-j', '--job_tag', default="mfm-hmr")

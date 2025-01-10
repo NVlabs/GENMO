@@ -13,7 +13,7 @@ from hmr4d.configs import MainStore, builds
 from hmr4d.utils.geo.augment_noisy_pose import gaussian_augment
 import hmr4d.utils.matrix as matrix
 from hmr4d.utils.pylogger import Log
-from hmr4d.utils.geo.hmr_global import get_local_transl_vel, rollout_local_transl_vel
+from hmr4d.utils.geo.hmr_global import get_local_transl_vel, rollout_local_transl_vel, get_static_joint_mask
 from hmr4d.utils.geo.quaternion import qinv_np, quaternion_to_cont6d, cont6d_to_matrix
 from hmr4d.utils.smplx_utils import make_smplx
 from . import stats_compose
@@ -106,6 +106,13 @@ class EnDecoder(nn.Module):
         local_skeleton = skeleton - skeleton[:, :, self.parents_tensor]
         local_skeleton = torch.cat([skeleton[:, :, :1], local_skeleton[:, :, 1:]], dim=2)
         return local_skeleton
+    
+    def get_static_gt(self, inputs, vel_thr):
+        joint_ids = [7, 10, 8, 11, 20, 21]  # [L_Ankle, L_foot, R_Ankle, R_foot, L_wrist, R_wrist]
+        gt_w_j3d = self.fk_v2(**inputs["smpl_params_w"])  # (B, L, J=22, 3)
+        static_gt = get_static_joint_mask(gt_w_j3d, vel_thr=vel_thr, repeat_last=True)  # (B, L, J)
+        static_gt = static_gt[:, :, joint_ids].float()  # (B, L, J')
+        return static_gt
     
     def encode(self, inputs):
         if self.encode_type == 'gvhmr':

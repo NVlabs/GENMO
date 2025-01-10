@@ -23,7 +23,8 @@ class SimpleCkptSaver(Checkpoint):
         output_dir,
         filename="e{epoch:03d}-s{step:06d}.ckpt",
         save_top_k=1,
-        every_n_epochs=1,
+        every_n_epochs=None,
+        every_n_steps=None,
         save_last=None,
         save_weights_only=False,
     ):
@@ -32,6 +33,7 @@ class SimpleCkptSaver(Checkpoint):
         self.filename = filename
         self.save_top_k = save_top_k
         self.every_n_epochs = every_n_epochs
+        self.every_n_steps = every_n_steps
         self.save_last = save_last
         self.save_weights_only = save_weights_only
 
@@ -134,12 +136,26 @@ class SimpleCkptSaver(Checkpoint):
     @rank_zero_only
     def on_train_epoch_end(self, trainer, pl_module):
         """Save a checkpoint at the end of the training epoch."""
-        if self.every_n_epochs >= 1 and (trainer.current_epoch + 1) % self.every_n_epochs == 0:
+        if self.every_n_epochs is not None and (trainer.current_epoch + 1) % self.every_n_epochs == 0:
             if self.save_top_k == 0:
                 return
 
             # Save cureent checkpoint
             filepath = self.output_dir / self.filename.format(epoch=trainer.current_epoch, step=trainer.global_step)
+            lastpath = self.output_dir / 'last.ckpt'
+            checkpoint = trainer._checkpoint_connector.dump_checkpoint()
+            trainer.strategy.save_checkpoint(checkpoint, filepath)
+            trainer.strategy.save_checkpoint(checkpoint, lastpath)
+            
+    @rank_zero_only
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx: int) -> None:
+        """Save a checkpoint at the end of the training epoch."""
+        if self.every_n_steps is not None and trainer.global_step % self.every_n_steps == 0:
+            if self.save_top_k == 0:
+                return
+
+            # Save cureent checkpoint
+            filepath = self.output_dir / "s{step:06d}.ckpt".format(epoch=trainer.current_epoch, step=trainer.global_step)
             lastpath = self.output_dir / 'last.ckpt'
             checkpoint = trainer._checkpoint_connector.dump_checkpoint()
             trainer.strategy.save_checkpoint(checkpoint, filepath)
@@ -168,3 +184,4 @@ MainStore.store(name="every10e", node=base(every_n_epochs=10), group=group_name)
 MainStore.store(name="every10e_top100", node=base(every_n_epochs=10, save_top_k=100), group=group_name)
 MainStore.store(name="every100e_top100", node=base(every_n_epochs=100, save_top_k=100), group=group_name)
 MainStore.store(name="every1000e_top100", node=base(every_n_epochs=1000, save_top_k=100), group=group_name)
+MainStore.store(name="every10000s_top100", node=base(every_n_steps=10000, save_top_k=100), group=group_name)
