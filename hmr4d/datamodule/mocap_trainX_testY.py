@@ -38,7 +38,7 @@ def collate_fn(batch):
         else:
             return_dict[k] = default_collate([d[k] for d in batch])
     return_dict["B"] = len(batch)
-    return_dict['has_text'] = [text != '' for text in return_dict['caption']]
+    return_dict['has_text'] = torch.tensor([text != '' for text in return_dict['caption']])
     return return_dict
 
 

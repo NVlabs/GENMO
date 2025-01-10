@@ -194,10 +194,11 @@ class NetworkEncoderRoPE(nn.Module):
         
         x = self.add_cond_linear(torch.cat([x, xt], dim=-1))
         
-        emb_text = self.embed_text(y['encoded_text'])
+        enc_text = y['encoded_text'].clone()
         if self.training and self.text_mask_prob > 0:
             mask = torch.rand((B,), device=x.device) < self.text_mask_prob
-            emb_text = emb_text * (1 - mask[:, None, None].float())
+            enc_text = enc_text * (1 - mask[:, None, None].float())
+        emb_text = self.embed_text(enc_text)
         if self.use_text_pos_enc:
             emb_text = self.sequence_pos_encoder(emb_text, batch_first=True)
 

@@ -119,7 +119,7 @@ class UNIMFM(pl.LightningModule):
                 #     nvalid_elem = attn_mask[bnum].sum().item()
                 #     encoded_text[bnum][nvalid_elem:] = 0
         if has_text is not None:
-            no_text = ~torch.tensor(has_text)
+            no_text = ~has_text
             encoded_text[no_text] = 0
         return encoded_text
     
@@ -180,6 +180,18 @@ class UNIMFM(pl.LightningModule):
                 
         return outputs
     
+    def create_condition_mask(self, batch):
+        cond_mask_cfg = self.model_cfg.get("condition_mask", {})
+        mask_img_prob = cond_mask_cfg.get("mask_img_prob", 0.0)
+        f_condition_mask = dict()
+        has_text = batch["has_text"]
+        if mask_img_prob > 0:
+            mask_img = has_text & (torch.rand(batch["B"]) < mask_img_prob).to(batch["bbx_xys"].device)
+            for k in ["obs", "f_cliffcam", "f_imgseq"]:
+                f_condition_mask[k] = mask_img
+            batch['text_only'] = mask_img
+        batch["f_condition_mask"] = f_condition_mask
+    
     def prepare_3d_batch(self, batch):
         if 'text_embed' in batch:
             batch['encoded_text'] = batch['text_embed'].cuda()
@@ -187,6 +199,7 @@ class UNIMFM(pl.LightningModule):
             batch['encoded_text'] = self.encode_text(batch['caption'], batch['has_text'])
         batch['target_x'] = self.endecoder.encode(batch)  # (B, L, C)
         batch['static_gt'] = self.endecoder.get_static_gt(batch, self.pipeline.args.static_conf.vel_thr)  # (B, L, 6)
+        self.create_condition_mask(batch)
         
         B, F = batch["smpl_params_c"]["body_pose"].shape[:2]
 
@@ -263,7 +276,6 @@ class UNIMFM(pl.LightningModule):
         return outputs
     
     def prepare_2d_batch(self, batch):
-        B = batch["B"]
         if 'text_embed' in batch:
             batch['encoded_text'] = batch['text_embed'].cuda()
         elif self.use_text_encoder:
@@ -436,8 +448,8 @@ class UNIMFM(pl.LightningModule):
             "eval_text_only" : eval_text_only
         }
         
-        batch_['gt'] = self.endecoder.encode(batch)
-        batch_['static_gt'] = self.endecoder.get_static_gt(batch, self.pipeline.args.static_conf.vel_thr)
+        # batch_['gt'] = self.endecoder.encode(batch)
+        # batch_['static_gt'] = self.endecoder.get_static_gt(batch, self.pipeline.args.static_conf.vel_thr)
         
         if 'text_embed' in batch:
             batch_['encoded_text'] = batch['text_embed'].cuda()
@@ -466,7 +478,9 @@ class UNIMFM(pl.LightningModule):
                 "cam_angvel": flip_test["cam_angvel"],
                 "f_imgseq": flip_test["f_imgseq"],
             }
-            if self.use_text_encoder:
+            if 'text_embed' in batch:
+                batch_['encoded_text'] = batch['text_embed'].cuda()
+            elif self.use_text_encoder:
                 batch_['encoded_text'] = self.encode_text(batch['caption'], batch['has_text'])
             flipped_outputs = self.pipeline.forward(batch_, train=False, global_step=self.trainer.global_step)
 

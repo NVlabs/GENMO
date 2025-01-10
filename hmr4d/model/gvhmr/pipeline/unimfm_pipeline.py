@@ -66,7 +66,7 @@ class Pipeline(nn.Module):
         B, L = inputs["obs"].shape[:2]
 
         # *. Conditions
-        inputs['f_cliff_cam'] = compute_bbox_info_bedlam(inputs["bbx_xys"], inputs["K_fullimg"])  # (B, L, 3)
+        inputs['f_cliffcam'] = compute_bbox_info_bedlam(inputs["bbx_xys"], inputs["K_fullimg"])  # (B, L, 3)
         f_cam_angvel = inputs["cam_angvel"]
         if self.args.normalize_cam_angvel:
             f_cam_angvel = (f_cam_angvel - self.cam_angvel_mean) / self.cam_angvel_std
@@ -80,7 +80,12 @@ class Pipeline(nn.Module):
                 f_condition[k] = torch.zeros(B, L, self.f_condition_dim[k]).to(inputs["obs"])
         for k in self.args.mask_out_attr:
             f_condition[k] = torch.zeros_like(f_condition[k])
-        
+        for k in inputs.get("f_condition_mask", {}):
+            if k in f_condition:
+                mask = inputs["f_condition_mask"][k][:, None, None, None] if k in ['obs'] else inputs["f_condition_mask"][k][:, None, None]
+                f_condition[k] = f_condition[k] * mask
+        # for k, v in f_condition.items():
+        #     print(k, v[1].norm())
         
         if train:
             f_condition = randomly_set_null_condition(f_condition, 0.1)
@@ -285,6 +290,9 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
     endecoder = ppl.endecoder
     weights = ppl.weights
     args = ppl.args
+    
+    no_incam_loss_for_textonly = weights.get('no_incam_loss_for_textonly', False)
+    text_only = inputs.get('text_only', None)
 
     extra_loss_dict = {}
     extra_loss = 0
@@ -303,6 +311,8 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
     # Root aligned C-MPJPE Loss
     if weights.cr_j3d > 0.0:
         cr_j3d_loss = F.mse_loss(pred_cr_j3d, gt_cr_j3d, reduction="none")
+        if text_only is not None and no_incam_loss_for_textonly:
+            cr_j3d_loss[text_only] = 0
         cr_j3d_loss = (cr_j3d_loss * mask[..., None, None]).mean()
         extra_loss += cr_j3d_loss * weights.cr_j3d
         extra_loss_dict["cr_j3d_loss"] = cr_j3d_loss
@@ -334,6 +344,8 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
             * (inputs["bbx_xys"][..., 2] > 0)
         )[..., None]
         transl_c_loss = F.mse_loss(pred_cam, gt_pred_cam, reduction="none")
+        if text_only is not None and no_incam_loss_for_textonly:
+            transl_c_loss[text_only] = 0
         transl_c_loss = (transl_c_loss * mask[..., None] * valid_mask).mean()
 
         extra_loss_dict["transl_c_loss"] = transl_c_loss
@@ -360,6 +372,8 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
         )[..., None]
         valid_mask[~mask_reproj] = False  # Do not supervise on 3dpw
         j2d_loss = F.mse_loss(pred_j2d_01, gt_j2d_01, reduction="none")
+        if text_only is not None and no_incam_loss_for_textonly:
+            j2d_loss[text_only] = 0
         j2d_loss = (j2d_loss * mask[..., None, None] * valid_mask).mean()
 
         extra_loss += j2d_loss * weights.j2d
@@ -373,6 +387,8 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
 
         gt_cr_verts437 = inputs["gt_cr_verts437"]  # (B, L, 437, 3)
         cr_vert_loss = F.mse_loss(pred_cr_verts437, gt_cr_verts437, reduction="none")
+        if text_only is not None and no_incam_loss_for_textonly:
+            cr_vert_loss[text_only] = 0
         cr_vert_loss = (cr_vert_loss * mask[:, :, None, None]).mean()
         extra_loss += cr_vert_loss * weights.cr_verts
         extra_loss_dict["cr_vert_loss"] = cr_vert_loss
@@ -400,6 +416,8 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
         )[..., None]
         valid_mask[~mask_reproj] = False  # Do not supervise on 3dpw
         verts2d_loss = F.mse_loss(pred_verts2d_01, gt_verts2d_01, reduction="none")
+        if text_only is not None and no_incam_loss_for_textonly:
+            verts2d_loss[text_only] = 0
         verts2d_loss = (verts2d_loss * mask[..., None, None] * valid_mask).mean()
 
         extra_loss += verts2d_loss * weights.verts2d

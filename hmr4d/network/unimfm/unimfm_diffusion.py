@@ -173,6 +173,8 @@ class UNIMFMDiffusion(nn.Module):
         )
         B, L, _ = motion.shape
         vis_mask = length_to_mask(length, L)  # (B, L)
+        valid_mask = batch["mask"]["valid"]
+        assert (vis_mask == valid_mask).all()
 
         denoiser_kwargs = {
             "y": {
@@ -184,8 +186,6 @@ class UNIMFMDiffusion(nn.Module):
         }
         if 'encoded_text' in batch:
             denoiser_kwargs['y']['encoded_text'] = batch['encoded_text']
-        
-        valid_mask = batch["mask"]["valid"]
         
         if mode == 'regression':
             t = (torch.ones(B) * 999).long().to(motion.device)
@@ -205,9 +205,10 @@ class UNIMFMDiffusion(nn.Module):
             x_start_reg = pred_x_start_regression
             inpaint_mask = torch.ones_like(pred_x_start_regression)
             inpaint_mask = inpaint_mask * valid_mask[:, :, None]
-            inpaint_mask = inpaint_mask * vis_mask[:, :, None]
             x_start_gt = motion.clone() * inpaint_mask + pred_x_start_regression * (1 - inpaint_mask)
             regression_mask = (torch.rand(B).to(motion.device) < self.args.use_regression_outputs_prob).float()
+            if 'text_only' in batch:
+                regression_mask[batch['text_only']] = 0
             x_start = x_start_reg * regression_mask[:, None, None] + x_start_gt * (1 - regression_mask[:, None, None])
             noise = torch.randn_like(x_start)
             x_t = self.train_diffusion.q_sample(x_start.clone(), t, noise=noise)
@@ -360,7 +361,7 @@ class UNIMFMDiffusion(nn.Module):
         else:
             if self.args.get("use_cfg_sampler_for_text", False) and eval_text_only:
                 denoiser = ClassifierFreeSampleModel(denoiser)
-            cond["y"]["scale"] = self.model_cfg.diffusion.guidance_param
+                cond["y"]["scale"] = self.model_cfg.diffusion.guidance_param
             diff_sampler = self.model_cfg.diffusion.get("sampler", "ddim")
             if diff_sampler == "ddim":
                 sample_fn = diffusion.ddim_sample_loop_with_aux
