@@ -244,6 +244,26 @@ class Humanml3dDataset(BaseDataset):
             focal_length = K_fullimg[0, 0]
             wham_cam_augmentor = CameraAugmentorV11()
             T_w2c = wham_cam_augmentor(w_j3d, length)  # (F, 4, 4)
+        elif self.cam_augmentation == "static":
+            # interleave repeat to original length (faster)
+            N = 10
+            smpl_layer = self.smplx_dict[gender]
+            w_j3d = smpl_layer(
+                smpl_params_w["body_pose"][::N],
+                smpl_params_w["betas"][::N],
+                smpl_params_w["global_orient"][::N],
+                None,
+            )
+            w_j3d = w_j3d.repeat_interleave(N, dim=0) + smpl_params_w["transl"][:, None]  # (F, 24, 3)
+
+            if False:
+                wis3d = make_wis3d(name="debug_amass")
+                add_motion_as_lines(w_j3d, wis3d, "w_j3d")
+
+            width, height, K_fullimg = create_camera_sensor(1000, 1000, 43.3)  # WHAM
+            focal_length = K_fullimg[0, 0]
+            wham_cam_augmentor = CameraAugmentorV11()
+            T_w2c = wham_cam_augmentor(w_j3d, length, camera_type="static")  # (F, 4, 4)
 
         else:
             raise NotImplementedError
