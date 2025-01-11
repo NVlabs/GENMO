@@ -7,7 +7,7 @@ defaults:
     - override /optimizer: adamw_2e-4
     - override /scheduler_cfg: epoch_half_200_350
     - override /train_datasets:
-          - pure_motion_amass/v11
+          - pure_motion_humanml3d/static
     #       - imgfeat_bedlam/v2
     #       - imgfeat_h36m/v1
     #       - imgfeat_3dpw/v1

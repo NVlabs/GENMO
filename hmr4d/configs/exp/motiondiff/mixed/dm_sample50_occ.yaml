@@ -18,8 +18,11 @@ defaults:
           - emdb1/v1_fliptest
           - emdb2/v1_fliptest
           - rich/all
+          - rich_occ/all
           - 3dpw/fliptest
           - 3dpw_occ/fliptest
+          - emdb1_occ/v1_fliptest
+          - emdb2_occ/v1_fliptest
         #   - bones_2d_test
     - override /callbacks:
           - simple_ckpt_saver/every100e_top100
