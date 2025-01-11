@@ -59,7 +59,7 @@ model_cfg:
         max_text_len: 50
 
     condition_mask:
-        mask_img_prob: 0.5
+        mask_img_prob: 1.0
 
     mask_cfg:
         drop_prob: 0.75
@@ -96,6 +96,7 @@ pipeline:
             static_conf_bce: 1.
 
             text_only_losses: ["simple"]
+            text_only_no_reg_loss: true
 
         static_conf:
             vel_thr: 0.15

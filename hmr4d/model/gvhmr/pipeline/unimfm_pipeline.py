@@ -83,7 +83,7 @@ class Pipeline(nn.Module):
         for k in inputs.get("f_condition_mask", {}):
             if k in f_condition:
                 mask = inputs["f_condition_mask"][k][:, None, None, None] if k in ['obs'] else inputs["f_condition_mask"][k][:, None, None]
-                f_condition[k] = f_condition[k] * mask
+                f_condition[k] = f_condition[k] * (1 - mask.float())
         # for k, v in f_condition.items():
         #     print(k, v[1].norm())
         
@@ -149,11 +149,14 @@ class Pipeline(nn.Module):
         # ========== Compute Loss ========== #
         total_loss = 0
         mask = inputs["mask"]["valid"]  # (B, L)
+        text_only = inputs.get('text_only', None)
         
         # 1. Simple loss: MSE
         pred_x = model_output["pred_x"]  # (B, L, C)
         target_x = inputs["target_x"]  # (B, L, C)
         simple_loss = F.mse_loss(pred_x, target_x, reduction="none")
+        if text_only is not None and self.weights.get('text_only_no_reg_loss', False) and mode == 'regression':
+            simple_loss[text_only] = 0
         mask_simple = mask[:, :, None].expand(-1, -1, pred_x.size(2)).clone()  # (B, L, C)
         if self.endecoder.encode_type == 'gvhmr':
             mask_simple[inputs["mask"]["spv_incam_only"], :, 142:] = False  # 3dpw training
@@ -170,7 +173,7 @@ class Pipeline(nn.Module):
                 compute_extra_global_loss,
             ]
             for extra_func in extra_funcs:
-                extra_loss, extra_loss_dict = extra_func(inputs, outputs, self)
+                extra_loss, extra_loss_dict = extra_func(inputs, outputs, self, mode)
                 total_loss += extra_loss
                 outputs.update(extra_loss_dict)
 
@@ -284,15 +287,17 @@ def randomly_set_null_condition(f_condition, uncond_prob=0.1):
     return f_condition
 
 
-def compute_extra_incam_loss(inputs, outputs, ppl):
+def compute_extra_incam_loss(inputs, outputs, ppl, mode):
     model_output = outputs["model_output"]
     decode_dict = outputs["decode_dict"]
     endecoder = ppl.endecoder
     weights = ppl.weights
     args = ppl.args
     
-    no_incam_loss_for_textonly = weights.get('no_incam_loss_for_textonly', False)
+    text_only_losses = weights.get('text_only_losses', 'all')
     text_only = inputs.get('text_only', None)
+    if weights.get('text_only_no_reg_loss', False) and mode == 'regression':
+        text_only_losses = []
 
     extra_loss_dict = {}
     extra_loss = 0
@@ -311,7 +316,7 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
     # Root aligned C-MPJPE Loss
     if weights.cr_j3d > 0.0:
         cr_j3d_loss = F.mse_loss(pred_cr_j3d, gt_cr_j3d, reduction="none")
-        if text_only is not None and no_incam_loss_for_textonly:
+        if text_only is not None and text_only_losses != 'all' and 'cr_j3d' not in text_only_losses:
             cr_j3d_loss[text_only] = 0
         cr_j3d_loss = (cr_j3d_loss * mask[..., None, None]).mean()
         extra_loss += cr_j3d_loss * weights.cr_j3d
@@ -344,7 +349,7 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
             * (inputs["bbx_xys"][..., 2] > 0)
         )[..., None]
         transl_c_loss = F.mse_loss(pred_cam, gt_pred_cam, reduction="none")
-        if text_only is not None and no_incam_loss_for_textonly:
+        if text_only is not None and text_only_losses != 'all' and 'transl_c' not in text_only_losses:
             transl_c_loss[text_only] = 0
         transl_c_loss = (transl_c_loss * mask[..., None] * valid_mask).mean()
 
@@ -372,7 +377,7 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
         )[..., None]
         valid_mask[~mask_reproj] = False  # Do not supervise on 3dpw
         j2d_loss = F.mse_loss(pred_j2d_01, gt_j2d_01, reduction="none")
-        if text_only is not None and no_incam_loss_for_textonly:
+        if text_only is not None and text_only_losses != 'all' and 'j2d' not in text_only_losses:
             j2d_loss[text_only] = 0
         j2d_loss = (j2d_loss * mask[..., None, None] * valid_mask).mean()
 
@@ -387,7 +392,7 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
 
         gt_cr_verts437 = inputs["gt_cr_verts437"]  # (B, L, 437, 3)
         cr_vert_loss = F.mse_loss(pred_cr_verts437, gt_cr_verts437, reduction="none")
-        if text_only is not None and no_incam_loss_for_textonly:
+        if text_only is not None and text_only_losses != 'all' and 'cr_verts' not in text_only_losses:
             cr_vert_loss[text_only] = 0
         cr_vert_loss = (cr_vert_loss * mask[:, :, None, None]).mean()
         extra_loss += cr_vert_loss * weights.cr_verts
@@ -416,7 +421,7 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
         )[..., None]
         valid_mask[~mask_reproj] = False  # Do not supervise on 3dpw
         verts2d_loss = F.mse_loss(pred_verts2d_01, gt_verts2d_01, reduction="none")
-        if text_only is not None and no_incam_loss_for_textonly:
+        if text_only is not None and text_only_losses != 'all' and 'verts2d' not in text_only_losses:
             verts2d_loss[text_only] = 0
         verts2d_loss = (verts2d_loss * mask[..., None, None] * valid_mask).mean()
 
@@ -426,7 +431,7 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
     return extra_loss, extra_loss_dict
 
 
-def compute_extra_global_loss(inputs, outputs, ppl):
+def compute_extra_global_loss(inputs, outputs, ppl, mode):
     decode_dict = outputs["decode_dict"]
     endecoder = ppl.endecoder
     weights = ppl.weights
@@ -436,6 +441,11 @@ def compute_extra_global_loss(inputs, outputs, ppl):
     extra_loss = 0
     mask = inputs["mask"]["valid"].clone()  # (B, L)
     mask[inputs["mask"]["spv_incam_only"]] = False
+    
+    text_only_losses = weights.get('text_only_losses', 'all')
+    text_only = inputs.get('text_only', None)
+    if weights.get('text_only_no_reg_loss', False) and mode == 'regression':
+        text_only_losses = []
 
     if weights.transl_w > 0:
         # compute pred_transl_w by rollout
@@ -445,6 +455,8 @@ def compute_extra_global_loss(inputs, outputs, ppl):
         pred_transl_w = rollout_local_transl_vel(local_transl_vel, gt_global_orient_w, gt_transl_w[:, [0]])
 
         trans_w_loss = F.l1_loss(pred_transl_w, gt_transl_w, reduction="none")
+        if text_only is not None and text_only_losses != 'all' and 'transl_w' not in text_only_losses:
+            trans_w_loss[text_only] = 0
         trans_w_loss = (trans_w_loss * mask[..., None]).mean()
         extra_loss += trans_w_loss * weights.transl_w
         extra_loss_dict["transl_w_loss"] = trans_w_loss
@@ -461,6 +473,8 @@ def compute_extra_global_loss(inputs, outputs, ppl):
         pred_static_conf_logits = outputs["model_output"]["static_conf_logits"]
 
         static_conf_loss = F.binary_cross_entropy_with_logits(pred_static_conf_logits, static_gt, reduction="none")
+        if text_only is not None and text_only_losses != 'all' and 'static_conf_bce' not in text_only_losses:
+            static_conf_loss[text_only] = 0
         static_conf_loss = (static_conf_loss * mask[..., None]).mean()
         extra_loss += static_conf_loss * weights.static_conf_bce
         extra_loss_dict["static_conf_loss"] = static_conf_loss

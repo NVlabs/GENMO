@@ -186,6 +186,7 @@ class UNIMFM(pl.LightningModule):
     def create_condition_mask(self, batch):
         cond_mask_cfg = self.model_cfg.get("condition_mask", {})
         mask_img_prob = cond_mask_cfg.get("mask_img_prob", 0.0)
+        mask_cam_prob = cond_mask_cfg.get("mask_cam_prob", 0.0)
         f_condition_mask = dict()
         has_text = batch["has_text"]
         if mask_img_prob > 0:
@@ -193,6 +194,10 @@ class UNIMFM(pl.LightningModule):
             for k in ["obs", "f_cliffcam", "f_imgseq"]:
                 f_condition_mask[k] = mask_img
             batch['text_only'] = mask_img
+        if mask_cam_prob > 0:
+            mask_cam = has_text & (torch.rand(batch["B"]) < mask_cam_prob).to(batch["bbx_xys"].device)
+            for k in ["f_cam_angvel"]:
+                f_condition_mask[k] = mask_cam
         batch["f_condition_mask"] = f_condition_mask
     
     def prepare_3d_batch(self, batch):
