@@ -54,8 +54,8 @@ class UNIMFM(pl.LightningModule):
         self.model_cfg = model_cfg
         self.scheduler_cfg = scheduler_cfg
         self.enable_test_time_opt = model_cfg.get("enable_test_time_opt", False)
-        self.train_3d_modes = model_cfg.get("train_3d_modes", ["regression"])
-        self.train_2d_modes = model_cfg.get("train_2d_modes", ["regression"])
+        self.train_3d_modes = model_cfg.get("train_3d_modes", [])
+        self.train_2d_modes = model_cfg.get("train_2d_modes", [])
         self.infer_mode = model_cfg.get("infer_mode", "regression")
         if isinstance(self.train_3d_modes, str):
             self.train_3d_modes = [self.train_3d_modes]

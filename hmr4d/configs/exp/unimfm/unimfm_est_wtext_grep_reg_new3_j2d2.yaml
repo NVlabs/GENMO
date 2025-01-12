@@ -59,7 +59,8 @@ model_cfg:
         max_text_len: 50
 
     condition_mask:
-        mask_img_prob: 0.5
+        mask_img_prob: 1.0
+        mask_cam_prob: 1.0
 
     mask_cfg:
         drop_prob: 0.75
@@ -80,7 +81,6 @@ pipeline:
         endecoder_opt: ${endecoder}
         normalize_cam_angvel: true
         use_regression_outputs_prob: 1.
-        use_gt_for_text_only: False
         use_cfg_sampler_for_text: true
         weights:
             cr_j3d: 500.
@@ -90,11 +90,15 @@ pipeline:
             verts2d: 1000.
 
             j2d_train2d: 1000.
+            proj_gt_j2d_to_bi01: true
             # norm_j2d: 1000.
             train2d_skip_regression: false
 
             transl_w: 1.
             static_conf_bce: 1.
+
+            text_only_losses: ["simple"]
+            text_only_no_reg_loss: true
 
         static_conf:
             vel_thr: 0.15

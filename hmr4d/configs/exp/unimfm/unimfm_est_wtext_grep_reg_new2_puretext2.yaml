@@ -8,21 +8,21 @@ defaults:
     - override /optimizer: adamw_2e-4
     - override /scheduler_cfg: epoch_half_200_350
     - override /train_datasets:
-          - pure_motion_amass/v11
+        #   - pure_motion_amass/v11
           - pure_motion_humanml3d/static_train
-          - imgfeat_bedlam/v2
-          - imgfeat_h36m/v1
-          - imgfeat_3dpw/v1
-          - imgfeat_3dpw_occ/v1
+        #   - imgfeat_bedlam/v2
+        #   - imgfeat_h36m/v1
+        #   - imgfeat_3dpw/v1
+        #   - imgfeat_3dpw_occ/v1
     - override /train_2d_datasets:
           - bones_2d
     - override /test_datasets:
-          - humanml3d_eval
-          - emdb1/v1_fliptest
-          - emdb2/v1_fliptest
-          - rich/all
-          - 3dpw/fliptest
-          - 3dpw_occ/fliptest
+        - humanml3d_eval
+        #   - emdb1/v1_fliptest
+        #   - emdb2/v1_fliptest
+        #   - rich/all
+        #   - 3dpw/fliptest
+        #   - 3dpw_occ/fliptest
         #   - bones_2d_test
     - override /callbacks:
           - simple_ckpt_saver/every10000s_top100
@@ -30,11 +30,11 @@ defaults:
           - train_speed_timer/base
           - lr_monitor/pl
           - vis_text
-          - metric_emdb1
-          - metric_emdb2
-          - metric_rich
-          - metric_3dpw
-          - metric_3dpw_occ
+        #   - metric_emdb1
+        #   - metric_emdb2
+        #   - metric_rich
+        #   - metric_3dpw
+        #   - metric_3dpw_occ
     - _self_
 exp_name_base: ${hydra:runtime.choices.exp}
 exp_name_var: ""
@@ -43,14 +43,14 @@ data_name: mocap_mixed_v1
 # pretrain_2d_ckpt: "/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/yey/gvhmr/mocap_mixed_v1/mv2d/diff2d/diff2d_base_tt/version_0/checkpoints/last.ckpt"
 
 model_cfg:
-    train_3d_modes: ["regression", "diffusion"]
-    train_2d_modes: ["regression", "diffusion"]
+    train_3d_modes: ["diffusion"]
+    train_2d_modes: []
     start_2d_training_steps: 0
     noisy_2d_obs: true
     kp2d_noise_scale: 0.5
 
     diffusion:
-        test_timestep_respacing: '5'
+        test_timestep_respacing: '50'
         guidance_param: 2.5
 
     text_encoder:
@@ -59,7 +59,8 @@ model_cfg:
         max_text_len: 50
 
     condition_mask:
-        mask_img_prob: 0.5
+        mask_img_prob: 1.0
+        mask_cam_prob: 1.0
 
     mask_cfg:
         drop_prob: 0.75
@@ -80,7 +81,6 @@ pipeline:
         endecoder_opt: ${endecoder}
         normalize_cam_angvel: true
         use_regression_outputs_prob: 1.
-        use_gt_for_text_only: False
         use_cfg_sampler_for_text: true
         weights:
             cr_j3d: 500.
@@ -95,6 +95,9 @@ pipeline:
 
             transl_w: 1.
             static_conf_bce: 1.
+
+            text_only_losses: ["simple"]
+            text_only_no_reg_loss: true
 
         static_conf:
             vel_thr: 0.15
