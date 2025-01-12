@@ -45,6 +45,7 @@ class Humanml3dDataset(BaseDataset):
         l_factor=1.5,  # speed augmentation
         skip_moyo=True,  # not contained in the ICCV19 released version
         cam_augmentation="v11",
+        split="train",
         random1024=False,  # DEBUG
         limit_size=None,
         max_text_len=50,
@@ -69,7 +70,7 @@ class Humanml3dDataset(BaseDataset):
             "neutral": self.smplx_neutral,
         }
         self.max_text_len = max_text_len
-
+        self.split = split
         self.eval_text_only = eval_text_only
         self.use_random_subset = use_random_subset
         self.random_subset_seed = random_subset_seed
@@ -79,7 +80,7 @@ class Humanml3dDataset(BaseDataset):
         
         
     def _load_dataset(self):
-        filename = self.root / "humanml3d_smplhpose.pth"
+        filename = self.root / f"humanml3d_smplhpose_{self.split}.pth"
         Log.info(f"[{self.dataset_name}] Loading from {filename} ...")
         tic = Log.time()
         if self.random1024:  # Debug, faster loading
@@ -352,6 +353,10 @@ class Humanml3dDataset(BaseDataset):
         return return_data
 
 
-group_name = "train_datasets/pure_motion_humanml3d"
-MainStore.store(name="v11", node=builds(Humanml3dDataset, cam_augmentation="v11"), group=group_name)
-MainStore.store(name="static", node=builds(Humanml3dDataset, cam_augmentation="static"), group=group_name)
+train_group_name = "train_datasets/pure_motion_humanml3d"
+MainStore.store(name="v11_train", node=builds(Humanml3dDataset, cam_augmentation="v11", split="train"), group=train_group_name)
+MainStore.store(name="static_train", node=builds(Humanml3dDataset, cam_augmentation="static", split="train"), group=train_group_name)
+test_group_name = "test_datasets/pure_motion_humanml3d"
+MainStore.store(name="v11_test", node=builds(Humanml3dDataset, cam_augmentation="v11", split="test"), group=test_group_name)
+MainStore.store(name="static_test", node=builds(Humanml3dDataset, cam_augmentation="static", split="test"), group=test_group_name)
+
