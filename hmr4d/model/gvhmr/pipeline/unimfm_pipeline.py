@@ -83,7 +83,7 @@ class Pipeline(nn.Module):
         f_condition_mask = inputs.get("f_condition_mask", {})
         for k in f_condition_mask:
             if k in f_condition:
-                mask = f_condition_mask[:, None, None, None] if k in ['obs'] else f_condition_mask[:, None, None]
+                mask = f_condition_mask[k][:, None, None, None] if k in ['obs'] else f_condition_mask[k][:, None, None]
                 f_condition[k] = f_condition[k] * (1 - mask.float())
         # for k, v in f_condition.items():
         #     print(k, v[1].norm())
@@ -207,8 +207,11 @@ class Pipeline(nn.Module):
         f_condition_mask = inputs.get("f_condition_mask", {})
         for k in f_condition_mask:
             if k in f_condition:
-                mask = f_condition_mask[:, None, None, None] if k in ['obs'] else f_condition_mask[:, None, None]
+                mask = f_condition_mask[k][:, None, None, None] if k in ['obs'] else f_condition_mask[k][:, None, None]
                 f_condition[k] = f_condition[k] * (1 - mask.float())
+                
+        if inputs.get('text_mask', None) is not None:
+            inputs['encoded_text'] = inputs['encoded_text'] * (1 - inputs['text_mask'][:, None, None].float())
            
         if train:
             f_condition = randomly_set_null_condition(f_condition, 0.1)
@@ -233,6 +236,22 @@ class Pipeline(nn.Module):
         # ========== Compute Loss ========== #
         total_loss = 0
         mask = inputs["mask"]
+        text_only_losses = self.weights.get('text_only_losses', 'all')
+        text_only = inputs.get('text_only', None)
+        
+        # 1. Simple loss: MSE
+        if self.weights.get('simple_diffusion2d', 0.0) > 0.0 and mode == 'diffusion':
+            pred_x = model_output["pred_x"]  # (B, L, C)
+            target_x = inputs['regression_outputs']['2d_model_output']['pred_x']
+            simple_loss = F.mse_loss(pred_x, target_x, reduction="none")
+            mask_simple = mask[:, :, None].expand(-1, -1, pred_x.size(2)).clone()  # (B, L, C)
+            if self.weights.get('simple_loss_diffusion2d_local_only', False):
+                mask_simple[..., 142:] = False
+            simple_loss = (simple_loss * mask_simple).mean()
+            total_loss += simple_loss * self.weights.simple_diffusion2d
+            outputs["simple_loss"] = simple_loss
+        else:
+            outputs["simple_loss"] = 0.0
 
         # 2. Extra loss
         model_output = outputs["2d_model_output"]
@@ -261,6 +280,8 @@ class Pipeline(nn.Module):
                     gt_c_j17_2d = inputs["orig_obs"][..., :2]
                     
                 j2d_loss = F.mse_loss(pred_j2d_01, gt_c_j17_2d, reduction="none")
+                if text_only is not None and text_only_losses != 'all' and 'j2d_train2d' not in text_only_losses:
+                    j2d_loss[text_only] = 0
                 j2d_loss = (j2d_loss * mask[..., None, None] * conf_2d[..., None]).mean()
 
                 total_loss += j2d_loss * self.weights.j2d_train2d
@@ -281,6 +302,8 @@ class Pipeline(nn.Module):
                 kp2d_gt = inputs["orig_obs"][..., :2]
 
                 norm_j2d_loss = F.mse_loss(kp2d_norm, kp2d_gt, reduction="none")
+                if text_only is not None and text_only_losses != 'all' and 'norm_j2d' not in text_only_losses:
+                    norm_j2d_loss[text_only] = 0
                 norm_j2d_loss = (norm_j2d_loss * mask[..., None, None] * conf_2d[..., None]).mean()
 
                 total_loss += norm_j2d_loss * self.weights.norm_j2d
