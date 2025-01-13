@@ -25,15 +25,18 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
     def __init__(
         self,
         version='v2d', # [v2d, vlocal, vglobal]
+        motion_start_mode='sample',  # ["sample", "first"]
     ):
         self.hmr4d_support_dir = Path("inputs/MotionXpp/hmr4d_support")
         self.root = Path("inputs/MotionXpp/hmr4d_support")
+        self.text_embed_file = Path("inputs/MotionXpp_ye/t5_embeddings_v1/all_text_embed.pth") # TODO: USE THE STANDARD PATH
         self.dataset_name = "Motion-X++"
 
         # Setting
         self.min_motion_frames = 60
         self.max_motion_frames = 120
         self.version = version
+        self.motion_start_mode = motion_start_mode
         super().__init__()
 
     def _load_dataset(self):
@@ -41,6 +44,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         tic = time()
         self.train_labels = torch.load(self.root / "motionxpp_smplxposev3.pth")
         self.f_img_folder = self.hmr4d_support_dir / "imgfeats/"
+        self.text_embed_dict = torch.load(self.text_embed_file)
 
         Log.info(f"[Motion-X++] Motion files loaded. Elapsed: {time() - tic:.2f}s")
 
@@ -59,6 +63,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         data = {}
         vid = self.idx2meta[idx]
         data = self.train_labels[vid].copy()
+        text_embed = self.text_embed_dict[vid]
         subset = data["subset"]
         file_name = data["file_name"]
 
@@ -67,15 +72,18 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         min_motion_len = self.min_motion_frames
         max_motion_len = self.max_motion_frames
 
-        start = 0
         if mlength < min_motion_len:  # the minimal mlength is 30 when generating data
             length = mlength
         else:
             length = min(max_motion_len, mlength)
+        if self.motion_start_mode == "sample":
+            start = np.random.randint(0, max(mlength - length + 1, 1))
+        else:
+            start = 0
         end = start + length
         data["start_end"] = (start, end)
         data["length"] = length
-        mask = np.ones((self.max_motion_frames,))
+        mask = np.zeros((self.max_motion_frames,))
         mask[:length] = 1
         data["meta"] = {
             "data_name": self.dataset_name,
@@ -105,9 +113,9 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         # remap (start, end)
         data["f_imgseq"] = features[start:end].float()  # (L, 1024)
 
-        data["bbx_xys"] = bbx_xys[start:end].float()  # (L, 4)
+        data["bbx_xys"] = bbx_xys.float()  # (L, 4)
         data["img_wh"] = torch.tensor([width, height])  # (2)
-        data["kp2d"] = kp2d[start:end].float()  # (L, 17, 3)
+        data["kp2d"] = kp2d.float()  # (L, 17, 3)
 
         fx, fy, cx, cy = data['intrins']
         K_fullimg = torch.eye(3).repeat(self.max_motion_frames, 1, 1)
@@ -117,6 +125,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         K_fullimg[:, 1, 2] = cy
         data['K_fullimg'] = K_fullimg
         data['mask'] = mask.astype(np.bool8)
+        data['text_embed'] = text_embed[0]
 
         return data
 
@@ -175,6 +184,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
                 "conf": conf,
                 "length": length,
                 "is_2d": True,
+                "use_cliffcam": True,
                 "meta": {
                     "dataset_id": "motion-x++2d",
                 },
@@ -186,6 +196,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
             return_data["f_imgseq"] = repeat_to_max_len(return_data["f_imgseq"], max_len)
             return_data["obs_kp2d"] = repeat_to_max_len(torch.from_numpy(return_data["obs_kp2d"]), max_len).numpy()
             return_data["conf"] = repeat_to_max_len(torch.from_numpy(return_data["conf"]), max_len).numpy()
+            return_data["text_embed"] = data["text_embed"]
         else:
             return_data = {
                 "meta": {"data_name": "bedlam", "idx": idx},
@@ -228,6 +239,6 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         return return_data
 
 
-MainStore.store(name="v2d", node=builds(MotionXDataset, version="v2d"), group="train_2d_datasets/imgfeat_motionx")
-MainStore.store(name="vlocal", node=builds(MotionXDataset, version="vlocal"), group="train_datasets/imgfeat_motionx")
-MainStore.store(name="vglobal", node=builds(MotionXDataset, version="vglobal"), group="train_datasets/imgfeat_motionx")
+MainStore.store(name="v2d", node=builds(MotionXDataset, version="v2d", motion_start_mode="sample"), group="train_2d_datasets/imgfeat_motionx")
+MainStore.store(name="vlocal", node=builds(MotionXDataset, version="vlocal", motion_start_mode="sample"), group="train_datasets/imgfeat_motionx")
+MainStore.store(name="vglobal", node=builds(MotionXDataset, version="vglobal", motion_start_mode="sample"), group="train_datasets/imgfeat_motionx")

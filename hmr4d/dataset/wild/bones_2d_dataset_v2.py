@@ -180,6 +180,7 @@ class Bones2DDatasetV2SingleView(Bones2DDatasetV2):
             outputs = self.get_precompute_data(item)
             outputs['K_fullimg'] = self.cam_intrinsics.repeat(self.num_frames, 1, 1)
             outputs['f_imgseq'] = torch.zeros((self.num_frames, 1024))
+            outputs['use_cliffcam'] = False
             return outputs
         else:
             target = self.get_motion(item)
@@ -197,6 +198,7 @@ class Bones2DDatasetV2SingleView(Bones2DDatasetV2):
                 'mask': mask.astype(np.bool8),  # (F,)
                 'conf': conf,  # (F, 17)
                 'length': m_length,
+                'use_cliffcam': False,
                 'is_2d': True,
                 'meta': {
                     'dataset_id': 'bones2d_v2',

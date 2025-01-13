@@ -80,9 +80,10 @@ class Pipeline(nn.Module):
                 f_condition[k] = torch.zeros(B, L, self.f_condition_dim[k]).to(inputs["obs"])
         for k in self.args.mask_out_attr:
             f_condition[k] = torch.zeros_like(f_condition[k])
-        for k in inputs.get("f_condition_mask", {}):
+        f_condition_mask = inputs.get("f_condition_mask", {})
+        for k in f_condition_mask:
             if k in f_condition:
-                mask = inputs["f_condition_mask"][k][:, None, None, None] if k in ['obs'] else inputs["f_condition_mask"][k][:, None, None]
+                mask = f_condition_mask[:, None, None, None] if k in ['obs'] else f_condition_mask[:, None, None]
                 f_condition[k] = f_condition[k] * (1 - mask.float())
         # for k, v in f_condition.items():
         #     print(k, v[1].norm())
@@ -184,6 +185,15 @@ class Pipeline(nn.Module):
         outputs = dict()
         device = inputs["obs"].device
         B, L = inputs["obs"].shape[:2]
+        
+        if inputs['use_cliffcam'].any():
+            inputs['f_cliffcam'] = compute_bbox_info_bedlam(inputs["bbx_xys"], inputs["K_fullimg"])  # (B, L, 3)
+            inputs['f_cliffcam'][~inputs['use_cliffcam']] = 0
+        if 'cam_angvel' in inputs:
+            f_cam_angvel = inputs["cam_angvel"]
+            if self.args.normalize_cam_angvel:
+                f_cam_angvel = (f_cam_angvel - self.cam_angvel_mean) / self.cam_angvel_std
+            inputs["f_cam_angvel"] = f_cam_angvel
 
         # input view generation
         f_condition = dict()
@@ -194,6 +204,11 @@ class Pipeline(nn.Module):
                 f_condition[k] = torch.zeros(B, L, self.f_condition_dim[k]).to(inputs["obs"])
         for k in self.args.mask_out_attr:
             f_condition[k] = torch.zeros_like(f_condition[k])
+        f_condition_mask = inputs.get("f_condition_mask", {})
+        for k in f_condition_mask:
+            if k in f_condition:
+                mask = f_condition_mask[:, None, None, None] if k in ['obs'] else f_condition_mask[:, None, None]
+                f_condition[k] = f_condition[k] * (1 - mask.float())
            
         if train:
             f_condition = randomly_set_null_condition(f_condition, 0.1)
