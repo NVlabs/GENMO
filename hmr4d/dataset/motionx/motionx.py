@@ -240,12 +240,17 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         return return_data
 
 
+MainStore.store(name="v2d", node=builds(MotionXDataset, version="v2d", motion_start_mode="sample", split="train"), group="train_2d_datasets/imgfeat_motionx")
 MainStore.store(name="v2d_train", node=builds(MotionXDataset, version="v2d", motion_start_mode="sample", split="train"), group="train_2d_datasets/imgfeat_motionx")
 MainStore.store(name="v2d_val", node=builds(MotionXDataset, version="v2d", motion_start_mode="sample", split="val"), group="test_datasets/imgfeat_motionx")
 MainStore.store(name="v2d_test", node=builds(MotionXDataset, version="v2d", motion_start_mode="sample", split="test"), group="test_datasets/imgfeat_motionx")
+
+MainStore.store(name="vlocal", node=builds(MotionXDataset, version="vlocal", motion_start_mode="sample", split="train"), group="train_datasets/imgfeat_motionx")
 MainStore.store(name="vlocal_train", node=builds(MotionXDataset, version="vlocal", motion_start_mode="sample", split="train"), group="train_datasets/imgfeat_motionx")
 MainStore.store(name="vlocal_val", node=builds(MotionXDataset, version="vlocal", motion_start_mode="sample", split="val"), group="test_datasets/imgfeat_motionx")
 MainStore.store(name="vlocal_test", node=builds(MotionXDataset, version="vlocal", motion_start_mode="sample", split="test"), group="test_datasets/imgfeat_motionx")
+
+MainStore.store(name="vglobal", node=builds(MotionXDataset, version="vglobal", motion_start_mode="sample", split="train"), group="train_datasets/imgfeat_motionx")
 MainStore.store(name="vglobal_train", node=builds(MotionXDataset, version="vglobal", motion_start_mode="sample", split="train"), group="train_datasets/imgfeat_motionx")
 MainStore.store(name="vglobal_val", node=builds(MotionXDataset, version="vglobal", motion_start_mode="sample", split="val"), group="test_datasets/imgfeat_motionx")
 MainStore.store(name="vglobal_test", node=builds(MotionXDataset, version="vglobal", motion_start_mode="sample", split="test"), group="test_datasets/imgfeat_motionx")
