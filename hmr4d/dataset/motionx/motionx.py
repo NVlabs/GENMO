@@ -26,12 +26,13 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         self,
         version='v2d', # [v2d, vlocal, vglobal]
         motion_start_mode='sample',  # ["sample", "first"]
+        split='train',
     ):
         self.hmr4d_support_dir = Path("inputs/MotionXpp/hmr4d_support")
         self.root = Path("inputs/MotionXpp/hmr4d_support")
         self.text_embed_file = Path("inputs/MotionXpp_ye/t5_embeddings_v1/all_text_embed.pth") # TODO: USE THE STANDARD PATH
         self.dataset_name = "Motion-X++"
-
+        self.split = split
         # Setting
         self.min_motion_frames = 60
         self.max_motion_frames = 120
@@ -42,7 +43,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
     def _load_dataset(self):
         Log.info(f"[Motion-X++] Loading from {self.root}")
         tic = time()
-        self.train_labels = torch.load(self.root / "motionxpp_smplxposev3.pth")
+        self.train_labels = torch.load(self.root / f"motionxpp_smplxposev3_{self.split}.pth")
         self.f_img_folder = self.hmr4d_support_dir / "imgfeats/"
         self.text_embed_dict = torch.load(self.text_embed_file)
 
@@ -239,6 +240,13 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         return return_data
 
 
-MainStore.store(name="v2d", node=builds(MotionXDataset, version="v2d", motion_start_mode="sample"), group="train_2d_datasets/imgfeat_motionx")
-MainStore.store(name="vlocal", node=builds(MotionXDataset, version="vlocal", motion_start_mode="sample"), group="train_datasets/imgfeat_motionx")
-MainStore.store(name="vglobal", node=builds(MotionXDataset, version="vglobal", motion_start_mode="sample"), group="train_datasets/imgfeat_motionx")
+MainStore.store(name="v2d_train", node=builds(MotionXDataset, version="v2d", motion_start_mode="sample", split="train"), group="train_2d_datasets/imgfeat_motionx")
+MainStore.store(name="v2d_val", node=builds(MotionXDataset, version="v2d", motion_start_mode="sample", split="val"), group="test_datasets/imgfeat_motionx")
+MainStore.store(name="v2d_test", node=builds(MotionXDataset, version="v2d", motion_start_mode="sample", split="test"), group="test_datasets/imgfeat_motionx")
+MainStore.store(name="vlocal_train", node=builds(MotionXDataset, version="vlocal", motion_start_mode="sample", split="train"), group="train_datasets/imgfeat_motionx")
+MainStore.store(name="vlocal_val", node=builds(MotionXDataset, version="vlocal", motion_start_mode="sample", split="val"), group="test_datasets/imgfeat_motionx")
+MainStore.store(name="vlocal_test", node=builds(MotionXDataset, version="vlocal", motion_start_mode="sample", split="test"), group="test_datasets/imgfeat_motionx")
+MainStore.store(name="vglobal_train", node=builds(MotionXDataset, version="vglobal", motion_start_mode="sample", split="train"), group="train_datasets/imgfeat_motionx")
+MainStore.store(name="vglobal_val", node=builds(MotionXDataset, version="vglobal", motion_start_mode="sample", split="val"), group="test_datasets/imgfeat_motionx")
+MainStore.store(name="vglobal_test", node=builds(MotionXDataset, version="vglobal", motion_start_mode="sample", split="test"), group="test_datasets/imgfeat_motionx")
+
