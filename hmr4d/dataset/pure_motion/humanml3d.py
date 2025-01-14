@@ -55,7 +55,10 @@ class Humanml3dDataset(BaseDataset):
         random_subset_seed=7
     ):
         self.root = Path("inputs/HumanML3D_SMPL/hmr4d_support")
-        self.text_embed_file = Path("inputs/HumanML3D_SMPL_ye/t5_embeddings_v1/all_text_embed.pth") # TODO: USE THE STANDARD PATH
+        if split == "train":
+            self.text_embed_file = Path("inputs/HumanML3D_SMPL_ye/t5_embeddings_v1/all_text_embed.pth") # TODO: USE THE STANDARD PATH
+        else:
+            self.text_embed_file = Path("inputs/HumanML3D_SMPL_ye/t5_embeddings_v1/test_text_embed.pth")
         self.motion_frames = motion_frames
         self.l_factor = l_factor
         self.random1024 = random1024
@@ -357,6 +360,6 @@ train_group_name = "train_datasets/pure_motion_humanml3d"
 MainStore.store(name="v11_train", node=builds(Humanml3dDataset, cam_augmentation="v11", split="train"), group=train_group_name)
 MainStore.store(name="static_train", node=builds(Humanml3dDataset, cam_augmentation="static", split="train"), group=train_group_name)
 test_group_name = "test_datasets/pure_motion_humanml3d"
-MainStore.store(name="v11_test", node=builds(Humanml3dDataset, cam_augmentation="v11", split="test"), group=test_group_name)
-MainStore.store(name="static_test", node=builds(Humanml3dDataset, cam_augmentation="static", split="test"), group=test_group_name)
+MainStore.store(name="v11_test", node=builds(Humanml3dDataset, cam_augmentation="v11", split="test", eval_text_only=True), group=test_group_name)
+MainStore.store(name="static_test", node=builds(Humanml3dDataset, cam_augmentation="static", split="test", eval_text_only=True), group=test_group_name)
 

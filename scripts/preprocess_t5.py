@@ -52,7 +52,7 @@ text_encoder.cuda()
 
 torch.autograd.set_grad_enabled(False)
 
-dataset = Humanml3dDataset(cam_augmentation="v11")
+dataset = Humanml3dDataset(cam_augmentation="v11", split='test')
 output_dir = 'inputs/HumanML3D_SMPL/t5_embeddings_v1'
 os.makedirs(output_dir, exist_ok=True)
 
@@ -66,5 +66,5 @@ for i, (mid, data) in enumerate(dataset.motion_files.items()):
     text_embed_dict[mid] = text_embed
     print(f'{i}/{len(dataset)} {mid}')
 
-torch.save(text_embed_dict, os.path.join(output_dir, f"all_text_embed.pth"))
+torch.save(text_embed_dict, os.path.join(output_dir, f"test_text_embed.pth"))
 print(len(dataset))

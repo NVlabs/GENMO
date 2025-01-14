@@ -27,6 +27,8 @@ from tqdm import tqdm
 from pathlib import Path
 import numpy as np
 import cv2
+import hydra
+import os
 
 from smplx.joint_names import JOINT_NAMES
 from hmr4d.utils.net_utils import repeat_to_max_len, gaussian_smooth
@@ -35,10 +37,14 @@ from hmr4d.model.gvhmr.utils.vis_utils import visualize_smpl_scene
 
 
 class VisText(pl.Callback):
-    def __init__(self, vis_every_n_val=10):
+    def __init__(self, vis_every_n_val=10, save_feats=False, save_dir=None, endecoder=None):
         super().__init__()
         self.vis_every_n_val = vis_every_n_val
         self.num_val = 0
+        self.save_feats = save_feats
+        self.save_dir = save_dir
+        if endecoder is not None:
+            self.endecoder = hydra.utils.instantiate(endecoder).cuda()
         # vid->result
 
         # SMPL
@@ -91,23 +97,37 @@ class VisText(pl.Callback):
         # 2. ay
         pred_smpl_params_global = outputs["pred_smpl_params_global"]
         pred_ay_j3d = self.smplx_model["neutral"](**pred_smpl_params_global)
-        offset = pred_smpl_params_global["transl"][:, None] - pred_ay_j3d[:, [0]]
-        pred_ay_j3d = pred_ay_j3d + offset
         # pred_ay_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in smpl_out.vertices])
         # pred_ay_j3d = einsum(self.J_regressor, pred_ay_verts, "j v, l v i -> l j i")
         
-        # Visualize
-        if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
-            wandb_dict = visualize_smpl_scene('vis_text_global', batch_idx, vid, pred_ay_j3d, target_w_j3d, transform_mode='global')
-            self.wandb_html_dict.update(wandb_dict)
+        if self.save_feats:
+            encoder_inputs = {
+                'smpl_params_w': {k: v.unsqueeze(0) for k, v in outputs["pred_smpl_params_global"].items()},
+            }
+            feats = self.endecoder.encode_humanml3d(encoder_inputs)
+            self.feats_arr.append(feats)
+        else:
+            # Visualize
+            if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
+                wandb_dict = visualize_smpl_scene('vis_text_global', batch_idx, vid, pred_ay_j3d, target_w_j3d, transform_mode='global')
+                self.wandb_html_dict.update(wandb_dict)
         return
 
 
     def on_predict_epoch_start(self, trainer, pl_module):
         self.wandb_html_dict = {}
+        if self.save_feats:
+            self.feats_arr = []
+            print(f"start generating text-to-motion features which will be saved at {self.save_dir}")
         
 
     # ================== Epoch Summary  ================== #
     def on_predict_epoch_end(self, trainer, pl_module):
         self.num_val += 1
-        pl_module.logger.log_metrics(self.wandb_html_dict)
+        if len(self.wandb_html_dict) > 0:
+            pl_module.logger.log_metrics(self.wandb_html_dict)
+        if self.save_feats:
+            feats_arr = torch.cat(self.feats_arr, dim=0).cpu()
+            os.makedirs(self.save_dir, exist_ok=True)
+            torch.save(feats_arr, self.save_dir / 'feats.pt')
+            print(f"text-to-motion features saved at {self.save_dir}")
