@@ -86,8 +86,9 @@ def train(cfg: DictConfig) -> None:
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(cfg.data, _recursive_=False)
     model: pl.LightningModule = hydra.utils.instantiate(cfg.model, _recursive_=False)
     
-    if cfg.get('pretrain_2d_ckpt', None) is not None and cfg.ckpt_path is None:
-        load_pretrained_model(model, cfg.pretrain_2d_ckpt)
+    if cfg.get('pretrain_ckpt', None) is not None and cfg.ckpt_path is None and cfg.resume_mode is None:
+        load_pretrained_model(model, cfg.pretrain_ckpt)
+        print(f"Loaded pretrained model from {cfg.pretrain_ckpt}")
     
     
     wandb_cfg = OmegaConf.to_container(cfg, resolve=True)
