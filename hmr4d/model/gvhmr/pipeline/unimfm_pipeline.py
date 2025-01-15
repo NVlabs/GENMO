@@ -145,21 +145,22 @@ class Pipeline(nn.Module):
                     "betas": decode_dict["betas"],
                     **pred_smpl_params_global,
                 }
-                intermediate_pred_smpl_params_global = []
-                for int_decode_dict in outputs["intermediate_decode_dict"]:
-                    pred_smpl_params_global = get_smpl_params_w_Rt_v2(
-                        global_orient_gv=int_decode_dict["global_orient_gv"],
-                        local_transl_vel=int_decode_dict["local_transl_vel"],
-                        global_orient_c=int_decode_dict["global_orient"],
-                        cam_angvel=inputs["cam_angvel"],
-                    )
-                    pred_smpl_params_global = {
-                        "body_pose": int_decode_dict["body_pose"],
-                        "betas": int_decode_dict["betas"],
-                        **pred_smpl_params_global,
-                    }
-                    intermediate_pred_smpl_params_global.append(pred_smpl_params_global)
-                outputs["intermediate_pred_smpl_params_global"] = intermediate_pred_smpl_params_global
+                if 'intermediate_decode_dict' in outputs:
+                    intermediate_pred_smpl_params_global = []
+                    for int_decode_dict in outputs["intermediate_decode_dict"]:
+                        pred_smpl_params_global = get_smpl_params_w_Rt_v2(
+                            global_orient_gv=int_decode_dict["global_orient_gv"],
+                            local_transl_vel=int_decode_dict["local_transl_vel"],
+                            global_orient_c=int_decode_dict["global_orient"],
+                            cam_angvel=inputs["cam_angvel"],
+                        )
+                        pred_smpl_params_global = {
+                            "body_pose": int_decode_dict["body_pose"],
+                            "betas": int_decode_dict["betas"],
+                            **pred_smpl_params_global,
+                        }
+                        intermediate_pred_smpl_params_global.append(pred_smpl_params_global)
+                    outputs["intermediate_pred_smpl_params_global"] = intermediate_pred_smpl_params_global
             else:
                 outputs["pred_smpl_params_global"] = {
                     "body_pose": decode_dict["body_pose"],
