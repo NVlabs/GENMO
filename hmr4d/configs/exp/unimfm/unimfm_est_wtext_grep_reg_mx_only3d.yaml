@@ -9,13 +9,11 @@ defaults:
     - override /scheduler_cfg: epoch_half_200_350
     - override /train_datasets:
           - pure_motion_amass/v11
-        #   - pure_motion_humanml3d/static_train
+          - pure_motion_humanml3d/static_train
           - imgfeat_bedlam/v2
           - imgfeat_h36m/v1
           - imgfeat_3dpw/v1
           - imgfeat_3dpw_occ/v1
-    # - override /train_2d_datasets:
-    #       - imgfeat_motionx/v2d_train
     - override /test_datasets:
           - humanml3d_eval
           - emdb1/v1_fliptest
@@ -49,8 +47,8 @@ data_name: mocap_mixed_v1
 # pretrain_2d_ckpt: "/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/yey/gvhmr/mocap_mixed_v1/mv2d/diff2d/diff2d_base_tt/version_0/checkpoints/last.ckpt"
 
 model_cfg:
-    train_3d_modes: ["diffusion"]
-    train_2d_modes: ["diffusion"]
+    train_3d_modes: ["regression", "diffusion"]
+    train_2d_modes: ["regression", "diffusion"]
     start_2d_training_steps: 0
     noisy_2d_obs: true
     kp2d_noise_scale: 0.5

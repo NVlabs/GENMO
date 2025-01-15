@@ -49,8 +49,8 @@ data_name: mocap_mixed_v1
 # pretrain_2d_ckpt: "/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/yey/gvhmr/mocap_mixed_v1/mv2d/diff2d/diff2d_base_tt/version_0/checkpoints/last.ckpt"
 
 model_cfg:
-    train_3d_modes: ["diffusion"]
-    train_2d_modes: ["diffusion"]
+    train_3d_modes: ["regression"]
+    train_2d_modes: ["regression"]
     start_2d_training_steps: 0
     noisy_2d_obs: true
     kp2d_noise_scale: 0.5
@@ -97,6 +97,7 @@ pipeline:
         normalize_cam_angvel: true
         use_regression_outputs_prob: 1.
         use_cfg_sampler_for_text: true
+        regression_only: true
         weights:
             cr_j3d: 500.
             transl_c: 1.
