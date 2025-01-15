@@ -77,7 +77,7 @@ for cfg_f in cfg_files:
     if not args.debug:
         cmd = f"tools/train_v2.py exp={cfg} exp_name_var={args.cfg_var} pl_trainer.devices={args.gpus} {args.additional_args}"
         if args.resume:
-            cmd += " resume_mode=last"
+            cmd += f" resume_mode={args.resume_cp}"
     else:
         args.partition = "interactive"
         cmd = ' --version; sleep 1000'

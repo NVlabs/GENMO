@@ -56,9 +56,9 @@ class Humanml3dDataset(BaseDataset):
     ):
         self.root = Path("inputs/HumanML3D_SMPL/hmr4d_support")
         if split == "train":
-            self.text_embed_file = Path("inputs/HumanML3D_SMPL_ye/t5_embeddings_v1/all_text_embed.pth") # TODO: USE THE STANDARD PATH
+            self.text_embed_file = Path("inputs/HumanML3D_SMPL_ye/t5_embeddings_v1_half/all_text_embed.pth") # TODO: USE THE STANDARD PATH
         else:
-            self.text_embed_file = Path("inputs/HumanML3D_SMPL_ye/t5_embeddings_v1/test_text_embed.pth")
+            self.text_embed_file = Path("inputs/HumanML3D_SMPL_ye/t5_embeddings_v1_half/test_text_embed.pth")
         self.motion_frames = motion_frames
         self.l_factor = l_factor
         self.random1024 = random1024
@@ -141,7 +141,7 @@ class Humanml3dDataset(BaseDataset):
         # Load original data
         mid, start_id = self.idx2meta[idx]
         raw_data = self.motion_files[mid]
-        text_embed_data = self.text_embed_dict[mid]
+        text_embed_data = self.text_embed_dict[mid].float()
         raw_len = raw_data["pose"].shape[0] - start_id
         data = {
             "body_pose": raw_data["pose"][start_id:, 3:],  # (F, 63)

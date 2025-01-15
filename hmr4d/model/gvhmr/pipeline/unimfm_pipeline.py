@@ -88,6 +88,9 @@ class Pipeline(nn.Module):
         # for k, v in f_condition.items():
         #     print(k, v[1].norm())
         
+        if inputs.get('text_mask', None) is not None:
+            inputs['encoded_text'] = inputs['encoded_text'] * (1 - inputs['text_mask'][:, None, None].float())
+           
         if train:
             f_condition = randomly_set_null_condition(f_condition, 0.1)
 

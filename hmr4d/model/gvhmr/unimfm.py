@@ -188,9 +188,18 @@ class UNIMFM(pl.LightningModule):
     def create_condition_mask(self, batch, mode):
         cond_mask_cfg = self.model_cfg.get("condition_mask", {})
         reuse_regression_mask = cond_mask_cfg.get("reuse_regression_mask", True)
+        regression_no_img_mask = cond_mask_cfg.get("regression_no_img_mask", False)
+        mask_text_prob = cond_mask_cfg.get("mask_text_prob", {}).get(mode, 0.0)
         mask_img_prob = cond_mask_cfg.get("mask_img_prob", 0.0)
         mask_cam_prob = cond_mask_cfg.get("mask_cam_prob", 0.0)
-        regression_no_img_mask = cond_mask_cfg.get("regression_no_img_mask", False)
+        if mask_text_prob > 0:
+            mask_text = (torch.rand(batch["B"]) < mask_text_prob).to(batch["bbx_xys"].device)
+            batch['text_mask'] = mask_text
+        else:
+            batch['text_mask'] = None
+        if batch.get('text_mask', None) is not None:
+            batch['has_text'][batch['text_mask']] = False
+        
         if reuse_regression_mask and mode == 'diffusion':
             batch['f_condition_mask'] = batch['regression_outputs']['f_condition_mask']
             batch['text_only'] = batch['regression_outputs']['text_only']

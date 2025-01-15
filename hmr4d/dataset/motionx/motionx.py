@@ -30,7 +30,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
     ):
         self.hmr4d_support_dir = Path("inputs/MotionXpp/hmr4d_support")
         self.root = Path("inputs/MotionXpp/hmr4d_support")
-        self.text_embed_file = Path("inputs/MotionXpp_ye/t5_embeddings_v1/all_text_embed.pth") # TODO: USE THE STANDARD PATH
+        self.text_embed_file = Path("inputs/MotionXpp_ye/t5_embeddings_v1_half/all_text_embed.pth") # TODO: USE THE STANDARD PATH
         self.dataset_name = "Motion-X++"
         self.split = split
         # Setting
@@ -64,7 +64,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         data = {}
         vid = self.idx2meta[idx]
         data = self.train_labels[vid].copy()
-        text_embed = self.text_embed_dict[vid]
+        text_embed = self.text_embed_dict[vid].float()
         subset = data["subset"]
         file_name = data["file_name"]
 
