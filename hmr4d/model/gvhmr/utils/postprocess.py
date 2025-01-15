@@ -119,6 +119,22 @@ def pp_static_joint_cam(outputs, endecoder: EnDecoder):
 
 
 @autocast(enabled=False)
+def pp_floor_height(pred_smpl_params_global, endecoder: EnDecoder):
+    pred_w_j3d = endecoder.fk_v2(**pred_smpl_params_global)
+    ####################
+
+    # Overwrite results:
+    # vectorized
+    post_w_transl = pred_smpl_params_global["transl"].clone()  # (B, L, 3)
+
+    # Put the sequence on the ground by -min(y), this does not consider foot height, for o3d vis
+    post_w_j3d = pred_w_j3d
+    ground_y = post_w_j3d[..., 1].flatten(-2).min(dim=-1)[0]  # (B,)  Minimum y value
+    post_w_transl[..., 1] -= ground_y
+
+    return post_w_transl
+
+@autocast(enabled=False)
 def process_ik(outputs, endecoder, static_conf=None):
     if static_conf is None:
         static_conf = outputs["static_conf_logits"].sigmoid()  # (B, L, J)

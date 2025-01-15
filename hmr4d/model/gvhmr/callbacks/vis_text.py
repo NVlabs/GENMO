@@ -33,7 +33,7 @@ import os
 from smplx.joint_names import JOINT_NAMES
 from hmr4d.utils.net_utils import repeat_to_max_len, gaussian_smooth
 from hmr4d.utils.geo.hmr_global import rollout_vel, get_static_joint_mask
-from hmr4d.model.gvhmr.utils.vis_utils import visualize_smpl_scene
+from hmr4d.model.gvhmr.utils.vis_utils import visualize_smpl_scene, visualize_intermediate_smpl_scene
 
 
 class VisText(pl.Callback):
@@ -97,6 +97,8 @@ class VisText(pl.Callback):
         # 2. ay
         pred_smpl_params_global = outputs["pred_smpl_params_global"]
         pred_ay_j3d = self.smplx_model["neutral"](**pred_smpl_params_global)
+        if 'intermediate_pred_smpl_params_global' in outputs:
+            intermediate_pred_ay_j3d = [self.smplx_model["neutral"](**pred_smpl_params_global).squeeze(0) for pred_smpl_params_global in outputs["intermediate_pred_smpl_params_global"]]
         # pred_ay_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in smpl_out.vertices])
         # pred_ay_j3d = einsum(self.J_regressor, pred_ay_verts, "j v, l v i -> l j i")
         
@@ -111,6 +113,9 @@ class VisText(pl.Callback):
             if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
                 wandb_dict = visualize_smpl_scene('vis_text_global', batch_idx, vid, pred_ay_j3d, target_w_j3d, transform_mode='global')
                 self.wandb_html_dict.update(wandb_dict)
+                if 'intermediate_pred_smpl_params_global' in outputs:
+                    wandb_dict = visualize_intermediate_smpl_scene('vis_intermediate_text_global', batch_idx, vid, intermediate_pred_ay_j3d, target_w_j3d, transform_mode='global')
+
         return
 
 

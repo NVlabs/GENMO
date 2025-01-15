@@ -7,23 +7,25 @@ defaults:
     - override /optimizer: adamw_2e-4
     - override /scheduler_cfg: epoch_half_200_350
     - override /train_datasets:
-          - pure_motion_humanml3d/static_train
+        #   - pure_motion_humanml3d/static_train
     #       - imgfeat_bedlam/v2
     #       - imgfeat_h36m/v1
     #       - imgfeat_3dpw/v1
     #       - imgfeat_3dpw_occ/v1
-    #       - imgfeat_motionx/vlocal
-    # - override /train_2d_datasets:
+    - override /train_2d_datasets:
+            - imgfeat_motionx/v2d_train
     #       - bones_2d
     - override /test_datasets:
-          - emdb1/v1_fliptest
-          - emdb2/v1_fliptest
-          - rich/all
-          - rich_occ/all
-          - 3dpw/fliptest
-          - 3dpw_occ/fliptest
-          - emdb1_occ/v1_fliptest
-          - emdb2_occ/v1_fliptest
+            - imgfeat_motionx/v2d_test
+        #   - imgfeat_motionx/vlocal_val
+        #   - emdb1/v1_fliptest
+        #   - emdb2/v1_fliptest
+        #   - rich/all
+        #   - rich_occ/all
+        #   - 3dpw/fliptest
+        #   - 3dpw_occ/fliptest
+        #   - emdb1_occ/v1_fliptest
+        #   - emdb2_occ/v1_fliptest
         #   - bones_2d_test
     - override /callbacks:
           - simple_ckpt_saver/every100e_top100

@@ -541,6 +541,9 @@ class MDMBase(nn.Module):
                 # sample_fn = diffusion.p_sample_loop
                 # kwargs = {}
 
+            if self.args.get("return_mid", False):
+                kwargs["return_mid"] = True
+
             samples_out = sample_fn(
                 denoiser,
                 (batch_size, self.denoiser.njoints, self.denoiser.nfeats, L),
@@ -569,6 +572,10 @@ class MDMBase(nn.Module):
             "pred_x": sample,
             "static_conf_logits": static_conf_logits,
         }
+
+        if self.args.get("return_mid", False):
+            output['intermediate_pred_x'] = [sample_i['pred_xstart'][:, :, self.s_pred_ind + 6:] for sample_i in samples_out['intermediates']]
+
         if 'pred_cam' in self.args.out_attr:
             output["pred_cam"] = pred_cam
         if 'cam_t_vel' in self.args.out_attr:

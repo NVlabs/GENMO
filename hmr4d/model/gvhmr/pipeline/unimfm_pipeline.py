@@ -12,6 +12,7 @@ from hmr4d.model.gvhmr.utils.endecoder import EnDecoder
 from hmr4d.model.gvhmr.utils.postprocess import (
     pp_static_joint,
     process_ik,
+    pp_floor_height,
     pp_static_joint_cam,
 )
 from hmr4d.model.gvhmr.utils import stats_compose
@@ -104,6 +105,9 @@ class Pipeline(nn.Module):
         model_output = self.denoiser3d(inputs, train=train, postproc=postproc, static_cam=static_cam, mode=mode)  # pred_x, pred_cam, static_conf_logits
         decode_dict = self.endecoder.decode(model_output["pred_x"])  # (B, L, C) -> dict
         outputs.update({"model_output": model_output, "decode_dict": decode_dict})
+        if 'intermediate_pred_x' in model_output:
+            int_decode_dict = [self.endecoder.decode(pred_x) for pred_x in model_output['intermediate_pred_x']]
+            outputs['intermediate_decode_dict'] = int_decode_dict
 
         # Post-processing
         if self.endecoder.encode_type == 'gvhmr':
@@ -113,6 +117,17 @@ class Pipeline(nn.Module):
                 "global_orient": decode_dict["global_orient"],  # (B, L, 3)
                 "transl": compute_transl_full_cam(model_output["pred_cam"], inputs["bbx_xys"], inputs["K_fullimg"]),
             }
+            outputs["intermediate_pred_smpl_params_incam"] = [
+                {
+                    "body_pose": int_decode_dict["body_pose"],
+                    "betas": int_decode_dict["betas"],
+                    "global_orient": int_decode_dict["global_orient"],
+                    "transl": compute_transl_full_cam(
+                        model_output["pred_cam"], inputs["bbx_xys"], inputs["K_fullimg"]
+                    ),
+                }
+                for int_decode_dict in outputs["intermediate_decode_dict"]
+            ]
         
         if not train:
             # if eval_text_only:
@@ -129,6 +144,21 @@ class Pipeline(nn.Module):
                     "betas": decode_dict["betas"],
                     **pred_smpl_params_global,
                 }
+                intermediate_pred_smpl_params_global = []
+                for int_decode_dict in outputs["intermediate_decode_dict"]:
+                    pred_smpl_params_global = get_smpl_params_w_Rt_v2(
+                        global_orient_gv=int_decode_dict["global_orient_gv"],
+                        local_transl_vel=int_decode_dict["local_transl_vel"],
+                        global_orient_c=int_decode_dict["global_orient"],
+                        cam_angvel=inputs["cam_angvel"],
+                    )
+                    pred_smpl_params_global = {
+                        "body_pose": int_decode_dict["body_pose"],
+                        "betas": int_decode_dict["betas"],
+                        **pred_smpl_params_global,
+                    }
+                    intermediate_pred_smpl_params_global.append(pred_smpl_params_global)
+                outputs["intermediate_pred_smpl_params_global"] = intermediate_pred_smpl_params_global
             else:
                 outputs["pred_smpl_params_global"] = {
                     "body_pose": decode_dict["body_pose"],
@@ -143,6 +173,13 @@ class Pipeline(nn.Module):
                     outputs["pred_smpl_params_global"]["transl"] = pp_static_joint_cam(outputs, self.endecoder)
                 else:
                     outputs["pred_smpl_params_global"]["transl"] = pp_static_joint(outputs, self.endecoder)
+
+                if "intermediate_pred_smpl_params_global" in outputs:
+                    for i in range(len(outputs["intermediate_pred_smpl_params_global"])):
+                        outputs["intermediate_pred_smpl_params_global"][i]["transl"] = pp_floor_height(
+                            outputs["intermediate_pred_smpl_params_global"][i],
+                            self.endecoder
+                        )
                 body_pose = process_ik(outputs, self.endecoder)
                 decode_dict["body_pose"] = body_pose
                 outputs["pred_smpl_params_global"]["body_pose"] = body_pose

@@ -28,7 +28,10 @@ from pathlib import Path
 import numpy as np
 import cv2
 
-from hmr4d.model.gvhmr.utils.vis_utils import visualize_smpl_scene
+from hmr4d.model.gvhmr.utils.vis_utils import (
+    visualize_smpl_scene,
+    visualize_intermediate_smpl_scene,
+)
 
 
 class MetricMocap(pl.Callback):
@@ -142,11 +145,25 @@ class MetricMocap(pl.Callback):
             pred_ay_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in smpl_out.vertices])
             pred_ay_j3d = einsum(self.J_regressor, pred_ay_verts, "j v, l v i -> l j i")
             del smpl_out  # Prevent OOM
-            
+            if 'intermediate_pred_smpl_params_global' in outputs:
+                intermediate_pred_ay_j3d_list = []
+                for i, pred_smpl_params_global_i in enumerate(outputs["intermediate_pred_smpl_params_global"]):
+                    pred_smpl_params_global_i = {k: v.squeeze(0) for k, v in pred_smpl_params_global_i.items()}
+                    intermediate_pred_smpl_out = self.smplx(**pred_smpl_params_global_i)
+                    intermediate_pred_ay_verts = torch.stack(
+                        [torch.matmul(self.smplx2smpl, v_) for v_ in intermediate_pred_smpl_out.vertices]
+                    )
+                    intermediate_pred_ay_j3d = einsum(self.J_regressor, intermediate_pred_ay_verts, "j v, l v i -> l j i")
+                    del intermediate_pred_smpl_out  # Prevent OOM
+                    intermediate_pred_ay_j3d_list.append(intermediate_pred_ay_j3d)
+
             if trainer.state.stage == "test" and trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
                 vis_type = 'vis_emdb2_global' if not self.occ else 'vis_emdb2_occ_global'
                 wandb_dict = visualize_smpl_scene(vis_type, batch_idx, vid, pred_ay_j3d, target_w_j3d, transform_mode='global')
                 self.wandb_html_dict.update(wandb_dict)
+                
+                if 'intermediate_pred_smpl_params_global' in outputs:
+                    wandb_dict = visualize_intermediate_smpl_scene(vis_type + '_intermediate', batch_idx, vid, intermediate_pred_ay_j3d_list, target_w_j3d, transform_mode='global')
                 
             batch_eval = {
                 "pred_j3d_glob": pred_ay_j3d,

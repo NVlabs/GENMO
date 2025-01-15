@@ -374,6 +374,9 @@ class UNIMFMDiffusion(nn.Module):
             else:
                 noise = torch.zeros_like(motion)
 
+            if self.args.get("return_mid", False):
+                kwargs['return_mid'] = True
+
             samples_out = sample_fn(
                 denoiser,
                 motion.shape,
@@ -403,6 +406,10 @@ class UNIMFMDiffusion(nn.Module):
             "pred_x": sample,
             "static_conf_logits": static_conf_logits,
         }
+
+        if self.args.get("return_mid", False):
+            output['intermediate_pred_x'] = [sample_i['pred_x'] for sample_i in samples_out['intermediates']]
+
         if 'pred_cam' in self.args.out_attr:
             output["pred_cam"] = pred_cam
         if 'cam_t_vel' in self.args.out_attr:

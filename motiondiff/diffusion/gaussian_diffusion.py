@@ -2049,6 +2049,7 @@ class GaussianDiffusion:
         guide_2d=None,
         overwrite_2d=False,
         overwrite_data=None,
+        return_mid=False,
     ):
         """
         Generate samples from the model using DDIM.
@@ -2062,6 +2063,7 @@ class GaussianDiffusion:
             raise NotImplementedError()
 
         final = None
+        intermediates = []
         for sample in self.ddim_sample_loop_progressive(
             model,
             shape,
@@ -2086,7 +2088,10 @@ class GaussianDiffusion:
             overwrite_2d=overwrite_2d,
             overwrite_data=overwrite_data,
         ):
+            intermediates.append(sample)
             final = sample
+        if return_mid:
+            final["intermediates"] = intermediates
         return final
 
     def ddim_sample_loop_progressive(
