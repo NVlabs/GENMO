@@ -141,17 +141,18 @@ class Pipeline(nn.Module):
             "global_orient": decode_dict["global_orient"],  # (B, L, 3)
             "transl": compute_transl_full_cam(model_output["pred_cam"], inputs["bbx_xys"], inputs["K_fullimg"]),
         }
-        outputs["intermediate_pred_smpl_params_incam"] = [
-            {
-                "body_pose": int_decode_dict["body_pose"],
-                "betas": int_decode_dict["betas"],
-                "global_orient": int_decode_dict["global_orient"],
-                "transl": compute_transl_full_cam(
-                    model_output["pred_cam"], inputs["bbx_xys"], inputs["K_fullimg"]
-                ),
-            }
-            for int_decode_dict in outputs["intermediate_decode_dict"]
-        ]
+        if 'intermediate_decode_dict' in outputs:
+            outputs["intermediate_pred_smpl_params_incam"] = [
+                {
+                    "body_pose": int_decode_dict["body_pose"],
+                    "betas": int_decode_dict["betas"],
+                    "global_orient": int_decode_dict["global_orient"],
+                    "transl": compute_transl_full_cam(
+                        model_output["pred_cam"], inputs["bbx_xys"], inputs["K_fullimg"]
+                    ),
+                }
+                for int_decode_dict in outputs["intermediate_decode_dict"]
+            ]
         if not train:
             if self.args.infer_version == 2:
                 pred_smpl_params_global = get_smpl_params_w_Rt_v2(  # This function has for-loop
