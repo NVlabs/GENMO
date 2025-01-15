@@ -25,7 +25,7 @@ defaults:
         #   - 3dpw_occ/fliptest
         #   - bones_2d_test
     - override /callbacks:
-          - simple_ckpt_saver/every10000s_top100
+          - simple_ckpt_saver/every3000s_top100
           - prog_bar/prog_reporter_every0.1
           - train_speed_timer/base
           - lr_monitor/pl
