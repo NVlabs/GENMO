@@ -323,6 +323,7 @@ class UNIMFM(pl.LightningModule):
         elif self.use_text_encoder:
             batch['encoded_text'] = self.encode_text(batch['caption'], batch['has_text'])
         
+        batch['obs_kp2d_raw'] = batch['obs_kp2d'].squeeze(2).clone()
         obs_kp2d = batch['obs_kp2d'].squeeze(2)
         conf = batch['conf']
         aug_bbox = self.model_cfg.get('train_2d_aug_bbox', False)
