@@ -316,7 +316,7 @@ class Pipeline(nn.Module):
                 
                 if self.weights.get('proj_gt_j2d_to_bi01', False):
                     bbx_lurb = convert_bbx_xys_to_lurb(inputs["bbx_xys"])
-                    gt_c_j17_2d = cvt_to_bi01_p2d(inputs['obs_kp2d'][:, :, 0], bbx_lurb)
+                    gt_c_j17_2d = cvt_to_bi01_p2d(inputs['obs_kp2d_raw'], bbx_lurb)
                     gt_c_j17_2d[~inputs["mask"]] = 0
                 else:
                     gt_c_j17_2d = inputs["orig_obs"][..., :2]
