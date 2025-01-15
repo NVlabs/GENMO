@@ -46,6 +46,9 @@ class UNIMFMDiffusion(nn.Module):
         latent_dim=512,
         dropout=0.1,
         args=None,
+        use_cond_exists_as_input=False,
+        cond_merge_strategy="add",
+        cond_exists_dim=512,
         **kwargs,
     ):
         super().__init__()
@@ -65,6 +68,9 @@ class UNIMFMDiffusion(nn.Module):
         self.dropout = dropout
         
         self.regression_input_type = self.args.get('regression_input_type', 'zero')
+        self.use_cond_exists_as_input = use_cond_exists_as_input
+        self.cond_merge_strategy = cond_merge_strategy
+        self.cond_exists_dim = cond_exists_dim
 
         assert 'obs' in self.args.in_attr, "obs (kp2d) must be in in_attr"
         self.learned_pos_linear = nn.Linear(2, 32)
@@ -106,6 +112,27 @@ class UNIMFMDiffusion(nn.Module):
                 nn.LayerNorm(self.imgseq_dim),
                 zero_module(nn.Linear(self.imgseq_dim, latent_dim)),
             )
+            
+        add_dim = 0
+        if self.use_cond_exists_as_input:
+            if cond_merge_strategy == 'add':
+                self.cond_exists_embedder = nn.ModuleDict()
+                for k in self.args.in_attr:
+                    self.cond_exists_embedder[k] = nn.Sequential(
+                        nn.Linear(latent_dim + 1, latent_dim),
+                        nn.SiLU(),
+                        zero_module(nn.Linear(latent_dim, latent_dim)),
+                    )
+            elif cond_merge_strategy == 'concat':
+                add_dim = cond_exists_dim
+                
+        if cond_merge_strategy == 'concat':
+            # self.cond_merger = nn.Linear(len(self.args.in_attr) * (latent_dim + add_dim), latent_dim)
+            self.cond_merger = nn.Sequential(
+                nn.Linear(len(self.args.in_attr) * (latent_dim + add_dim), latent_dim),
+                nn.SiLU(),
+                zero_module(nn.Linear(latent_dim, latent_dim)),
+            )
 
         self.denoiser = import_type_from_str(self.model_cfg.denoiser.type)(
             pl_module=self, **self.model_cfg.denoiser
@@ -123,9 +150,11 @@ class UNIMFMDiffusion(nn.Module):
         self, batch, target_x, static_gt
     ):
         f_condition = batch["f_condition"]
+        f_condition_exists = batch["f_condition_exists"] 
 
         length = batch["length"]
         assert 'obs' in f_condition
+        f_cond_dict = {}
         if 'obs' in f_condition:
             obs = f_condition["obs"]
             B, L, J, C = obs.shape
@@ -136,24 +165,37 @@ class UNIMFMDiffusion(nn.Module):
             f_obs = self.learned_pos_linear(obs[..., :2])  # (B, L, J, 32)
             f_obs = f_obs * visible_mask + self.learned_pos_params.repeat(B, L, 1, 1) * ~visible_mask  # (B, L, J, 32)
             f_obs = self.embed_noisyobs(f_obs.view(B, L, -1))  # (B, L, J*32) -> (B, L, C)
-            f_cond = f_obs
+            f_cond_dict["obs"] = f_obs
 
         if 'f_cliffcam' in f_condition:
             f_cliffcam = f_condition["f_cliffcam"]  # (B, L, 3)
             f_cliffcam = self.cliffcam_embedder(f_cliffcam)
-            f_cond = f_cond + f_cliffcam
+            f_cond_dict["f_cliffcam"] = f_cliffcam
         if "f_cam_angvel" in f_condition:
             f_cam_angvel = f_condition["f_cam_angvel"]  # (B, L, 6)
             f_cam_angvel = self.cam_angvel_embedder(f_cam_angvel)
-            f_cond = f_cond + f_cam_angvel
+            f_cond_dict["f_cam_angvel"] = f_cam_angvel
         if "f_cam_t_vel" in f_condition:
             f_cam_t_vel = f_condition["f_cam_t_vel"]  # (B, L, 3)
             f_cam_t_vel = self.cam_t_vel_embedder(f_cam_t_vel)
-            f_cond = f_cond + f_cam_t_vel
+            f_cond_dict["f_cam_t_vel"] = f_cam_t_vel
         if 'f_imgseq' in f_condition:
             f_imgseq = f_condition["f_imgseq"]  # (B, L, C)
             f_imgseq = self.imgseq_embedder(f_imgseq)
-            f_cond = f_cond + f_imgseq
+            f_cond_dict["f_imgseq"] = f_imgseq
+            
+        if self.cond_merge_strategy == 'add':
+            if self.use_cond_exists_as_input:
+                for k in f_cond_dict:
+                    f_cond_dict[k] = torch.cat([f_cond_dict[k], f_condition_exists[k][:, :, None].float()], dim=-1)
+                    f_cond_dict[k] = self.cond_exists_embedder[k](f_cond_dict[k])
+            f_cond = sum(f_cond_dict.values())
+        elif self.cond_merge_strategy == 'concat':
+            f_cond = torch.cat(list(f_cond_dict.values()), dim=-1)
+            f_cond_exists = torch.cat([f_condition_exists[k][:, :, None].float().repeat(1, 1, self.cond_exists_dim) for k in f_cond_dict], dim=-1)
+            if self.use_cond_exists_as_input:
+                f_cond = torch.cat([f_cond, f_cond_exists], dim=-1)
+            f_cond = self.cond_merger(f_cond)
 
         vis_mask = length_to_mask(length, L)  # (B, L)
 

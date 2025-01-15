@@ -186,13 +186,20 @@ class UNIMFM(pl.LightningModule):
         return outputs
     
     def create_condition_mask(self, batch, cond_mask_cfg, mode):
-        device = batch["bbx_xys"].device
+        device = batch["obs"].device
+        B, L = batch["obs"].shape[:2]
         reuse_regression_mask = cond_mask_cfg.get("reuse_regression_mask", True)
         regression_no_img_mask = cond_mask_cfg.get("regression_no_img_mask", False)
         mask_text_prob = cond_mask_cfg.get("mask_text_prob", {}).get(mode, 0.0)
         mask_img_prob = cond_mask_cfg.get("mask_img_prob", 0.0)
         mask_cam_prob = cond_mask_cfg.get("mask_cam_prob", 0.0)
         mask_f_imgseq_prob = cond_mask_cfg.get("mask_f_imgseq_prob", 0.0)
+        f_condition_exists = dict()
+        f_condition_exists['obs'] = (batch['obs'].view(B, -1).norm(dim=-1) > 1e-4).unsqueeze(-1).repeat(1, L)
+        f_condition_exists['f_cliffcam'] = f_condition_exists['obs'].clone()
+        f_condition_exists['f_imgseq'] = (batch['f_imgseq'].view(B, -1).norm(dim=-1) > 1e-4).unsqueeze(-1).repeat(1, L)
+        f_condition_exists['f_cam_angvel'] = torch.ones(B, L).bool().to(device)
+        
         if mask_text_prob > 0:
             mask_text = (torch.rand(batch["B"]) < mask_text_prob).to(device)
             batch['text_mask'] = mask_text
@@ -224,7 +231,10 @@ class UNIMFM(pl.LightningModule):
                     f_condition_mask["f_imgseq"] = f_condition_mask["f_imgseq"] | mask_f_imgseq
                 else:
                     f_condition_mask["f_imgseq"] = mask_f_imgseq
+            for k in f_condition_mask.keys():
+                f_condition_exists[k][f_condition_mask[k]] = False
             batch["f_condition_mask"] = f_condition_mask
+        batch['f_condition_exists'] = f_condition_exists
     
     def prepare_3d_batch(self, batch):
         if 'text_embed' in batch:
