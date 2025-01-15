@@ -91,7 +91,7 @@ class EncoderRoPEBlock(nn.Module):
 
 
 class DecoderRoPEBlock(nn.Module):
-    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, dropout=0.1, use_self_attn=True, **block_kwargs):
+    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, dropout=0.1, use_self_attn=True, cross_attn_type='rope', **block_kwargs):
         super().__init__()
         self.use_self_attn = use_self_attn
         if self.use_self_attn:
@@ -100,7 +100,11 @@ class DecoderRoPEBlock(nn.Module):
             self.gate_msa = nn.Parameter(torch.zeros(1, 1, hidden_size))
             nn.init.constant_(self.gate_msa, 0)
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6)
-        self.cross_attn = RoPEAttention(hidden_size, num_heads, dropout)
+        self.cross_attn_type = cross_attn_type
+        if cross_attn_type == 'rope':
+            self.cross_attn = RoPEAttention(hidden_size, num_heads, dropout)
+        elif cross_attn_type == 'mha':
+            self.cross_attn = nn.MultiheadAttention(hidden_size, num_heads, dropout=dropout, batch_first=True)
         self.norm3 = nn.LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6)
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
         approx_gelu = lambda: nn.GELU(approximate="tanh")
@@ -131,5 +135,10 @@ class DecoderRoPEBlock(nn.Module):
 
     def _ca_block(self, x, context, key_padding_mask=None):
         # x: (B, L, C)
-        x = self.cross_attn(x, context=context, key_padding_mask=key_padding_mask)
+        if self.cross_attn_type == 'rope':
+            x = self.cross_attn(x, context=context, key_padding_mask=key_padding_mask)
+        elif self.cross_attn_type == 'mha':
+            x = self.cross_attn(x, context, context, key_padding_mask=key_padding_mask)[0]
+        else:
+            raise ValueError(f"Invalid cross_attn_type: {self.cross_attn_type}")
         return x

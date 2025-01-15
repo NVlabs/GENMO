@@ -119,12 +119,17 @@ class NetworkEncoderRoPE(nn.Module):
         else:
             raise ValueError(f"Invalid text_encode_mode {text_encode_mode}")
         use_self_attn = text_encoder_cfg.get("use_self_attn", False)
-        self.text_encoder_layers = nn.ModuleDict(
-            {
-                f'{idx}': DecoderRoPEBlock(self.latent_dim, self.num_heads, use_self_attn=use_self_attn, mlp_ratio=mlp_ratio, dropout=dropout)
-                for idx in self.text_encode_layer_idx
-            }
-        )
+        net_type = text_encoder_cfg.get("net_type", "rope_decoder")
+        cross_attn_type = text_encoder_cfg.get("cross_attn_type", "rope")
+        self.text_encoder_layers = nn.ModuleDict()
+        for idx in self.text_encode_layer_idx:
+            if net_type == "rope_decoder":
+                text_block = DecoderRoPEBlock(
+                    self.latent_dim, self.num_heads, use_self_attn=use_self_attn, mlp_ratio=mlp_ratio, dropout=dropout, cross_attn_type=cross_attn_type
+                )
+            else:
+                raise ValueError(f"Invalid net_type {net_type}")
+            self.text_encoder_layers[f'{idx}'] = text_block
         
         # Output heads
         self.final_layer = Mlp(self.latent_dim, out_features=self.output_dim)

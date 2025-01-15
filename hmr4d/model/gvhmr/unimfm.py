@@ -200,7 +200,7 @@ class UNIMFM(pl.LightningModule):
         if batch.get('text_mask', None) is not None:
             batch['has_text'][batch['text_mask']] = False
         
-        if reuse_regression_mask and mode == 'diffusion':
+        if reuse_regression_mask and mode == 'diffusion' and 'regression_outputs' in batch:
             batch['f_condition_mask'] = batch['regression_outputs']['f_condition_mask']
             batch['text_only'] = batch['regression_outputs']['text_only']
         else:
