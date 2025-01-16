@@ -37,7 +37,7 @@ from hmr4d.model.gvhmr.utils.vis_utils import visualize_smpl_scene, visualize_in
 
 
 class VisText(pl.Callback):
-    def __init__(self, vis_every_n_val=10, save_feats=False, save_dir=None, endecoder=None):
+    def __init__(self, vis_every_n_val=1, save_feats=False, save_dir=None, endecoder=None):
         super().__init__()
         self.vis_every_n_val = vis_every_n_val
         self.num_val = 0

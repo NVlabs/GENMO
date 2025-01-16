@@ -185,20 +185,24 @@ class UNIMFM(pl.LightningModule):
                 
         return outputs
     
+    def init_condition_exists(self, batch):
+        B, L = batch["obs"].shape[:2]
+        f_condition_exists = dict()
+        f_condition_exists['obs'] = (batch['obs'].view(B, -1).norm(dim=-1) > 1e-4).unsqueeze(-1).repeat(1, L)
+        f_condition_exists['f_cliffcam'] = f_condition_exists['obs'].clone()
+        f_condition_exists['f_imgseq'] = (batch['f_imgseq'].view(B, -1).norm(dim=-1) > 1e-4).unsqueeze(-1).repeat(1, L)
+        f_condition_exists['f_cam_angvel'] = (batch['cam_angvel'].view(B, -1).norm(dim=-1) > 1e-4).unsqueeze(-1).repeat(1, L)
+        batch['f_condition_exists'] = f_condition_exists
+    
     def create_condition_mask(self, batch, cond_mask_cfg, mode):
         device = batch["obs"].device
-        B, L = batch["obs"].shape[:2]
         reuse_regression_mask = cond_mask_cfg.get("reuse_regression_mask", True)
         regression_no_img_mask = cond_mask_cfg.get("regression_no_img_mask", False)
         mask_text_prob = cond_mask_cfg.get("mask_text_prob", {}).get(mode, 0.0)
         mask_img_prob = cond_mask_cfg.get("mask_img_prob", 0.0)
         mask_cam_prob = cond_mask_cfg.get("mask_cam_prob", 0.0)
         mask_f_imgseq_prob = cond_mask_cfg.get("mask_f_imgseq_prob", 0.0)
-        f_condition_exists = dict()
-        f_condition_exists['obs'] = (batch['obs'].view(B, -1).norm(dim=-1) > 1e-4).unsqueeze(-1).repeat(1, L)
-        f_condition_exists['f_cliffcam'] = f_condition_exists['obs'].clone()
-        f_condition_exists['f_imgseq'] = (batch['f_imgseq'].view(B, -1).norm(dim=-1) > 1e-4).unsqueeze(-1).repeat(1, L)
-        f_condition_exists['f_cam_angvel'] = torch.ones(B, L).bool().to(device)
+        self.init_condition_exists(batch)
         
         if mask_text_prob > 0:
             mask_text = (torch.rand(batch["B"]) < mask_text_prob).to(device)
@@ -232,9 +236,8 @@ class UNIMFM(pl.LightningModule):
                 else:
                     f_condition_mask["f_imgseq"] = mask_f_imgseq
             for k in f_condition_mask.keys():
-                f_condition_exists[k][f_condition_mask[k]] = False
+                batch['f_condition_exists'][k][f_condition_mask[k]] = False
             batch["f_condition_mask"] = f_condition_mask
-        batch['f_condition_exists'] = f_condition_exists
     
     def prepare_3d_batch(self, batch):
         if 'text_embed' in batch:
@@ -516,6 +519,7 @@ class UNIMFM(pl.LightningModule):
             batch_['encoded_text'] = batch['text_embed'].cuda()
         elif self.use_text_encoder:
             batch_['encoded_text'] = self.encode_text(batch['caption'], batch['has_text'])
+        self.init_condition_exists(batch_)
         outputs = self.pipeline.forward(batch_, train=False, postproc=do_postproc_not_flip_test, global_step=self.trainer.global_step)
         outputs["pred_smpl_params_global"] = {k: v[0] for k, v in outputs["pred_smpl_params_global"].items()}
         if 'pred_smpl_params_incam' in outputs:
@@ -543,6 +547,7 @@ class UNIMFM(pl.LightningModule):
                 batch_['encoded_text'] = batch['text_embed'].cuda()
             elif self.use_text_encoder:
                 batch_['encoded_text'] = self.encode_text(batch['caption'], batch['has_text'])
+            self.init_condition_exists(batch_)
             flipped_outputs = self.pipeline.forward(batch_, train=False, global_step=self.trainer.global_step)
 
             # First update incam results
