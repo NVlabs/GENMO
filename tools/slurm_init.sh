@@ -25,7 +25,7 @@ export XDG_CACHE_HOME=$cache_dir
 if [[ -n "$SLURM_LOCALID" && "$SLURM_LOCALID" -ne 0 ]]; then
     # Place the commands you want to run here
     echo "sleep 30s since SLURM_LOCALID is not 0"
-    sleep 30
+    sleep 60
 else
     echo "run installation since SLURM_LOCALID is 0"
 

@@ -191,7 +191,10 @@ class UNIMFM(pl.LightningModule):
         f_condition_exists['obs'] = (batch['obs'].view(B, -1).norm(dim=-1) > 1e-4).unsqueeze(-1).repeat(1, L)
         f_condition_exists['f_cliffcam'] = f_condition_exists['obs'].clone()
         f_condition_exists['f_imgseq'] = (batch['f_imgseq'].view(B, -1).norm(dim=-1) > 1e-4).unsqueeze(-1).repeat(1, L)
-        f_condition_exists['f_cam_angvel'] = (batch['cam_angvel'].view(B, -1).norm(dim=-1) > 1e-4).unsqueeze(-1).repeat(1, L)
+        if 'cam_angvel' in batch:
+            f_condition_exists['f_cam_angvel'] = (batch['cam_angvel'].view(B, -1).norm(dim=-1) > 1e-4).unsqueeze(-1).repeat(1, L)
+        else:
+            f_condition_exists['f_cam_angvel'] = torch.zeros(B, L).bool().to(batch["obs"].device)
         batch['f_condition_exists'] = f_condition_exists
     
     def create_condition_mask(self, batch, cond_mask_cfg, mode):
