@@ -292,8 +292,6 @@ class Pipeline(nn.Module):
             simple_loss = (simple_loss * mask_simple).mean()
             total_loss += simple_loss * self.weights.simple_diffusion2d
             outputs["simple_loss"] = simple_loss
-        else:
-            outputs["simple_loss"] = 0.0
 
         # 2. Extra loss
         model_output = outputs["2d_model_output"]

@@ -188,9 +188,12 @@ class GaussianDiffusion:
         )
         # log calculation clipped because the posterior variance is 0 at the
         # beginning of the diffusion chain.
-        self.posterior_log_variance_clipped = np.log(
-            np.append(self.posterior_variance[1], self.posterior_variance[1:])
-        )
+        if len(self.posterior_variance) == 1:
+            self.posterior_log_variance_clipped = np.array([0.0])
+        else:
+            self.posterior_log_variance_clipped = np.log(
+                np.append(self.posterior_variance[1], self.posterior_variance[1:])
+            )
         self.posterior_mean_coef1 = (
             betas * np.sqrt(self.alphas_cumprod_prev) / (1.0 - self.alphas_cumprod)
         )
@@ -441,8 +444,8 @@ class GaussianDiffusion:
                 # for fixedlarge, we set the initial (log-)variance like so
                 # to get a better decoder log likelihood.
                 ModelVarType.FIXED_LARGE: (
-                    np.append(self.posterior_variance[1], self.betas[1:]),
-                    np.log(np.append(self.posterior_variance[1], self.betas[1:])),
+                    np.append(self.posterior_variance[1], self.betas[1:]) if len(self.posterior_variance) > 1 else self.betas,
+                    np.log(np.append(self.posterior_variance[1], self.betas[1:])) if len(self.posterior_variance) > 1 else np.log(self.betas),
                 ),
                 ModelVarType.FIXED_SMALL: (
                     self.posterior_variance,

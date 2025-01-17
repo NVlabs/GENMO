@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import importlib
 import numpy as np
 import random
+from copy import deepcopy
 from hmr4d.utils.net_utils import length_to_mask
 from hmr4d.network.base_arch.transformer.layer import zero_module
 from motiondiff.models.model_util import create_gaussian_diffusion
@@ -143,6 +144,9 @@ class UNIMFMDiffusion(nn.Module):
     def init_diffusion(self):
         self.train_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=True)
         self.test_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=False)
+        text_only_diffusion = deepcopy(self.model_cfg.diffusion)
+        text_only_diffusion.test_timestep_respacing = self.model_cfg.diffusion.get('text_only_test_timestep_respacing', '50')
+        self.test_text_only_diffusion = create_gaussian_diffusion(text_only_diffusion, training=False)
         self.schedule_sampler = create_named_schedule_sampler(self.model_cfg.diffusion.schedule_sampler_type, self.train_diffusion)
         return
 
@@ -245,9 +249,12 @@ class UNIMFMDiffusion(nn.Module):
             else:
                 pred_x_start_regression = torch.zeros_like(motion)
             x_start_reg = pred_x_start_regression
-            inpaint_mask = torch.ones_like(pred_x_start_regression)
-            inpaint_mask = inpaint_mask * valid_mask[:, :, None]
-            x_start_gt = motion.clone() * inpaint_mask + pred_x_start_regression * (1 - inpaint_mask)
+            if self.args.get('inpaint_x_start_gt', True):
+                inpaint_mask = torch.ones_like(pred_x_start_regression)
+                inpaint_mask = inpaint_mask * valid_mask[:, :, None]
+                x_start_gt = motion.clone() * inpaint_mask + pred_x_start_regression * (1 - inpaint_mask)
+            else:
+                x_start_gt = motion.clone()
             regression_mask = (torch.rand(B).to(motion.device) < self.args.use_regression_outputs_prob).float()
             if 'text_only' in batch and self.args.get('use_gt_for_text_only', True):
                 regression_mask[batch['text_only']] = 0
@@ -287,7 +294,7 @@ class UNIMFMDiffusion(nn.Module):
 
     def forward_train_2d(self, inputs, mode):
         assert self.training, "forward_train_2d should only be called during training"
-        diffusion = self.train_diffusion if self.training else self.test_diffusion
+        diffusion = self.train_diffusion
 
         length = inputs["length"]  # (B,) effective length of each sample
         
@@ -352,11 +359,11 @@ class UNIMFMDiffusion(nn.Module):
 
     def forward_test(self, inputs, train=False, postproc=False, static_cam=False, progress=False, mode=None):
         assert not self.training, "forward_test should only be called during inference"
-        diffusion = self.test_diffusion
+        eval_text_only = inputs.get('eval_text_only', False)
+        diffusion = self.test_text_only_diffusion if eval_text_only else self.test_diffusion
         denoiser = self.denoiser
         length = inputs["length"]  # (B,) effective length of each sample
         regression_only = self.args.get('regression_only', False)
-        eval_text_only = inputs.get('eval_text_only', False)
 
         f_condition = inputs["f_condition"]
         # L = 240
@@ -391,7 +398,7 @@ class UNIMFMDiffusion(nn.Module):
             t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
             t = (torch.ones_like(t) * 999).long()
             t_weights = torch.ones_like(t_weights)
-            x_t = motion.clone()
+            x_t = torch.zeros_like(motion)
 
             denoise_out = denoiser(
                 x_t, self.train_diffusion._scale_timesteps(t), return_aux=False, **cond
