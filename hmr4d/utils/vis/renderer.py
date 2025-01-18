@@ -16,7 +16,7 @@ from pytorch3d.structures import Meshes
 from pytorch3d.structures.meshes import join_meshes_as_scene
 from pytorch3d.renderer.cameras import look_at_rotation
 from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix
-
+from PIL import Image
 from .renderer_tools import get_colors, checkerboard_geometry
 
 
@@ -241,7 +241,7 @@ class Renderer:
         self.reset_bbox()
         return image
 
-    def render_with_ground(self, verts, colors, cameras, lights, faces=None):
+    def render_with_ground(self, verts, colors, cameras, lights, faces=None, opacity=1.0):
         """
         :param verts (N, V, 3), potential multiple people
         :param colors (N, 3) or (N, V, 3)
@@ -274,6 +274,57 @@ class Renderer:
 
         return image
 
+    def render_with_ground_timeline(self, verts_list, colors, cameras, lights, faces=None):
+        """
+        :param verts (N, V, 3), potential multiple people
+        :param colors (N, 3) or (N, V, 3)
+        :param faces (N, F, 3), optional, otherwise self.faces is used will be used
+        """
+        # Sanity check of input verts, colors and faces: (B, V, 3), (B, F, 3), (B, V, 3)
+        N, V, _ = verts_list[0].shape
+        if faces is None:
+            faces = self.faces.clone().expand(N, -1, -1)
+        else:
+            assert len(faces.shape) == 3, "faces should have shape of (N, F, 3)"
+        final_img = Image.new("RGBA", (self.width, self.height))
+        t_weights = torch.tensor([t / len(verts_list) for t in range(len(verts_list))])
+        # t_weights = (t_weights) / torch.sum(t_weights)
+        import ipdb; ipdb.set_trace()
+        torch.save({
+            "verts_list": verts_list,
+            "colors": colors,
+            "cameras": cameras,
+            "lights": lights,
+            "faces": faces,
+            'ground_geometry': self.ground_geometry,
+        }, "tmp.pth")
+        for t, verts in enumerate(verts_list):
+            N, V, _ = verts.shape
+
+            assert len(colors.shape) in [2, 3]
+            if len(colors.shape) == 2:
+                assert len(colors) == N, "colors of shape 2 should be (N, 3)"
+                colors = colors[:, None]
+            colors = colors.expand(N, V, -1)[..., :3]
+
+            # (V, 3), (F, 3), (V, 3)
+            gv, gf, gc = self.ground_geometry
+            verts = list(torch.unbind(verts, dim=0)) + [gv]
+            faces_list = list(torch.unbind(faces, dim=0)) + [gf]
+            colors_list = list(torch.unbind(colors, dim=0)) + [gc[..., :3]]
+            mesh = create_meshes(verts, faces_list, colors_list)
+
+            materials = Materials(device=self.device, shininess=0)
+            results = self.renderer(mesh, cameras=cameras, lights=lights, materials=materials)
+            # image = (results[0, ..., :3].cpu().numpy() * 255).astype(np.uint8)
+            image = (results[0, ..., :4].cpu().numpy() * 255)
+            image[..., 3] *= int(t_weights[t].item() * 255)
+            image = image.astype(np.uint8)
+            image = Image.fromarray(image, 'RGBA')
+            # image.putalpha(int(t_weights[t].item() * 255))
+            final_img = Image.alpha_composite(final_img, image)
+            # tmp_list.append(image)
+        return final_img
 
 def create_meshes(verts, faces, colors):
     """
@@ -338,6 +389,46 @@ def get_global_cameras_static(
 
     lights = PointLights(device=device, location=[position.tolist()])
     return rotation, translation, lights
+
+
+def get_global_cameras_static_v2(
+    verts, beta=4.0, cam_height_degree=30, target_center_height=1.0, use_long_axis=False, vec_rot=45, device="cuda"
+):
+    L, V, _ = verts.shape
+
+    # Compute target trajectory, denote as center + scale
+    targets = verts.mean(1)  # (L, 3)
+    targets[:, 1] = 0  # project to xz-plane
+    target_center = targets.mean(0)  # (3,)
+    target_scale, target_idx = torch.norm(targets - target_center, dim=-1).max(0)
+
+    # a 45 degree vec from longest axis
+    if use_long_axis:
+        long_vec = targets[target_idx] - target_center  # (x, 0, z)
+        long_vec = long_vec / torch.norm(long_vec)
+        R = axis_angle_to_matrix(torch.tensor([0, np.pi / 4, 0])).to(long_vec)
+        vec = R @ long_vec
+    else:
+        vec_rad = vec_rot / 180 * np.pi
+        vec = torch.tensor([np.sin(vec_rad), 0, np.cos(vec_rad)]).float()
+        vec = vec / torch.norm(vec)
+
+    # Compute camera position (center + scale * vec * beta) + y=4
+    target_scale = max(target_scale, 1.0) * beta
+    position = target_center + vec * target_scale
+    position[1] = target_scale * np.tan(np.pi * cam_height_degree / 180) + target_center_height
+
+    # Compute camera rotation and translation
+    # positions = position.unsqueeze(0).repeat(L, 1)
+    # target_centers = target_center.unsqueeze(0).repeat(L, 1)
+    target_center[1] = target_center_height
+    # rotation = look_at_rotation(positions, target_centers).mT
+    # translation = -(rotation @ positions.unsqueeze(-1)).squeeze(-1)
+
+    # lights = PointLights(device=device, location=[position.tolist()])
+    # return rotation, translation, lights
+    up = torch.tensor([0, 1, 0])
+    return position, target_center, up
 
 
 def get_ground_params_from_points(root_points, vert_points):

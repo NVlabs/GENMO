@@ -9,7 +9,7 @@ defaults:
     - override /scheduler_cfg: epoch_half_200_350
     - override /train_datasets:
           - pure_motion_amass/v11
-        #   - pure_motion_humanml3d/static_train
+          - pure_motion_humanml3d/static_train
           - imgfeat_bedlam/v2
           - imgfeat_h36m/v1
           - imgfeat_3dpw/v1
@@ -95,7 +95,7 @@ pipeline:
     args:
         endecoder_opt: ${endecoder}
         normalize_cam_angvel: true
-        use_regression_outputs_prob: 1.
+        use_regression_outputs_prob: 0.0
         use_cfg_sampler_for_text: true
         weights:
             cr_j3d: 500.

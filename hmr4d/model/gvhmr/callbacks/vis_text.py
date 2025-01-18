@@ -33,7 +33,11 @@ import os
 from smplx.joint_names import JOINT_NAMES
 from hmr4d.utils.net_utils import repeat_to_max_len, gaussian_smooth
 from hmr4d.utils.geo.hmr_global import rollout_vel, get_static_joint_mask
-from hmr4d.model.gvhmr.utils.vis_utils import visualize_smpl_scene, visualize_intermediate_smpl_scene
+from hmr4d.model.gvhmr.utils.vis_utils import (
+    visualize_smpl_scene,
+    visualize_intermediate_smpl_scene,
+    visualize_intermediate_smplmesh_scene_img,
+)
 
 
 class VisText(pl.Callback):
@@ -53,6 +57,9 @@ class VisText(pl.Callback):
             "female": make_smplx("supermotion_smpl24_female"),
             "neutral": make_smplx("supermotion_smpl24"),
         }
+        self.smplx = make_smplx("supermotion")
+        self.smplx2smpl = torch.load("hmr4d/utils/body_model/smplx2smpl_sparse.pt")
+
         self.J_regressor = torch.load("hmr4d/utils/body_model/smpl_neutral_J_regressor.pt")
         self.smplx2smpl = torch.load("hmr4d/utils/body_model/smplx2smpl_sparse.pt")
         self.faces_smpl = make_smplx("smpl").faces
@@ -78,6 +85,7 @@ class VisText(pl.Callback):
         # Move to cuda if not
         for g in ["male", "female", "neutral"]:
             self.smplx_model[g] = self.smplx_model[g].cuda()
+        self.smplx = self.smplx.cuda()
         self.J_regressor = self.J_regressor.cuda()
         self.smplx2smpl = self.smplx2smpl.cuda()
 
@@ -98,7 +106,18 @@ class VisText(pl.Callback):
         pred_smpl_params_global = outputs["pred_smpl_params_global"]
         pred_ay_j3d = self.smplx_model["neutral"](**pred_smpl_params_global)
         if 'intermediate_pred_smpl_params_global' in outputs:
-            intermediate_pred_ay_j3d = [self.smplx_model["neutral"](**pred_smpl_params_global).squeeze(0) for pred_smpl_params_global in outputs["intermediate_pred_smpl_params_global"]]
+            intermediate_pred_ay_j3d_list = []
+            intermediate_pred_ay_verts_list = []
+            for i, pred_smpl_params_global_i in enumerate(outputs["intermediate_pred_smpl_params_global"]):
+                pred_smpl_params_global_i = {k: v.squeeze(0) for k, v in pred_smpl_params_global_i.items()}
+                intermediate_pred_smpl_out = self.smplx(**pred_smpl_params_global_i)
+                intermediate_pred_ay_verts = torch.stack(
+                    [torch.matmul(self.smplx2smpl, v_) for v_ in intermediate_pred_smpl_out.vertices]
+                )
+                intermediate_pred_ay_j3d = einsum(self.J_regressor, intermediate_pred_ay_verts, "j v, l v i -> l j i")
+                del intermediate_pred_smpl_out  # Prevent OOM
+                intermediate_pred_ay_j3d_list.append(intermediate_pred_ay_j3d)
+                intermediate_pred_ay_verts_list.append(intermediate_pred_ay_verts)
         # pred_ay_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in smpl_out.vertices])
         # pred_ay_j3d = einsum(self.J_regressor, pred_ay_verts, "j v, l v i -> l j i")
         
@@ -114,8 +133,17 @@ class VisText(pl.Callback):
                 wandb_dict = visualize_smpl_scene('vis_text_global', batch_idx, vid, pred_ay_j3d, target_w_j3d, transform_mode='global')
                 self.wandb_html_dict.update(wandb_dict)
                 if 'intermediate_pred_smpl_params_global' in outputs:
-                    wandb_dict = visualize_intermediate_smpl_scene('vis_intermediate_text_global', batch_idx, vid, intermediate_pred_ay_j3d, target_w_j3d, transform_mode='global')
-
+                    # wandb_dict = visualize_intermediate_smpl_scene('vis_intermediate_text_global', batch_idx, vid, intermediate_pred_ay_j3d, target_w_j3d, transform_mode='global')
+                    visualize_intermediate_smplmesh_scene_img(
+                        "vis_intermediate_text_global",
+                        batch_idx,
+                        vid,
+                        intermediate_pred_ay_verts_list,
+                        None,
+                        self.J_regressor,
+                        self.faces_smpl,
+                    )
+                
         return
 
 
