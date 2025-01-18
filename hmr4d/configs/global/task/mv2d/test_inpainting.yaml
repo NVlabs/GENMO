@@ -15,8 +15,8 @@ defaults:
   - _self_
 
 task: test
-# remote_results_path: /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/yey/gvhmr
-remote_results_path: outputs
+remote_results_path: /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/yey/gvhmr
+# remote_results_path: outputs
 ckpt_path: ??? # will not override previous setting if already set
 
 # lightning utilities
@@ -26,8 +26,8 @@ pl_trainer:
 logger:
     _target_: pytorch_lightning.loggers.WandbLogger
     project: 'mfm-hmr-test'
-    # entity: 'nvr-lpr'
-    entity: 'nvidia-toronto'
+    entity: 'nvr-lpr'
+    # entity: 'nvidia-toronto'
     save_dir: "/tmp" # /save_dir/name/version/sub_dir
     name: ""
     version: ""

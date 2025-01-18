@@ -724,6 +724,9 @@ class UNIMFM(pl.LightningModule):
             elif self.model_cfg['inpainting_3d']['mode'] == 'body_pose_root_rot_keyframe2':
                 keyframes = [0, motion_mask_3d.shape[1]-1]
                 motion_mask_3d[:, keyframes, :126+10+12] = 1
+            elif self.model_cfg['inpainting_3d']['mode'] == 'body_pose_root_rot_keyframe5':
+                keyframes = [int((motion_mask_3d.shape[1]-1) * i / 4) for i in range(5)]
+                motion_mask_3d[:, keyframes, :126+10+12] = 1
             elif self.model_cfg['inpainting_3d']['mode'] == 'root_rot_vel_dense':
                 motion_mask_3d[:, :, 126:] = 1
             else:

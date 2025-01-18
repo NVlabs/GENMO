@@ -1,40 +1,53 @@
 import torch
-import torch.nn.functional as F
 import pytorch_lightning as pl
-from pytorch_lightning.utilities import rank_zero_only
 import time
-from hmr4d.configs import MainStore, builds
-
-from hmr4d.utils.comm.gather import all_gather
-from hmr4d.utils.pylogger import Log
-
-from hmr4d.utils.eval.eval_utils import (
-    compute_camcoord_metrics,
-    compute_global_metrics,
-    compute_camcoord_perjoint_metrics,
-    as_np_array,
-)
-from hmr4d.utils.geo_transform import apply_T_on_points, compute_T_ayfz2ay
-from hmr4d.utils.smplx_utils import make_smplx
-from einops import einsum, rearrange
-
-from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix, matrix_to_axis_angle
-from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines, get_colors_by_conf
-# from hmr4d.utils.vis.renderer import Renderer, get_global_cameras_static, get_ground_params_from_points
-from hmr4d.utils.geo.hmr_cam import estimate_focal_length
-from hmr4d.utils.video_io_utils import read_video_np, save_video, get_writer
-import imageio
-from tqdm import tqdm
-from pathlib import Path
 import numpy as np
-import cv2
 import hydra
 import os
 
-from smplx.joint_names import JOINT_NAMES
-from hmr4d.utils.net_utils import repeat_to_max_len, gaussian_smooth
-from hmr4d.utils.geo.hmr_global import rollout_vel, get_static_joint_mask
+from hmr4d.utils.smplx_utils import make_smplx
 from hmr4d.model.gvhmr.utils.vis_utils import visualize_smpl_scene, visualize_intermediate_smpl_scene
+from motiondiff.models.mdm.rotation_conversions import axis_angle_to_quaternion
+from hmr4d.utils.geo.quaternion import qinv_np, qrot_np
+
+
+def normalize(x, eps: float = 1e-9):
+    return x / x.norm(p=2, dim=-1).clamp(min=eps, max=None).unsqueeze(-1)
+
+def get_y_heading_q(q):
+    q_new = q.clone()
+    q_new[..., 1] = 0
+    q_new[..., 3] = 0
+    q_new = normalize(q_new)
+    return q_new
+
+def canonicalize(posed_joints, root_rot, z_up=True):
+    root_quat = axis_angle_to_quaternion(root_rot)
+    heading_quat = get_y_heading_q(root_quat)
+    heading_quat = heading_quat.unsqueeze(1).repeat(1, posed_joints.shape[1], 1)
+    heading_quat = heading_quat.numpy()
+    heading_quat_inv = qinv_np(heading_quat)
+    init_heading_quat_inv = np.repeat(heading_quat_inv[[0]], heading_quat_inv.shape[0], axis=0)
+    
+    posed_joints = posed_joints.numpy()
+
+    '''Put on Floor'''
+    floor_height = posed_joints.min(axis=0).min(axis=0)[1]
+    posed_joints[:, :, 1] -= floor_height
+    # verts[:, :, 1] -= floor_height
+
+    '''XZ at origin'''
+    root_pos_init = posed_joints[0]
+    root_pose_init_xz = root_pos_init[0] * np.array([1, 0, 1])
+    posed_joints = posed_joints - root_pose_init_xz
+    # verts = verts - root_pose_init_xz
+
+    '''All initially face Z+'''
+    posed_joints = qrot_np(init_heading_quat_inv, posed_joints)
+    # verts = qrot_np(init_heading_quat_inv, verts)
+
+    posed_joints = torch.Tensor(posed_joints)
+    return posed_joints
 
 
 class MetricInpainting(pl.Callback):
@@ -95,12 +108,18 @@ class MetricInpainting(pl.Callback):
         target_w_j3d = self.smplx_model[gender](**target_w_params)
         offset = batch["smpl_params_w"]["transl"][0, :, None] - target_w_j3d[:, [0]]
         target_w_j3d = target_w_j3d + offset
+        # Canonicalize the motion so that it always starts facing Z+
+        target_j3d_can = canonicalize(target_w_j3d.cpu(), target_w_params['global_orient'].cpu()).cuda()
         # target_w_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in target_w_output.vertices])
         # target_w_j3d = torch.matmul(self.J_regressor, target_w_verts)
 
         # 2. ay
         pred_smpl_params_global = outputs["pred_smpl_params_global"]
         pred_ay_j3d = self.smplx_model["neutral"](**pred_smpl_params_global)
+        pred_j3d_can = canonicalize(pred_ay_j3d.cpu(), pred_smpl_params_global['global_orient'].cpu()).cuda()
+        # Hack: aligns the root position at the first frame with GT
+        pred_j3d_can[:, :] = pred_j3d_can[:, :] + target_j3d_can[[0], [0]] - pred_j3d_can[[0], [0]]
+
         if 'intermediate_pred_smpl_params_global' in outputs:
             intermediate_pred_ay_j3d = [self.smplx_model["neutral"](**pred_smpl_params_global).squeeze(0) for pred_smpl_params_global in outputs["intermediate_pred_smpl_params_global"]]
         # pred_ay_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in smpl_out.vertices])
@@ -118,7 +137,7 @@ class MetricInpainting(pl.Callback):
         if self.vis:
             # Visualize
             if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
-                wandb_dict = visualize_smpl_scene(f'vis_inpainting_3d_{trainer.model.model_cfg.inpainting_3d.mode}_{self.test_start_time}', batch_idx, vid, pred_ay_j3d, target_w_j3d, transform_mode='global')
+                wandb_dict = visualize_smpl_scene(f'vis_inpainting_3d_{trainer.model.model_cfg.inpainting_3d.mode}_{self.test_start_time}', batch_idx, vid, pred_j3d_can, target_j3d_can, transform_mode='global')
                 self.wandb_html_dict.update(wandb_dict)
                 if 'intermediate_pred_smpl_params_global' in outputs:
                     wandb_dict = visualize_intermediate_smpl_scene('vis_intermediate_text_global', batch_idx, vid, intermediate_pred_ay_j3d, target_w_j3d, transform_mode='global')
