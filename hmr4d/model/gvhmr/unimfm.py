@@ -714,6 +714,21 @@ class UNIMFM(pl.LightningModule):
             batch_["encoded_text"] = self.encode_text(
                 batch["caption"], batch["has_text"]
             )
+        if "inpainting_3d" in self.model_cfg:
+            batch_['observed_motion_3d'] = self.endecoder.encode(batch)
+            motion_mask_3d = torch.zeros_like(batch_['observed_motion_3d']).cuda()
+            if self.model_cfg['inpainting_3d']['mode'] == 'body_pose_dense':
+                motion_mask_3d[:, :, :126+10] = 1
+            elif self.model_cfg['inpainting_3d']['mode'] == 'body_pose_root_rot_dense':
+                motion_mask_3d[:, :, :126+10+12] = 1
+            elif self.model_cfg['inpainting_3d']['mode'] == 'body_pose_root_rot_keyframe2':
+                keyframes = [0, motion_mask_3d.shape[1]-1]
+                motion_mask_3d[:, keyframes, :126+10+12] = 1
+            elif self.model_cfg['inpainting_3d']['mode'] == 'root_rot_vel_dense':
+                motion_mask_3d[:, :, 126:] = 1
+            else:
+                raise ValueError(f"Unknown inpainting mode [{self.model_cfg['inpainting_3d']['mode']}]")
+            batch_['motion_mask_3d'] = motion_mask_3d
         self.init_condition_exists(batch_)
         outputs = self.pipeline.forward(
             batch_,

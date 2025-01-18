@@ -192,7 +192,7 @@ class NetworkEncoderRoPE(nn.Module):
                 zero_module(nn.Linear(self.imgseq_dim, latent_dim)),
             )
 
-    def forward(self, xt, timesteps, y=None, **kwargs):
+    def forward(self, xt, timesteps, y=None, observed_motion_3d=None, motion_mask_3d=None, **kwargs):
         """
         Args:
             x: None we do not use it
@@ -215,6 +215,9 @@ class NetworkEncoderRoPE(nn.Module):
         if self.input_remove_global:
             xt[..., -15:] = 0
 
+        if motion_mask_3d is not None:
+            xt[:, :, -self.output_dim:] = xt[:, :, -self.output_dim:] * (1 - motion_mask_3d) + observed_motion_3d * motion_mask_3d
+        
         emb = self.embed_timestep(timesteps)  # [1, bs, d]
         x = x + emb
 
