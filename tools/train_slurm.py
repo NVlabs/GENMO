@@ -20,7 +20,7 @@ parser.add_argument("-v", "--cfg_var", type=str, default='', help="exp name var"
 parser.add_argument("-g", "--gpus", type=int, default=1, help="gpus used per node")
 parser.add_argument("-n", "--nodes", type=int, default=1, help="number of nodes")
 parser.add_argument('-ar_bt', '--autoresume_before_timelimit', type=int, default=20)
-parser.add_argument('-pt', '--partition', default='polar,polar2,polar3,polar4,grizzly', help='slurm partition')
+parser.add_argument('-pt', '--partition', default='polar,polar3,polar4,grizzly', help='slurm partition')
 parser.add_argument('-t', '--time', type=int, default=4, help='single slurm job time duration in hours')
 parser.add_argument('-db', '--debug', action="store_true")
 parser.add_argument('-exc', '--exclude', nargs='+', default=[], help='exclude cfg by keywords')
@@ -56,9 +56,6 @@ for query in args.cfg_query:
     cfg_files += sorted(glob.glob(cfg_path, recursive=True))
 cfg_files = sorted(list(set(cfg_files)))
 print('cfgs:')
-for cfg in cfg_files:
-    print(cfg)
-print('total:', len(cfg_files))
 
 # ecluded cfg files
 if len(args.exclude) > 0:
@@ -66,8 +63,15 @@ if len(args.exclude) > 0:
     for query in args.exclude:
         cfg_path = f'{config_dir}/**/{query}.yaml'
         exc_cfg_files += sorted(glob.glob(cfg_path, recursive=True))
+        print('excluded:', exc_cfg_files)
     cfg_files = [c for c in cfg_files if c not in exc_cfg_files]
+    for cfg in cfg_files:
+        print(cfg)
     print('total after exclusion:', len(cfg_files))
+else:
+    for cfg in cfg_files:
+        print(cfg)
+    print('total:', len(cfg_files))
 
 
 slurm_cmds = []
@@ -76,6 +80,7 @@ for cfg_f in cfg_files:
     cfg = osp.relpath(cfg, config_dir)
     if not args.debug:
         cmd = f"tools/train_v2.py exp={cfg} exp_name_var={args.cfg_var} pl_trainer.devices={args.gpus} {args.additional_args}"
+        cmd += " ++data.loader_opts.train.num_workers=8 ++data.loader_opts.train_2d.num_workers=8"
         if args.resume:
             cmd += f" resume_mode={args.resume_cp}"
     else:
