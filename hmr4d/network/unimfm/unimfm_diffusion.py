@@ -367,11 +367,17 @@ class UNIMFMDiffusion(nn.Module):
         regression_only = self.args.get('regression_only', False) and not eval_text_only
 
         f_condition = inputs["f_condition"]
-        # L = 240
-        # length[0] = L
-        # for k in f_condition:
-        #     f_condition[k] = torch.cat([f_condition[k], f_condition[k][:, [-1]].repeat_interleave(L-f_condition[k].shape[1], dim=1)], dim=1)
         
+        if self.args.get("test_motion_len", None) is not None:
+            L = self.args.test_motion_len
+            length = torch.ones_like(length) * L
+            f_condition_exists = inputs["f_condition_exists"]
+            for k in f_condition:
+                f_condition[k] = torch.cat([f_condition[k], f_condition[k][:, [-1]].repeat_interleave(L-f_condition[k].shape[1], dim=1)], dim=1)
+                f_condition_exists[k] = torch.cat([f_condition_exists[k], f_condition_exists[k][:, [-1]].repeat_interleave(L-f_condition_exists[k].shape[1], dim=1)], dim=1)
+            for k in ['bbx_xys', 'K_fullimg', 'cam_angvel']:
+                inputs[k] = torch.cat([inputs[k], inputs[k][:, [-1]].repeat_interleave(L-inputs[k].shape[1], dim=1)], dim=1)
+            
         obs = f_condition["obs"]
         B, L = obs.shape[:2]
 
