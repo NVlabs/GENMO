@@ -146,6 +146,7 @@ class UNIMFMDiffusion(nn.Module):
         self.test_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=False)
         text_only_diffusion = deepcopy(self.model_cfg.diffusion)
         text_only_diffusion.test_timestep_respacing = self.model_cfg.diffusion.get('text_only_test_timestep_respacing', '50')
+        print(f"Text only test timestep respacing: {text_only_diffusion.test_timestep_respacing}")
         self.test_text_only_diffusion = create_gaussian_diffusion(text_only_diffusion, training=False)
         self.schedule_sampler = create_named_schedule_sampler(self.model_cfg.diffusion.schedule_sampler_type, self.train_diffusion)
         return
@@ -363,7 +364,7 @@ class UNIMFMDiffusion(nn.Module):
         diffusion = self.test_text_only_diffusion if eval_text_only else self.test_diffusion
         denoiser = self.denoiser
         length = inputs["length"]  # (B,) effective length of each sample
-        regression_only = self.args.get('regression_only', False)
+        regression_only = self.args.get('regression_only', False) and not eval_text_only
 
         f_condition = inputs["f_condition"]
         # L = 240

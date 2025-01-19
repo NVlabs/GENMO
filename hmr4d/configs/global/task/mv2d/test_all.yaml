@@ -1,0 +1,43 @@
+# @package _global_
+defaults:
+  - override /data: mocap/testY
+  - override /test_datasets:
+      - humanml3d_eval
+      - emdb1/v1_fliptest
+      - emdb2/v1_fliptest
+      - rich/all
+      - 3dpw/fliptest
+      - emdb1_occ/v1_fliptest
+      - emdb2_occ/v1_fliptest
+      - rich_occ/all
+      - 3dpw_occ/fliptest
+  - override /callbacks:
+      - vis_text
+      - metric_emdb1
+      - metric_emdb2
+      - metric_rich
+      - metric_3dpw
+      - metric_3dpw_occ
+      - metric_emdb1_occ
+      - metric_emdb2_occ
+      - metric_rich_occ
+  - _self_
+
+task: test
+remote_results_path: /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/yey/gvhmr
+ckpt_path: ??? # will not override previous setting if already set
+
+# lightning utilities
+pl_trainer:
+  devices: 1
+
+logger:
+    _target_: pytorch_lightning.loggers.WandbLogger
+    project: 'mfm-hmr-test'
+    entity: 'nvr-lpr'
+    save_dir: "/tmp" # /save_dir/name/version/sub_dir
+    name: ""
+    version: ""
+    resume: 'allow'
+    dir: "/tmp"
+    id: null
