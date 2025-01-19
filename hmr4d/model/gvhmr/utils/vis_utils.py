@@ -75,7 +75,7 @@ def visualize_smpl_scene(vis_type, index, vid, j3d, gt_j3d, transform_mode=None)
     if gt_j3d is not None:
         smpl_seq['gt'] = {
             'joints_pos': gt_j3d,
-        },
+        }
     vid_ = vid.replace("/", "_")
     fname = f'{index:03d}-{vid_}'
     if len(fname) > 100:
