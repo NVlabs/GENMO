@@ -79,7 +79,7 @@ class VisText(pl.Callback):
         """The behaviour is the same for val/test/predict"""
         assert batch["B"] == 1
         dataset_id = batch["meta"][0]["dataset_id"]
-        if dataset_id not in ['humanml3d']:
+        if dataset_id not in ['humanml3d', 'motion-x++2d']:
             return
 
         # Move to cuda if not
@@ -93,17 +93,21 @@ class VisText(pl.Callback):
         vid = text.replace(' ', '_').replace('.', '_').replace(',', '_')
         seq_length = batch["length"][0].item()
         gender = 'neutral'
+        smpl_key = '2d_pred_smpl_params_global' if dataset_id == 'motion-x++2d' else 'pred_smpl_params_global'
 
         # Groundtruth (world, cam)
-        target_w_params = {k: v[0] for k, v in batch["smpl_params_w"].items()}
-        target_w_j3d = self.smplx_model[gender](**target_w_params)
-        offset = batch["smpl_params_w"]["transl"][0, :, None] - target_w_j3d[:, [0]]
-        target_w_j3d = target_w_j3d + offset
-        # target_w_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in target_w_output.vertices])
-        # target_w_j3d = torch.matmul(self.J_regressor, target_w_verts)
+        if dataset_id == 'humanml3d':
+            target_w_params = {k: v[0] for k, v in batch["smpl_params_w"].items()}
+            target_w_j3d = self.smplx_model[gender](**target_w_params)
+            offset = batch["smpl_params_w"]["transl"][0, :, None] - target_w_j3d[:, [0]]
+            target_w_j3d = target_w_j3d + offset
+            # target_w_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in target_w_output.vertices])
+            # target_w_j3d = torch.matmul(self.J_regressor, target_w_verts)
+        else:
+            target_w_j3d = None
 
         # 2. ay
-        pred_smpl_params_global = outputs["pred_smpl_params_global"]
+        pred_smpl_params_global = outputs[smpl_key]
         pred_ay_j3d = self.smplx_model["neutral"](**pred_smpl_params_global)
         if 'intermediate_pred_smpl_params_global' in outputs:
             intermediate_pred_ay_j3d_list = []
@@ -123,14 +127,14 @@ class VisText(pl.Callback):
         
         if self.save_feats:
             encoder_inputs = {
-                'smpl_params_w': {k: v.unsqueeze(0) for k, v in outputs["pred_smpl_params_global"].items()},
+                'smpl_params_w': {k: v.unsqueeze(0) for k, v in outputs[smpl_key].items()},
             }
             feats = self.endecoder.encode_humanml3d(encoder_inputs)
             self.feats_arr.append(feats)
         else:
             # Visualize
             if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
-                wandb_dict = visualize_smpl_scene('vis_text_global', batch_idx, vid, pred_ay_j3d, target_w_j3d, transform_mode='global')
+                wandb_dict = visualize_smpl_scene(f'vis_text_global_{dataset_id}', batch_idx, vid, pred_ay_j3d, target_w_j3d, transform_mode='global')
                 self.wandb_html_dict.update(wandb_dict)
                 if 'intermediate_pred_smpl_params_global' in outputs:
                     # wandb_dict = visualize_intermediate_smpl_scene('vis_intermediate_text_global', batch_idx, vid, intermediate_pred_ay_j3d, target_w_j3d, transform_mode='global')

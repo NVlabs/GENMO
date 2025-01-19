@@ -449,6 +449,7 @@ class UNIMFM(pl.LightningModule):
             return self.validation_3d(batch, batch_idx, dataloader_idx)
         
     def validation_2d(self, batch, batch_idx, dataloader_idx=0):
+        do_postproc = self.trainer.state.stage == "test"  # Only apply postproc in test
         B = batch["obs_kp2d"].shape[0]
         obs_kp2d = batch['obs_kp2d'].squeeze(2)
         conf = batch['conf']
@@ -480,12 +481,21 @@ class UNIMFM(pl.LightningModule):
         obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
         obs[~batch["mask"]] = 0
         batch["obs"] = obs
-
+        batch['eval_text_only'] = batch['meta'][0].get('eval_text_only', False)
+        if 'text_embed' in batch:
+            batch['encoded_text'] = batch['text_embed'].cuda()
+        elif self.use_text_encoder:
+            batch['encoded_text'] = self.encode_text(batch['caption'], batch['has_text'])
+        self.init_condition_exists(batch)
         # Forward and get loss
         if self.infer_mode == 'regression':
-            outputs = self.pipeline.forward_2d(batch, train=False, global_step=self.trainer.global_step, diffusion=self.train_diffusion)
+            outputs = self.pipeline.forward_2d(batch, train=False, postproc=do_postproc, global_step=self.trainer.global_step)
         else:
             outputs = self.infer_diffusion(batch)
+        outputs["2d_pred_smpl_params_global"] = {k: v[0] for k, v in outputs["2d_pred_smpl_params_global"].items()}
+        if '2d_pred_smpl_params_incam' in outputs:
+            outputs["2d_pred_smpl_params_incam"] = {k: v[0] for k, v in outputs["2d_pred_smpl_params_incam"].items()}
+        outputs['eval_text_only'] = batch['eval_text_only']
         outputs["batch"] = batch
         outputs['vis_2d'] = self.model_cfg.get("vis_2d", False)
         return outputs
