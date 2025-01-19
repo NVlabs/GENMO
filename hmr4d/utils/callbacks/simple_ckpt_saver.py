@@ -1,6 +1,7 @@
 from pathlib import Path
 import torch
 import pytorch_lightning as pl
+import os
 from pytorch_lightning.callbacks.checkpoint import Checkpoint
 from pytorch_lightning.utilities import rank_zero_only
 
@@ -146,6 +147,8 @@ class SimpleCkptSaver(Checkpoint):
             checkpoint = trainer._checkpoint_connector.dump_checkpoint()
             trainer.strategy.save_checkpoint(checkpoint, filepath)
             trainer.strategy.save_checkpoint(checkpoint, lastpath)
+            os.chmod(filepath, 0o755)
+            os.chmod(lastpath, 0o755)
             
     @rank_zero_only
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx: int) -> None:
@@ -160,6 +163,8 @@ class SimpleCkptSaver(Checkpoint):
             checkpoint = trainer._checkpoint_connector.dump_checkpoint()
             trainer.strategy.save_checkpoint(checkpoint, filepath)
             trainer.strategy.save_checkpoint(checkpoint, lastpath)
+            os.chmod(filepath, 0o755)
+            os.chmod(lastpath, 0o755)
 
 
     # def on_train_batch_end(

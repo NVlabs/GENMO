@@ -223,6 +223,7 @@ class UNIMFM(pl.LightningModule):
             has_text = batch["has_text"]
             if regression_no_img_mask and mode == 'regression':
                 mask_img_prob = 0
+                mask_f_imgseq_prob = 0
             if mask_img_prob > 0:
                 mask_img = has_text & (torch.rand(batch["B"]) < mask_img_prob).to(device)
                 for k in ["obs", "f_cliffcam", "f_imgseq"]:
