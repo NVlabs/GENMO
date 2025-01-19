@@ -94,7 +94,7 @@ pipeline:
         use_regression_outputs_prob: 0.
         use_cfg_sampler_for_text: true
         inpaint_x_start_gt: false
-        # regression_only: true
+        regression_only: true
         weights:
             cr_j3d: 500.
             transl_c: 1.
