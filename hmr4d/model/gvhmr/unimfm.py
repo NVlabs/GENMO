@@ -513,10 +513,11 @@ class UNIMFM(pl.LightningModule):
         
     def validation_3d(self, batch, batch_idx, dataloader_idx=0):
         # Options & Check
-        do_postproc = self.trainer.state.stage == "test" and (not self.pipeline.args.get('infer_version', 2) == 3)  # Only apply postproc in test
+        do_postproc = self.trainer.state.stage == "test"  # Only apply postproc in test
         do_flip_test = "flip_test" in batch
         do_postproc_not_flip_test = do_postproc and not do_flip_test  # later pp when flip_test
         assert batch["B"] == 1, "Only support batch size 1 in evalution."
+        infer_version = self.pipeline.args.get('infer_version', 2)
 
         # ROPE inference
         obs = normalize_kp2d(batch["kp2d"], batch["bbx_xys"])
@@ -544,15 +545,16 @@ class UNIMFM(pl.LightningModule):
             "bbx_xys": batch["bbx_xys"],
             "K_fullimg": batch["K_fullimg"],
             "cam_angvel": batch["cam_angvel"],
-            "R_w2c": batch["R_w2c"],
-            "cam_tvel": batch["cam_tvel"],
             "f_imgseq": batch["f_imgseq"],
             "eval_text_only": eval_text_only,
         }
-        if "vimo_smpl_params" in batch:
-            batch_["vimo_smpl_params"] = batch["vimo_smpl_params"]
-            batch_["scales"] = batch["scales"]
-            batch_["mean_scale"] = batch["mean_scale"]
+        if infer_version == 3:
+            batch_['R_w2c'] = batch['R_w2c']
+            batch_['cam_tvel'] = batch['cam_tvel']
+            if "vimo_smpl_params" in batch:
+                batch_["vimo_smpl_params"] = batch["vimo_smpl_params"]
+                batch_["scales"] = batch["scales"]
+                batch_["mean_scale"] = batch["mean_scale"]
         
         # batch_['gt'] = self.endecoder.encode(batch)
         # batch_['static_gt'] = self.endecoder.get_static_gt(batch, self.pipeline.args.static_conf.vel_thr)
@@ -583,14 +585,15 @@ class UNIMFM(pl.LightningModule):
                 "bbx_xys": flip_test["bbx_xys"],
                 "K_fullimg": batch["K_fullimg"],
                 "cam_angvel": flip_test["cam_angvel"],
-                "cam_tvel": flip_test["cam_tvel"],
-                "R_w2c": flip_test["R_w2c"],
                 "f_imgseq": flip_test["f_imgseq"],
             }
-            if "vimo_smpl_params" in flip_test:
-                batch_["vimo_smpl_params"] = flip_test["vimo_smpl_params"]
-                batch_["scales"] = flip_test["scales"]
-                batch_["mean_scale"] = flip_test["mean_scale"]
+            if infer_version == 3:
+                batch_['R_w2c'] = flip_test['R_w2c']
+                batch_['cam_tvel'] = flip_test['cam_tvel']
+                if "vimo_smpl_params" in flip_test:
+                    batch_["vimo_smpl_params"] = flip_test["vimo_smpl_params"]
+                    batch_["scales"] = flip_test["scales"]
+                    batch_["mean_scale"] = flip_test["mean_scale"]
             if 'text_embed' in batch:
                 batch_['encoded_text'] = batch['text_embed'].cuda()
             elif self.use_text_encoder:

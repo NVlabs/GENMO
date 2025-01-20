@@ -229,7 +229,7 @@ class Pipeline(nn.Module):
                 }
             outputs["static_conf_logits"] = model_output["static_conf_logits"]
 
-            if postproc and self.endecoder.encode_type == 'gvhmr':  # apply post-processing
+            if postproc and self.endecoder.encode_type == 'gvhmr' and self.args.get('infer_version', 2) != 3:  # apply post-processing
                 if static_cam:  # extra post-processing to utilize static camera prior
                     outputs["pred_smpl_params_global"]["transl"] = pp_static_joint_cam(outputs, self.endecoder)
                 else:
