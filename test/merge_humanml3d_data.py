@@ -14,9 +14,10 @@ from motiondiff.models.mdm.rotation_conversions import (
 from motiondiff.utils.vis_scenepic import ScenepicVisualizer
 
 device = 'cuda:0'
-data_file = "/home/jiefengl/git/HumanML3D/HumanML3D/train.txt"
+split = 'test'
+data_file = f"/home/jiefengl/git/HumanML3D/HumanML3D/{split}.txt"
 text_dir = "/home/jiefengl/git/HumanML3D/HumanML3D/texts/"
-motion_dir = "/home/jiefengl/git/HumanML3D/pose_smplh/"
+motion_dir = "/home/jiefengl/git/HumanML3D/pose_smplh_v2/"
 sp_visualizer = ScenepicVisualizer("/home/jiefengl/git/physdiff_megm/data/smpl_data", device=device)
 trans_matrix = torch.tensor(
     [
@@ -123,6 +124,6 @@ for line in tqdm(lines):
 
             db[name] = data
 
-print(f"missed {miss_cnt} humanact12 motions")
-print(f"total {len(db)} samples from {len(lines)} motions")
-torch.save(db, "humanml3d_smplhpose.pth")
+print(f"missed {miss_cnt} humanact12 motions in {split}")
+print(f"total {len(db)} samples from {len(lines)} motions in {split}")
+torch.save(db, f"humanml3d_smplhpose_{split}.pth")

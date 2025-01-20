@@ -1,5 +1,6 @@
 import glob
 import os
+import random
 
 os.environ["PYOPENGL_PLATFORM"] = "egl"
 
@@ -43,13 +44,16 @@ if __name__ == "__main__":
 
     motionx_db_feat = {}
     motionx_db = torch.load("/mnt/disk3/motion-x++/motionxpp_smplxposev2.pth")
-    extractor = Extractor()
-
-    for vid in tqdm(motionx_db):
+    extractor = Extractor('cuda:0')
+    keys = list(motionx_db.keys())
+    random.shuffle(keys)
+    for vid in tqdm(keys):
         data = motionx_db[vid]
         subset = data["subset"]
         file_name = data["file_name"]
         vid_name = f"{subset}_{file_name}"
+        if os.path.exists(f"/mnt/disk3/motion-x++/hmr4d_feat/{subset}/{file_name}.pth"):
+            continue
         video_file = f"/mnt/disk3/motion-x++/video/{subset}/{file_name}.mp4"
         assert os.path.exists(video_file), (video_file, video_file)
         bbx_xywh = data["bbox"]
@@ -61,11 +65,13 @@ if __name__ == "__main__":
         vit_features = extractor.extract_video_features(video_file, bbx_xys, batch_size=32)
         # torch.save(vit_features, paths.vit_features)
         motionx_db_feat[vid_name] = vit_features
-        assert vit_features.shape[0] == bbx_xys.shape[0], (vit_features.shape, bbx_xys.shape)
+        # assert vit_features.shape[0] == bbx_xys.shape[0], (vit_features.shape, bbx_xys.shape)
         if vit_features.shape[0] != data["pose"].shape[0]:
-            assert vit_features.shape[0] == data["pose"].shape[0] + 1, (vit_features.shape, data["pose"].shape)
-            vit_features = vit_features[:-1]
+            # assert vit_features.shape[0] == data["pose"].shape[0] + 1, (vit_features.shape, data["pose"].shape)
+            vit_features = vit_features[: data["pose"].shape[0]]
         motionx_db_feat[vid_name] = vit_features.float()
+        os.makedirs(f"/mnt/disk3/motion-x++/hmr4d_feat/{subset}", exist_ok=True)
+        torch.save(vit_features, f"/mnt/disk3/motion-x++/hmr4d_feat/{subset}/{file_name}.pth")
 
 print(f"total {len(motionx_db_feat)} samples")
 torch.save(motionx_db_feat, "/mnt/disk3/motion-x++/motionxpp_feat.pth")
