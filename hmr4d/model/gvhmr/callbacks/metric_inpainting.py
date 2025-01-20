@@ -84,6 +84,8 @@ class MetricInpainting(pl.Callback):
 
         self.test_start_time = int(time.time())
 
+        self.metrics = {}
+
     # ================== Batch-based Computation  ================== #
     def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
         """The behaviour is the same for val/test/predict"""
@@ -100,6 +102,7 @@ class MetricInpainting(pl.Callback):
 
         text = batch['caption'][0]
         vid = text.replace(' ', '_').replace('.', '_').replace(',', '_')
+        vid = vid[:100]
         seq_length = batch["length"][0].item()
         gender = 'neutral'
 
@@ -126,6 +129,20 @@ class MetricInpainting(pl.Callback):
         # pred_ay_j3d = einsum(self.J_regressor, pred_ay_verts, "j v, l v i -> l j i")
         
         # Compute metrics
+        if trainer.model.model_cfg.inpainting_3d.mode.startswith('body_pose_root_rot_keyframe'):
+            # if trainer.model.model_cfg.inpainting_3d.mode == 'body_pose_root_rot_keyframe2':
+            #     keyframes = [0, target_j3d_can.shape[0]-1]
+            # elif trainer.model.model_cfg.inpainting_3d.mode == 'body_pose_root_rot_keyframe5':
+            #     keyframes = [int((target_j3d_can.shape[0]-1) * i / 4) for i in range(5)]
+            keyframes = batch["keyframes"]
+
+            pred_kf_j3d_relative = pred_j3d_can[keyframes[1:]] - pred_j3d_can[keyframes[1:], :1]
+            target_kf_j3d_relative = target_j3d_can[keyframes[1:]] - target_j3d_can[keyframes[1:], :1]
+            joint_pos_diff = (pred_kf_j3d_relative - target_kf_j3d_relative).norm(dim=-1).mean()
+            if 'joint_keyframe' not in self.metrics:
+                self.metrics['joint_keyframe'] = []
+            self.metrics['joint_keyframe'] += [joint_pos_diff.item()]
+            print(joint_pos_diff.item())
         
         if self.save_feats:
             encoder_inputs = {
@@ -162,3 +179,7 @@ class MetricInpainting(pl.Callback):
             os.makedirs(self.save_dir, exist_ok=True)
             torch.save(feats_arr, self.save_dir / 'feats.pt')
             print(f"text-to-motion features saved at {self.save_dir}")
+        
+        for metric_name in sorted(self.metrics):
+            metric_avg = np.average(self.metrics[metric_name])
+            print(f"Metric [{metric_name}]: {metric_avg:.02f}")
