@@ -188,13 +188,22 @@ class UNIMFM(pl.LightningModule):
     def init_condition_exists(self, batch):
         B, L = batch["obs"].shape[:2]
         f_condition_exists = dict()
-        f_condition_exists['obs'] = (batch['obs'].view(B, -1).norm(dim=-1) > 1e-4).unsqueeze(-1).repeat(1, L)
-        f_condition_exists['f_cliffcam'] = f_condition_exists['obs'].clone()
-        f_condition_exists['f_imgseq'] = (batch['f_imgseq'].view(B, -1).norm(dim=-1) > 1e-4).unsqueeze(-1).repeat(1, L)
-        if 'cam_angvel' in batch:
-            f_condition_exists['f_cam_angvel'] = (batch['cam_angvel'].view(B, -1).norm(dim=-1) > 1e-4).unsqueeze(-1).repeat(1, L)
+        if self.model_cfg.get("perframe_condition_exists", False):
+            f_condition_exists['obs'] = (batch['obs'].view(B, L, -1).norm(dim=-1) > 1e-4)
+            f_condition_exists['f_cliffcam'] = f_condition_exists['obs'].clone()
+            f_condition_exists['f_imgseq'] = (batch['f_imgseq'].view(B, L, -1).norm(dim=-1) > 1e-4)
+            if 'cam_angvel' in batch:
+                f_condition_exists['f_cam_angvel'] = (batch['cam_angvel'].view(B, L, -1).norm(dim=-1) > 1e-4)
+            else:
+                f_condition_exists['f_cam_angvel'] = torch.zeros(B, L).bool().to(batch["obs"].device)
         else:
-            f_condition_exists['f_cam_angvel'] = torch.zeros(B, L).bool().to(batch["obs"].device)
+            f_condition_exists['obs'] = (batch['obs'].view(B, -1).norm(dim=-1) > 1e-4).unsqueeze(-1).repeat(1, L)
+            f_condition_exists['f_cliffcam'] = f_condition_exists['obs'].clone()
+            f_condition_exists['f_imgseq'] = (batch['f_imgseq'].view(B, -1).norm(dim=-1) > 1e-4).unsqueeze(-1).repeat(1, L)
+            if 'cam_angvel' in batch:
+                f_condition_exists['f_cam_angvel'] = (batch['cam_angvel'].view(B, -1).norm(dim=-1) > 1e-4).unsqueeze(-1).repeat(1, L)
+            else:
+                f_condition_exists['f_cam_angvel'] = torch.zeros(B, L).bool().to(batch["obs"].device)
         batch['f_condition_exists'] = f_condition_exists
     
     def create_condition_mask(self, batch, cond_mask_cfg, mode):
@@ -375,6 +384,8 @@ class UNIMFM(pl.LightningModule):
             batch['f_imgseq'][occluded_img_mask] = 0
         obs_kp2d = torch.cat([obs_kp2d, j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
         obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
+        if self.model_cfg.get('train2d_mask_invis_obs', False):
+            obs[~j2d_visible_mask] = 0  # if not visible, set to (0,0,0)
         obs[~batch["mask"]] = 0
         batch["obs"] = obs
         # vis_ind = 0

@@ -51,7 +51,7 @@ model_cfg:
     kp2d_noise_scale: 0.5
     perframe_condition_exists: true
     train2d_mask_invis_obs: true
-    mask_occluded_imgfeats: false
+    mask_occluded_imgfeats: true
 
     diffusion:
         test_timestep_respacing: '5'
@@ -110,6 +110,7 @@ pipeline:
             proj_gt_j2d_to_bi01: true
             # norm_j2d: 1000.
             train2d_skip_regression: false
+            simple_diffusion2d: 0.01
 
             transl_w: 1.
             static_conf_bce: 1.

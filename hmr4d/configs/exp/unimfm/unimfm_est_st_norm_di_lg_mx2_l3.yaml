@@ -18,6 +18,7 @@ defaults:
           - imgfeat_motionx/v2d_train
     - override /test_datasets:
           - humanml3d_eval
+          - imgfeat_motionx/v2d_test32
           - emdb1/v1_fliptest
           - emdb2/v1_fliptest
           - rich/all
@@ -48,6 +49,9 @@ model_cfg:
     start_2d_training_steps: 0
     noisy_2d_obs: true
     kp2d_noise_scale: 0.5
+    perframe_condition_exists: true
+    train2d_mask_invis_obs: true
+    mask_occluded_imgfeats: false
 
     diffusion:
         test_timestep_respacing: '5'
