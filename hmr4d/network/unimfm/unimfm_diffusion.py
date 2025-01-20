@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import importlib
 import numpy as np
 import random
+from copy import deepcopy
 from hmr4d.utils.net_utils import length_to_mask
 from hmr4d.network.base_arch.transformer.layer import zero_module
 from motiondiff.models.model_util import create_gaussian_diffusion
@@ -46,6 +47,9 @@ class UNIMFMDiffusion(nn.Module):
         latent_dim=512,
         dropout=0.1,
         args=None,
+        use_cond_exists_as_input=False,
+        cond_merge_strategy="add",
+        cond_exists_dim=512,
         **kwargs,
     ):
         super().__init__()
@@ -65,6 +69,9 @@ class UNIMFMDiffusion(nn.Module):
         self.dropout = dropout
         
         self.regression_input_type = self.args.get('regression_input_type', 'zero')
+        self.use_cond_exists_as_input = use_cond_exists_as_input
+        self.cond_merge_strategy = cond_merge_strategy
+        self.cond_exists_dim = cond_exists_dim
 
         assert 'obs' in self.args.in_attr, "obs (kp2d) must be in in_attr"
         self.learned_pos_linear = nn.Linear(2, 32)
@@ -106,6 +113,27 @@ class UNIMFMDiffusion(nn.Module):
                 nn.LayerNorm(self.imgseq_dim),
                 zero_module(nn.Linear(self.imgseq_dim, latent_dim)),
             )
+            
+        add_dim = 0
+        if self.use_cond_exists_as_input:
+            if cond_merge_strategy == 'add':
+                self.cond_exists_embedder = nn.ModuleDict()
+                for k in self.args.in_attr:
+                    self.cond_exists_embedder[k] = nn.Sequential(
+                        nn.Linear(latent_dim + 1, latent_dim),
+                        nn.SiLU(),
+                        zero_module(nn.Linear(latent_dim, latent_dim)),
+                    )
+            elif cond_merge_strategy == 'concat':
+                add_dim = cond_exists_dim
+                
+        if cond_merge_strategy == 'concat':
+            # self.cond_merger = nn.Linear(len(self.args.in_attr) * (latent_dim + add_dim), latent_dim)
+            self.cond_merger = nn.Sequential(
+                nn.Linear(len(self.args.in_attr) * (latent_dim + add_dim), latent_dim),
+                nn.SiLU(),
+                zero_module(nn.Linear(latent_dim, latent_dim)),
+            )
 
         self.denoiser = import_type_from_str(self.model_cfg.denoiser.type)(
             pl_module=self, **self.model_cfg.denoiser
@@ -116,6 +144,10 @@ class UNIMFMDiffusion(nn.Module):
     def init_diffusion(self):
         self.train_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=True)
         self.test_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=False)
+        text_only_diffusion = deepcopy(self.model_cfg.diffusion)
+        text_only_diffusion.test_timestep_respacing = self.model_cfg.diffusion.get('text_only_test_timestep_respacing', '50')
+        print(f"Text only test timestep respacing: {text_only_diffusion.test_timestep_respacing}")
+        self.test_text_only_diffusion = create_gaussian_diffusion(text_only_diffusion, training=False)
         self.schedule_sampler = create_named_schedule_sampler(self.model_cfg.diffusion.schedule_sampler_type, self.train_diffusion)
         return
 
@@ -123,9 +155,11 @@ class UNIMFMDiffusion(nn.Module):
         self, batch, target_x, static_gt
     ):
         f_condition = batch["f_condition"]
+        f_condition_exists = batch["f_condition_exists"] 
 
         length = batch["length"]
         assert 'obs' in f_condition
+        f_cond_dict = {}
         if 'obs' in f_condition:
             obs = f_condition["obs"]
             B, L, J, C = obs.shape
@@ -136,24 +170,37 @@ class UNIMFMDiffusion(nn.Module):
             f_obs = self.learned_pos_linear(obs[..., :2])  # (B, L, J, 32)
             f_obs = f_obs * visible_mask + self.learned_pos_params.repeat(B, L, 1, 1) * ~visible_mask  # (B, L, J, 32)
             f_obs = self.embed_noisyobs(f_obs.view(B, L, -1))  # (B, L, J*32) -> (B, L, C)
-            f_cond = f_obs
+            f_cond_dict["obs"] = f_obs
 
         if 'f_cliffcam' in f_condition:
             f_cliffcam = f_condition["f_cliffcam"]  # (B, L, 3)
             f_cliffcam = self.cliffcam_embedder(f_cliffcam)
-            f_cond = f_cond + f_cliffcam
+            f_cond_dict["f_cliffcam"] = f_cliffcam
         if "f_cam_angvel" in f_condition:
             f_cam_angvel = f_condition["f_cam_angvel"]  # (B, L, 6)
             f_cam_angvel = self.cam_angvel_embedder(f_cam_angvel)
-            f_cond = f_cond + f_cam_angvel
+            f_cond_dict["f_cam_angvel"] = f_cam_angvel
         if "f_cam_t_vel" in f_condition:
             f_cam_t_vel = f_condition["f_cam_t_vel"]  # (B, L, 3)
             f_cam_t_vel = self.cam_t_vel_embedder(f_cam_t_vel)
-            f_cond = f_cond + f_cam_t_vel
+            f_cond_dict["f_cam_t_vel"] = f_cam_t_vel
         if 'f_imgseq' in f_condition:
             f_imgseq = f_condition["f_imgseq"]  # (B, L, C)
             f_imgseq = self.imgseq_embedder(f_imgseq)
-            f_cond = f_cond + f_imgseq
+            f_cond_dict["f_imgseq"] = f_imgseq
+            
+        if self.cond_merge_strategy == 'add':
+            if self.use_cond_exists_as_input:
+                for k in f_cond_dict:
+                    f_cond_dict[k] = torch.cat([f_cond_dict[k], f_condition_exists[k][:, :, None].float()], dim=-1)
+                    f_cond_dict[k] = self.cond_exists_embedder[k](f_cond_dict[k])
+            f_cond = sum(f_cond_dict.values())
+        elif self.cond_merge_strategy == 'concat':
+            f_cond = torch.cat(list(f_cond_dict.values()), dim=-1)
+            f_cond_exists = torch.cat([f_condition_exists[k][:, :, None].float().repeat(1, 1, self.cond_exists_dim) for k in f_cond_dict], dim=-1)
+            if self.use_cond_exists_as_input:
+                f_cond = torch.cat([f_cond, f_cond_exists], dim=-1)
+            f_cond = self.cond_merger(f_cond)
 
         vis_mask = length_to_mask(length, L)  # (B, L)
 
@@ -203,9 +250,12 @@ class UNIMFMDiffusion(nn.Module):
             else:
                 pred_x_start_regression = torch.zeros_like(motion)
             x_start_reg = pred_x_start_regression
-            inpaint_mask = torch.ones_like(pred_x_start_regression)
-            inpaint_mask = inpaint_mask * valid_mask[:, :, None]
-            x_start_gt = motion.clone() * inpaint_mask + pred_x_start_regression * (1 - inpaint_mask)
+            if self.args.get('inpaint_x_start_gt', True):
+                inpaint_mask = torch.ones_like(pred_x_start_regression)
+                inpaint_mask = inpaint_mask * valid_mask[:, :, None]
+                x_start_gt = motion.clone() * inpaint_mask + pred_x_start_regression * (1 - inpaint_mask)
+            else:
+                x_start_gt = motion.clone()
             regression_mask = (torch.rand(B).to(motion.device) < self.args.use_regression_outputs_prob).float()
             if 'text_only' in batch and self.args.get('use_gt_for_text_only', True):
                 regression_mask[batch['text_only']] = 0
@@ -245,7 +295,7 @@ class UNIMFMDiffusion(nn.Module):
 
     def forward_train_2d(self, inputs, mode):
         assert self.training, "forward_train_2d should only be called during training"
-        diffusion = self.train_diffusion if self.training else self.test_diffusion
+        diffusion = self.train_diffusion
 
         length = inputs["length"]  # (B,) effective length of each sample
         
@@ -310,18 +360,24 @@ class UNIMFMDiffusion(nn.Module):
 
     def forward_test(self, inputs, train=False, postproc=False, static_cam=False, progress=False, mode=None):
         assert not self.training, "forward_test should only be called during inference"
-        diffusion = self.test_diffusion
+        eval_text_only = inputs.get('eval_text_only', False)
+        diffusion = self.test_text_only_diffusion if eval_text_only else self.test_diffusion
         denoiser = self.denoiser
         length = inputs["length"]  # (B,) effective length of each sample
-        regression_only = self.args.get('regression_only', False)
-        eval_text_only = inputs.get('eval_text_only', False)
+        regression_only = self.args.get('regression_only', False) and not eval_text_only
 
         f_condition = inputs["f_condition"]
-        # L = 240
-        # length[0] = L
-        # for k in f_condition:
-        #     f_condition[k] = torch.cat([f_condition[k], f_condition[k][:, [-1]].repeat_interleave(L-f_condition[k].shape[1], dim=1)], dim=1)
         
+        if self.args.get("test_motion_len", None) is not None:
+            L = self.args.test_motion_len
+            length = torch.ones_like(length) * L
+            f_condition_exists = inputs["f_condition_exists"]
+            for k in f_condition:
+                f_condition[k] = torch.cat([f_condition[k], f_condition[k][:, [-1]].repeat_interleave(L-f_condition[k].shape[1], dim=1)], dim=1)
+                f_condition_exists[k] = torch.cat([f_condition_exists[k], f_condition_exists[k][:, [-1]].repeat_interleave(L-f_condition_exists[k].shape[1], dim=1)], dim=1)
+            for k in ['bbx_xys', 'K_fullimg', 'cam_angvel']:
+                inputs[k] = torch.cat([inputs[k], inputs[k][:, [-1]].repeat_interleave(L-inputs[k].shape[1], dim=1)], dim=1)
+            
         obs = f_condition["obs"]
         B, L = obs.shape[:2]
 
@@ -349,7 +405,7 @@ class UNIMFMDiffusion(nn.Module):
             t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
             t = (torch.ones_like(t) * 999).long()
             t_weights = torch.ones_like(t_weights)
-            x_t = motion.clone()
+            x_t = torch.zeros_like(motion)
 
             denoise_out = denoiser(
                 x_t, self.train_diffusion._scale_timesteps(t), return_aux=False, **cond
@@ -373,6 +429,9 @@ class UNIMFMDiffusion(nn.Module):
                 noise = torch.randn_like(motion)
             else:
                 noise = torch.zeros_like(motion)
+
+            if self.args.get("return_mid", False):
+                kwargs['return_mid'] = True
 
             samples_out = sample_fn(
                 denoiser,
@@ -403,6 +462,10 @@ class UNIMFMDiffusion(nn.Module):
             "pred_x": sample,
             "static_conf_logits": static_conf_logits,
         }
+
+        if self.args.get("return_mid", False):
+            output['intermediate_pred_x'] = [sample_i['pred_x'] for sample_i in samples_out['intermediates']]
+
         if 'pred_cam' in self.args.out_attr:
             output["pred_cam"] = pred_cam
         if 'cam_t_vel' in self.args.out_attr:

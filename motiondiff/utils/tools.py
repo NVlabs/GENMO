@@ -192,6 +192,13 @@ def load_ema_weights_from_checkpoint(model, checkpoint):
     return
 
 
+def rsync_file_from_remote(fname, remote_dir, local_dir, hostname):
+    remote_fname = fname.replace(local_dir, f'{remote_dir}/./')
+    cmd = f'rsync -avzP -m --relative {hostname}:{remote_fname} {local_dir}/'
+    subprocess_run(cmd, shell=True)
+    return
+
+
 # Global variable for timing indentation level
 timer_indent_level = 0
 

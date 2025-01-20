@@ -17,9 +17,9 @@ from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
 
 
 @autocast(enabled=False)
-def pp_static_joint(outputs, endecoder: EnDecoder):
+def pp_static_joint(outputs, endecoder: EnDecoder, smpl_key="pred_smpl_params_global"):
     # Global FK
-    pred_w_j3d = endecoder.fk_v2(**outputs["pred_smpl_params_global"])
+    pred_w_j3d = endecoder.fk_v2(**outputs[smpl_key])
     L = pred_w_j3d.shape[1]
     joint_ids = [7, 10, 8, 11, 20, 21]  # [L_Ankle, L_foot, R_Ankle, R_foot, L_wrist, R_wrist]
     pred_j3d_static = pred_w_j3d.clone()[:, :, joint_ids]  # (B, L, J, 3)
@@ -43,7 +43,7 @@ def pp_static_joint(outputs, endecoder: EnDecoder):
         for i in range(1, L):
             post_w_transl[:, i:] -= pred_disp[:, i - 1 : i]
     else:  # vectorized
-        pred_w_transl = outputs["pred_smpl_params_global"]["transl"].clone()  # (B, L, 3)
+        pred_w_transl = outputs[smpl_key]["transl"].clone()  # (B, L, 3)
         pred_w_disp = pred_w_transl[:, 1:] - pred_w_transl[:, :-1]  # (B, L-1, 3)
         pred_w_disp_new = pred_w_disp - pred_disp
         post_w_transl = torch.cumsum(torch.cat([pred_w_transl[:, :1], pred_w_disp_new], dim=1), dim=1)
@@ -119,10 +119,26 @@ def pp_static_joint_cam(outputs, endecoder: EnDecoder):
 
 
 @autocast(enabled=False)
-def process_ik(outputs, endecoder, static_conf=None):
+def pp_floor_height(pred_smpl_params_global, endecoder: EnDecoder):
+    pred_w_j3d = endecoder.fk_v2(**pred_smpl_params_global)
+    ####################
+
+    # Overwrite results:
+    # vectorized
+    post_w_transl = pred_smpl_params_global["transl"].clone()  # (B, L, 3)
+
+    # Put the sequence on the ground by -min(y), this does not consider foot height, for o3d vis
+    post_w_j3d = pred_w_j3d
+    ground_y = post_w_j3d[..., 1].flatten(-2).min(dim=-1)[0]  # (B,)  Minimum y value
+    post_w_transl[..., 1] -= ground_y
+
+    return post_w_transl
+
+@autocast(enabled=False)
+def process_ik(outputs, endecoder, static_conf=None, smpl_key="pred_smpl_params_global"):
     if static_conf is None:
         static_conf = outputs["static_conf_logits"].sigmoid()  # (B, L, J)
-    post_w_j3d, local_mat, post_w_mat = endecoder.fk_v2(**outputs["pred_smpl_params_global"], get_intermediate=True)
+    post_w_j3d, local_mat, post_w_mat = endecoder.fk_v2(**outputs[smpl_key], get_intermediate=True)
 
     # sebas rollout merge
     joint_ids = [7, 10, 8, 11, 20, 21]  # [L_Ankle, L_foot, R_Ankle, R_foot, L_wrist, R_wrist]

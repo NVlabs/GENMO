@@ -15,7 +15,7 @@ from hmr4d.utils.pylogger import Log
 from hmr4d.configs import register_store_gvhmr
 from hmr4d.utils.vis.rich_logger import print_cfg
 from hmr4d.utils.net_utils import load_pretrained_model, get_resume_ckpt_path
-from motiondiff.utils.tools import find_last_version, get_checkpoint_path
+from motiondiff.utils.tools import find_last_version, get_checkpoint_path, rsync_file_from_remote
 from pytorch_lightning.utilities import rank_zero_only
 from hmr4d.utils.callbacks.autoresume_callback import AutoResumeCallback, AutoResume
 import yaml
@@ -76,7 +76,10 @@ def train(cfg: DictConfig) -> None:
         remote_run_dir = cfg.output_dir.replace('outputs', cfg.remote_results_path)
         version = find_last_version(remote_run_dir, cp=test_cp)
         checkpoint_dir = f'{remote_run_dir}/version_{version}/checkpoints'
-        cfg.ckpt_path = get_checkpoint_path(checkpoint_dir, test_cp)
+        remote_ckpt_path = get_checkpoint_path(checkpoint_dir, test_cp)
+        cfg.ckpt_path = remote_ckpt_path.replace(cfg.remote_results_path, 'outputs')
+        if not os.path.exists(cfg.ckpt_path):
+            rsync_file_from_remote(cfg.ckpt_path, remote_run_dir, cfg.output_dir, hostname='slurm-dc-03')
         cfg.output_dir = f'{cfg.output_dir}/version_{version}'
         cfg.logger.name = f"{cfg.exp_name}_v{version}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
     else:    
