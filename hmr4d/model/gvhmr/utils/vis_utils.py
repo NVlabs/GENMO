@@ -248,7 +248,7 @@ def visualize_intermediate_smplmesh_scene_img(
     position, target, up = get_global_cameras_static_v2(
         # verts_list[0].cpu(),
         verts_glob_list.reshape(-1, V, 3).cpu().clone(),
-        beta=2.0,
+        beta=1.5,
         cam_height_degree=20,
         target_center_height=1.0,
     )
@@ -275,16 +275,29 @@ def visualize_intermediate_smplmesh_scene_img(
     colors_trans[:, 2] = torch.linspace(color_green[2], color_light_purple[2], T)
     faces = torch.from_numpy(faces_smpl.astype('int')).unsqueeze(0).to(device).expand(N, -1, -1)
 
-    for t, verts in enumerate(verts_glob_list):
-        if t % 20 != 0:
-            continue
-        verts = list(torch.unbind(verts_glob_list[t], dim=0))  # + [gv]
+    # colors = torch.stack([torch.from_numpy(color_rgb[i % len(color_rgb)]).float().cuda() for i in range(len(verts_glob_list))], dim=0)
+
+    for i in range(N):
         faces_list = list(torch.unbind(faces, dim=0))  # + [gf]
-        for i in range(N):
-            mesh = create_meshes(verts[i], faces_list[i], colors[t] if i == 0 else colors_trans[t])
-            renderer.scene.add_geometry(
-                f"mesh_{i}_{t}", mesh, lit_mat_box if i == 0 else trans_mat_box
-            )
+        for t, verts in enumerate(verts_glob_list):
+            if t % 20 != 0:
+                continue
+            verts = list(torch.unbind(verts_glob_list[t], dim=0))  # + [gv]
+            mat = o3d.visualization.rendering.MaterialRecord()
+            mat.base_color = [0.9, 0.9, 0.9, (i + 1) / N]
+            mat.shader = Settings.Transparency
+            # mat.opacity = (i + 1) / N
+            mat.thickness = 1.0
+            mat.transmission = 1.0
+            mat.absorption_distance = 10
+            mat.absorption_color = [0.5, 0.5, 0.5]
+
+            # mesh = create_meshes(verts[i], faces_list[i], colors[t] if i == 0 else colors_trans[t])
+            mesh = create_meshes(verts[i], faces_list[i], colors[t])
+            renderer.scene.add_geometry(f"mesh_{i}_{t}", mesh, mat)
+            # renderer.scene.add_geometry(
+            #     f"mesh_{i}_{t}", mesh, lit_mat_box if i == 0 else trans_mat_box
+            # )
 
     img = renderer.render_to_image()
     os.makedirs(os.path.dirname(f"out/{vis_type}_time/{fname}.png"), exist_ok=True)
