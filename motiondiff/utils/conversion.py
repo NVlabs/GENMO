@@ -117,5 +117,5 @@ def humanml_to_smpl(sample_raw, mean, std, smpl, debug=False, time=False, render
     
     smpl_trans = quat_apply(base_rot.expand(smpl_trans.shape[:-1] + (4,)), smpl_trans)
     smpl_pose[..., :3] = quaternion_to_angle_axis(quat_mul(base_rot.expand(smpl_pose.shape[:-1] + (4,)), angle_axis_to_quaternion(smpl_pose[..., :3])))
-
+    
     return smpl_pose, smpl_trans, joints_3d

@@ -9,6 +9,8 @@ from pytorch_lightning.callbacks.checkpoint import Checkpoint
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 import wandb
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from hmr4d.utils.pylogger import Log
 from hmr4d.configs import register_store_gvhmr
 from hmr4d.utils.vis.rich_logger import print_cfg
@@ -81,6 +83,7 @@ def train(cfg: DictConfig) -> None:
         run_root_dir = cfg.output_dir
         if version is None:
             version = find_last_version(run_root_dir, cp='last')
+
 
     # preparation
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(cfg.data, _recursive_=False)

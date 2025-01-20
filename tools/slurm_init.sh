@@ -6,6 +6,7 @@ declare -A wandb_keys=(
     ["drempe"]="cd969fa7c2159d17d536f66796c8a34adfcb36eb"
     ["haotianz"]="a8222cccae5b1338d8afe0a35cc18c4a1c0ae3d3"
     ["jiefengl"]="7ecf9f6fe9e8b7263e6141fb8fc69158c2bd7fa0"
+    ["jinkunc"]="c9a98990e2992e4a76dfad280ef8fd8bc8446caa"
 )
 
 # wandb login ${wandb_keys[${user}]}
