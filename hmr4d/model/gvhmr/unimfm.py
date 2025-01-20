@@ -520,6 +520,17 @@ class UNIMFM(pl.LightningModule):
 
         # ROPE inference
         obs = normalize_kp2d(batch["kp2d"], batch["bbx_xys"])
+        
+        #################### Debug validate 2d ####################
+        # device = batch["obs_kp2d"].device
+        # B, L = batch["obs_kp2d"].shape[:2]
+        # obs = torch.zeros(B, L, 17, 3).to(device)
+        # batch["bbx_xys"] = torch.zeros(B, L, 3).to(device)
+        # batch["cam_angvel"] = torch.zeros(B, L, 6).to(device)
+        # batch["cam_tvel"] = torch.zeros(B, L, 3).to(device)
+        # batch["R_w2c"] = torch.zeros(B, L, 3, 3).to(device)
+        #################### Debug ################################
+        
         if "mask" in batch:
             mask = batch["mask"]
             if isinstance(mask, dict):

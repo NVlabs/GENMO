@@ -133,6 +133,7 @@ class SimpleCkptSaver(Checkpoint):
         lastpath = self.output_dir / 'last.ckpt'
         checkpoint = trainer._checkpoint_connector.dump_checkpoint()
         trainer.strategy.save_checkpoint(checkpoint, lastpath)
+        os.chmod(lastpath, 0o755)
         
     @rank_zero_only
     def on_train_epoch_end(self, trainer, pl_module):
