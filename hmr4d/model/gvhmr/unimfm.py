@@ -513,7 +513,7 @@ class UNIMFM(pl.LightningModule):
         
     def validation_3d(self, batch, batch_idx, dataloader_idx=0):
         # Options & Check
-        do_postproc = self.trainer.state.stage == "test" and (not self.pipeline.args.infer_version == 3)  # Only apply postproc in test
+        do_postproc = self.trainer.state.stage == "test" and (not self.pipeline.args.get('infer_version', 2) == 3)  # Only apply postproc in test
         do_flip_test = "flip_test" in batch
         do_postproc_not_flip_test = do_postproc and not do_flip_test  # later pp when flip_test
         assert batch["B"] == 1, "Only support batch size 1 in evalution."
