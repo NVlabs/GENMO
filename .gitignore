@@ -184,3 +184,5 @@ batch_*
 third-party
 *.pth
 examples*
+checkpoints/
+GVHMR

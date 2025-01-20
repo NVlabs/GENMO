@@ -101,6 +101,7 @@ class Pipeline(nn.Module):
         if eval_text_only:
             for k in f_condition.keys():
                 f_condition[k] = torch.zeros_like(f_condition[k])
+                inputs['f_condition_exists'][k][:] = False
         
         inputs["f_condition"] = f_condition
         # Forward & output
@@ -281,7 +282,7 @@ class Pipeline(nn.Module):
         outputs["loss"] = total_loss
         return outputs
     
-    def forward_2d(self, inputs, train=False, global_step=0, mode=None):
+    def forward_2d(self, inputs, train=False, postproc=False, static_cam=False, global_step=0, mode=None):
         outputs = dict()
         device = inputs["obs"].device
         B, L = inputs["obs"].shape[:2]
@@ -315,9 +316,20 @@ class Pipeline(nn.Module):
            
         if train:
             f_condition = randomly_set_null_condition(f_condition, 0.1)
+            
+        eval_text_only = inputs.get('eval_text_only', False)
+        if eval_text_only:
+            for k in f_condition.keys():
+                f_condition[k] = torch.zeros_like(f_condition[k])
+                inputs['f_condition_exists'][k][:] = False
 
         inputs["f_condition"] = f_condition
-        model_output = self.denoiser3d.forward_train_2d(inputs, mode)  # pred_x, pred_cam, static_conf_logits
+        
+        if train:
+            model_output = self.denoiser3d.forward_train_2d(inputs, mode)  # pred_x, pred_cam, static_conf_logits
+        else:
+            model_output = self.denoiser3d(inputs, train=train, postproc=postproc, static_cam=static_cam, mode=mode)  # pred_x, pred_cam, static_conf_logits
+        
         if 'decode_dict' in model_output:
             decode_dict = model_output.pop("decode_dict")
         else:
@@ -332,6 +344,42 @@ class Pipeline(nn.Module):
                 "global_orient": decode_dict["global_orient"],  # (B, L, 3)
                 "transl": compute_transl_full_cam(model_output["pred_cam"], inputs["bbx_xys"], inputs["K_fullimg"]),
             }
+            
+        if not train:
+            if eval_text_only:
+                inputs["cam_angvel"] = torch.zeros(decode_dict["global_orient_gv"].shape[:2] + (6,), device=decode_dict["global_orient_gv"].device)
+            if self.endecoder.encode_type == 'gvhmr':
+                pred_smpl_params_global = get_smpl_params_w_Rt_v2(  # This function has for-loop
+                    global_orient_gv=decode_dict["global_orient_gv"],
+                    local_transl_vel=decode_dict["local_transl_vel"],
+                    global_orient_c=decode_dict["global_orient"],
+                    cam_angvel=inputs["cam_angvel"],
+                )
+                outputs["2d_pred_smpl_params_global"] = {
+                    "body_pose": decode_dict["body_pose"],
+                    "betas": decode_dict["betas"],
+                    **pred_smpl_params_global,
+                }
+            else:
+                outputs["2d_pred_smpl_params_global"] = {
+                    "body_pose": decode_dict["body_pose"],
+                    "betas": decode_dict["betas"],
+                    "global_orient": decode_dict["global_orient_w"],
+                    "transl": decode_dict["transl_w"],
+                }
+            outputs["static_conf_logits"] = model_output["static_conf_logits"]
+
+            if postproc and self.endecoder.encode_type == 'gvhmr':  # apply post-processing
+                if static_cam:  # extra post-processing to utilize static camera prior
+                    outputs["2d_pred_smpl_params_global"]["transl"] = pp_static_joint_cam(outputs, self.endecoder, smpl_key='2d_pred_smpl_params_global')
+                else:
+                    outputs["2d_pred_smpl_params_global"]["transl"] = pp_static_joint(outputs, self.endecoder, smpl_key='2d_pred_smpl_params_global')
+                body_pose = process_ik(outputs, self.endecoder, smpl_key='2d_pred_smpl_params_global')
+                decode_dict["body_pose"] = body_pose
+                outputs["2d_pred_smpl_params_global"]["body_pose"] = body_pose
+                outputs["2d_pred_smpl_params_incam"]["body_pose"] = body_pose
+
+            return outputs
 
         # ========== Compute Loss ========== #
         total_loss = 0

@@ -27,6 +27,9 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         version='v2d', # [v2d, vlocal, vglobal]
         motion_start_mode='sample',  # ["sample", "first"]
         split='train',
+        max_num_motions=None,
+        random_permute=False,
+        random_seed=7,
     ):
         self.hmr4d_support_dir = Path("inputs/MotionXpp/hmr4d_support")
         self.root = Path("inputs/MotionXpp/hmr4d_support")
@@ -38,6 +41,9 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         self.max_motion_frames = 120
         self.version = version
         self.motion_start_mode = motion_start_mode
+        self.max_num_motions = max_num_motions
+        self.random_permute = random_permute
+        self.random_seed = random_seed
         super().__init__()
 
     def _load_dataset(self):
@@ -55,6 +61,15 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
             seq_length = self.train_labels[vid]["pose"].shape[0]
             seq_lengths.append(seq_length)
         self.idx2meta = list(self.train_labels.keys())
+        if self.random_permute:
+            rng = np.random.RandomState(self.random_seed)
+            shuffle_ind = np.arange(len(self.idx2meta))
+            rng.shuffle(shuffle_ind)
+            self.idx2meta = [self.idx2meta[i] for i in shuffle_ind]
+            seq_lengths = [seq_lengths[i] for i in shuffle_ind]
+        if self.max_num_motions is not None:
+            self.idx2meta = self.idx2meta[: self.max_num_motions]
+            seq_lengths = seq_lengths[: self.max_num_motions]
         minutes = sum(seq_lengths) / 30 / 60
         Log.info(
             f"[{self.dataset_name}] has {minutes:.1f} minutes motion -> Resampled to {len(self.idx2meta)} samples."
@@ -188,6 +203,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
                 "use_cliffcam": True,
                 "meta": {
                     "dataset_id": "motion-x++2d",
+                    "eval_text_only": True,
                 },
                 "caption": data["text"],
                 "dataset_name": self.dataset_name,
@@ -244,6 +260,8 @@ MainStore.store(name="v2d", node=builds(MotionXDataset, version="v2d", motion_st
 MainStore.store(name="v2d_train", node=builds(MotionXDataset, version="v2d", motion_start_mode="sample", split="train"), group="train_2d_datasets/imgfeat_motionx")
 MainStore.store(name="v2d_val", node=builds(MotionXDataset, version="v2d", motion_start_mode="sample", split="val"), group="test_datasets/imgfeat_motionx")
 MainStore.store(name="v2d_test", node=builds(MotionXDataset, version="v2d", motion_start_mode="sample", split="test"), group="test_datasets/imgfeat_motionx")
+MainStore.store(name="v2d_test32", node=builds(MotionXDataset, version="v2d", motion_start_mode="sample", split="test", max_num_motions=32, random_permute=True), group="test_datasets/imgfeat_motionx")
+MainStore.store(name="v2d_test128", node=builds(MotionXDataset, version="v2d", motion_start_mode="sample", split="test", max_num_motions=128, random_permute=True), group="test_datasets/imgfeat_motionx")
 
 MainStore.store(name="vlocal", node=builds(MotionXDataset, version="vlocal", motion_start_mode="sample", split="train"), group="train_datasets/imgfeat_motionx")
 MainStore.store(name="vlocal_train", node=builds(MotionXDataset, version="vlocal", motion_start_mode="sample", split="train"), group="train_datasets/imgfeat_motionx")
