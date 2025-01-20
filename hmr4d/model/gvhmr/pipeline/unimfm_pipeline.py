@@ -1057,11 +1057,11 @@ def get_smpl_params_w_Rt_v3(
         motion_f_slam["transl"] = post_w_transl_slam
 
         body_pose = motion_f_slam["body_pose"].clone()
-        final_out = {"pred_smpl_params_global": motion_f_slam}
-        body_pose_ik = process_ik(final_out, endecoder, static_conf_logits.sigmoid().float())
-        use_slam = torch.cat([use_slam, use_slam[:, -1:]], dim=1)
-        use_slam = use_slam.repeat(1, 1, 63)
-        body_pose[~use_slam] = body_pose_ik[~use_slam]
+        # final_out = {"pred_smpl_params_global": motion_f_slam}
+        # body_pose_ik = process_ik(final_out, endecoder, static_conf_logits.sigmoid().float())
+        # use_slam = torch.cat([use_slam, use_slam[:, -1:]], dim=1)
+        # use_slam = use_slam.repeat(1, 1, 63)
+        # body_pose[~use_slam] = body_pose_ik[~use_slam]
         motion_f_slam["body_pose"] = body_pose
 
     for bid in range(B):
