@@ -37,7 +37,7 @@ callbacks:
       encode_type: 'humanml3d'
     save_dir: ${output_dir}/${text_feats_dir}_${text_data_name}
 
-
+seed: ${trial_ind}
 
 task: test
 remote_results_path: /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/yey/gvhmr

@@ -478,14 +478,12 @@ fid = compute_fid(gt_motion_embs.cpu().numpy(), pred_motion_embs.cpu().numpy())
 GT_diversity = evaluate_diversity(gt_motion_embs.cpu().numpy())
 Pred_diversity = evaluate_diversity(pred_motion_embs.cpu().numpy())
 
-breakpoint()
 GT_multi_modality = evaluate_multimodality(gt_motion_embs.cpu().numpy())
 Pred_multi_modality = evaluate_multimodality(pred_motion_embs.cpu().numpy())
 
 # GT_multi_modality = evaluate_multimodality(GT_feats)
 # Pred_multi_modality = evaluate_multimodality(Pred_feats)
 
-breakpoint()
 
 # print(f'GT_multi_modality: {GT_multi_modality}')
 # print(f'Pred_multi_modality: {Pred_multi_modality}')
@@ -501,7 +499,6 @@ breakpoint()
 # print(f'GT_diversity: {GT_diversity}')
 # print(f'Pred_diversity: {Pred_diversity}')
 
-breakpoint()
 
 
 # FID:
