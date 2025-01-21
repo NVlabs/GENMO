@@ -48,19 +48,24 @@ class Humanml3dDataset(BaseDataset):
         split="train",
         random1024=False,  # DEBUG
         limit_size=None,
+        no_subsample=False,
         max_text_len=50,
         part_ind=-1,
         num_parts=-1,
         eval_text_only=False,
         use_random_subset=False,
         random_subset_size=32,
-        random_subset_seed=7
+        random_subset_seed=7,
+        use_multi_text=False,
+        num_multi_text=3
     ):
         self.root = Path("inputs/HumanML3D_SMPL/hmr4d_support")
         if split == "train":
             self.text_embed_file = Path("inputs/HumanML3D_SMPL_ye/t5_embeddings_v1_half/all_text_embed.pth") # TODO: USE THE STANDARD PATH
         else:
             self.text_embed_file = Path("inputs/HumanML3D_SMPL_ye/t5_embeddings_v1_half/test_text_embed.pth")
+        if split == 'test':
+            no_subsample = True
         self.motion_frames = motion_frames
         self.l_factor = l_factor
         self.random1024 = random1024
@@ -76,12 +81,15 @@ class Humanml3dDataset(BaseDataset):
         }
         self.max_text_len = max_text_len
         self.split = split
+        self.no_subsample = no_subsample
         self.num_parts = num_parts
         self.part_ind = part_ind
         self.eval_text_only = eval_text_only
         self.use_random_subset = use_random_subset
         self.random_subset_seed = random_subset_seed
         self.random_subset_size = random_subset_size
+        self.use_multi_text = use_multi_text
+        self.num_multi_text = num_multi_text
         super().__init__(cam_augmentation, limit_size)
         return
         
@@ -119,10 +127,10 @@ class Humanml3dDataset(BaseDataset):
             seq_length = self.motion_files[vid]["pose"].shape[0]
             start_id = motion_start_id[vid] if vid in motion_start_id else 0
             seq_length = seq_length - start_id
-            if seq_length < 25:  # Skip clips that are too short
+            if seq_length < 25 and not self.no_subsample:  # Skip clips that are too short
                 continue
             num_samples = max(seq_length // self.motion_frames, 1)
-            if self.use_random_subset:
+            if self.use_random_subset or self.no_subsample:
                 num_samples = 1
             seq_lengths.append(seq_length)
             self.idx2meta.extend([(vid, start_id)] * num_samples)
@@ -136,11 +144,13 @@ class Humanml3dDataset(BaseDataset):
             seq_lengths = seq_lengths[start_idx:end_idx]
             
         if self.use_random_subset:
-            rng = np.random.RandomState(self.random_subset_seed)
+            self.rng = np.random.RandomState(self.random_subset_seed)
             shuffle_ind = np.arange(len(self.idx2meta))
-            rng.shuffle(shuffle_ind)
+            self.rng.shuffle(shuffle_ind)
             self.idx2meta = [self.idx2meta[i] for i in shuffle_ind[:self.random_subset_size]]
             seq_lengths = [seq_lengths[i] for i in shuffle_ind[:self.random_subset_size]]
+        else:
+            self.rng = np.random
         hours = sum(seq_lengths) / 30 / 3600
         Log.info(f"[{self.dataset_name}] has {hours:.1f} hours motion -> Resampled to {len(self.idx2meta)} samples.")
 
@@ -164,9 +174,9 @@ class Humanml3dDataset(BaseDataset):
         # Get {tgt_len} frames from data
         # Random select a subset with speed augmentation  [start, end)
         tgt_len = self.motion_frames
-        raw_subset_len = np.random.randint(int(tgt_len / self.l_factor), int(tgt_len * self.l_factor))
+        raw_subset_len = self.rng.randint(int(tgt_len / self.l_factor), int(tgt_len * self.l_factor))
         if raw_subset_len <= raw_len:
-            start = np.random.randint(0, raw_len - raw_subset_len + 1)
+            start = self.rng.randint(0, raw_len - raw_subset_len + 1)
             end = start + raw_subset_len
         else:  # interpolation will use all possible frames (results in a slow motion)
             start = 0
@@ -175,11 +185,11 @@ class Humanml3dDataset(BaseDataset):
 
         # Interpolation (vec + r6d)
         data_interpolated = interpolate_smpl_params(data, tgt_len)
-        # text_data = np.random.choice(raw_data["text_data"])
+        # text_data = self.rng.choice(raw_data["text_data"])
         if self.use_random_subset:
             text_ind = 0
         else:
-            text_ind = np.random.randint(0, len(raw_data["text_data"]))
+            text_ind = self.rng.randint(0, len(raw_data["text_data"]))
         text_data = raw_data["text_data"][text_ind]
         text_embed = text_embed_data[text_ind]
         
@@ -365,12 +375,40 @@ class Humanml3dDataset(BaseDataset):
         return_data["noisy_cam_tvel"] = repeat_to_max_len(return_data["noisy_cam_tvel"], max_len)
         return_data["T_w2c"] = repeat_to_max_len(return_data["T_w2c"], max_len)
         return return_data
+    
+    def __getitem__(self, idx):
+        data = self._load_data(idx)
+        data = self._process_data(data, idx)
+        if self.use_multi_text:
+            all_data = [data]
+            for i in range(1, self.num_multi_text):
+                new_idx = self.rng.randint(0, len(self))
+                data_i = self._load_data(new_idx)
+                data_i = self._process_data(data_i, new_idx)
+                all_data.append(data_i)
+            multi_text_data = {
+                'caption': [],
+                'text_embed': [],
+                'window_start': [],
+                'window_end': [],
+            }
+            window_stride = 1 / self.num_multi_text
+            for i, data_i in enumerate(all_data):
+                multi_text_data["caption"].append(data_i["caption"])
+                multi_text_data["text_embed"].append(data_i["text_embed"])
+                multi_text_data["window_start"].append(i * window_stride)
+                multi_text_data["window_end"].append((i + 1) * window_stride)
+            multi_text_data["text_embed"] = torch.stack(multi_text_data["text_embed"])
+            multi_text_data["window_start"] = torch.tensor(multi_text_data["window_start"])
+            multi_text_data["window_end"] = torch.tensor(multi_text_data["window_end"])
+            data["meta"]["multi_text_data"] = multi_text_data
+        return data
 
 
 train_group_name = "train_datasets/pure_motion_humanml3d"
 MainStore.store(name="v11_train", node=builds(Humanml3dDataset, cam_augmentation="v11", split="train"), group=train_group_name)
 MainStore.store(name="static_train", node=builds(Humanml3dDataset, cam_augmentation="static", split="train"), group=train_group_name)
 test_group_name = "test_datasets/pure_motion_humanml3d"
-MainStore.store(name="v11_test", node=builds(Humanml3dDataset, cam_augmentation="v11", split="test", eval_text_only=True), group=test_group_name)
-MainStore.store(name="static_test", node=builds(Humanml3dDataset, cam_augmentation="static", split="test", eval_text_only=True), group=test_group_name)
+MainStore.store(name="v11_test", node=builds(Humanml3dDataset, cam_augmentation="v11", split="test", eval_text_only=True, no_subsample=True), group=test_group_name)
+MainStore.store(name="static_test", node=builds(Humanml3dDataset, cam_augmentation="static", split="test", eval_text_only=True, no_subsample=True), group=test_group_name)
 
