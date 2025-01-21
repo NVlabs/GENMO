@@ -3,6 +3,50 @@ from scipy import linalg
 import torch 
 from collections import OrderedDict
 
+from scipy import linalg
+
+
+# (X - X_train)*(X - X_train) = -2X*X_train + X*X + X_train*X_train
+def euclidean_distance_matrix(matrix1, matrix2):
+    """
+        Params:
+        -- matrix1: N1 x D
+        -- matrix2: N2 x D
+        Returns:
+        -- dist: N1 x N2
+        dist[i, j] == distance(matrix1[i], matrix2[j])
+    """
+    assert matrix1.shape[1] == matrix2.shape[1]
+    d1 = -2 * np.dot(matrix1, matrix2.T)    # shape (num_test, num_train)
+    d2 = np.sum(np.square(matrix1), axis=1, keepdims=True)    # shape (num_test, 1)
+    d3 = np.sum(np.square(matrix2), axis=1)     # shape (num_train, )
+    dists = np.sqrt(d1 + d2 + d3)  # broadcasting
+    return dists
+
+def calculate_top_k(mat, top_k):
+    size = mat.shape[0]
+    gt_mat = np.expand_dims(np.arange(size), 1).repeat(size, 1)
+    bool_mat = (mat == gt_mat)
+    correct_vec = False
+    top_k_list = []
+    for i in range(top_k):
+#         print(correct_vec, bool_mat[:, i])
+        correct_vec = (correct_vec | bool_mat[:, i])
+        # print(correct_vec)
+        top_k_list.append(correct_vec[:, None])
+    top_k_mat = np.concatenate(top_k_list, axis=1)
+    return top_k_mat
+
+
+def calculate_R_precision(embedding1, embedding2, top_k, sum_all=False):
+    dist_mat = euclidean_distance_matrix(embedding1, embedding2)
+    argmax = np.argsort(dist_mat, axis=1)
+    top_k_mat = calculate_top_k(argmax, top_k)
+    if sum_all:
+        return top_k_mat.sum(axis=0)
+    else:
+        return top_k_mat
+
 # from action2motion
 
 def evaluate_matching_score(eval_wrapper, motion_loaders, file):
@@ -138,15 +182,16 @@ def calculate_diversity(activation, diversity_times):
     dist = linalg.norm(activation[first_indices] - activation[second_indices], axis=1)
     return dist.mean()
 
-def evaluate_diversity(activation_dict, file, diversity_times=300):
-    eval_dict = OrderedDict({})
-    print('========== Evaluating Diversity ==========')
-    for model_name, motion_embeddings in activation_dict.items():
-        diversity = calculate_diversity(motion_embeddings, diversity_times)
-        eval_dict[model_name] = diversity
-        print(f'---> [{model_name}] Diversity: {diversity:.4f}')
-        print(f'---> [{model_name}] Diversity: {diversity:.4f}', file=file, flush=True)
-    return eval_dict
+def evaluate_diversity(feats, diversity_times=300):
+    # eval_dict = OrderedDict({})
+    # print('========== Evaluating Diversity ==========')
+    # for model_name, motion_embeddings in activation_dict.items():
+    #     diversity = calculate_diversity(motion_embeddings, diversity_times)
+    #     eval_dict[model_name] = diversity
+    #     print(f'---> [{model_name}] Diversity: {diversity:.4f}')
+    #     print(f'---> [{model_name}] Diversity: {diversity:.4f}', file=file, flush=True)
+    diversity = calculate_diversity(feats, diversity_times)
+    return diversity
 
 def calculate_multimodality(activation, multimodality_times):
     assert len(activation.shape) == 3
@@ -159,48 +204,45 @@ def calculate_multimodality(activation, multimodality_times):
     return dist.mean()
 
 
-def evaluate_multimodality(eval_wrapper, mm_motion_loaders, file, mm_num_times=0):
-    eval_dict = OrderedDict({})
-    print('========== Evaluating MultiModality ==========')
-    for model_name, mm_motion_loader in mm_motion_loaders.items():
-        mm_motion_embeddings = []
-        with torch.no_grad():
-            for idx, batch in enumerate(mm_motion_loader):
-                # (1, mm_replications, dim_pos)
-                motions, m_lens = batch
-                motion_embedings = eval_wrapper.get_motion_embeddings(motions[0], m_lens[0])
-                mm_motion_embeddings.append(motion_embedings.unsqueeze(0))
-        if len(mm_motion_embeddings) == 0:
-            multimodality = 0
-        else:
-            mm_motion_embeddings = torch.cat(mm_motion_embeddings, dim=0).cpu().numpy()
-            multimodality = calculate_multimodality(mm_motion_embeddings, mm_num_times)
-        print(f'---> [{model_name}] Multimodality: {multimodality:.4f}')
-        print(f'---> [{model_name}] Multimodality: {multimodality:.4f}', file=file, flush=True)
-        eval_dict[model_name] = multimodality
-    return eval_dict
+def evaluate_multimodality(feats, mm_num_times=10):
+    # eval_dict = OrderedDict({})
+    # print('========== Evaluating MultiModality ==========')
+    # for model_name, mm_motion_loader in mm_motion_loaders.items():
+    #     mm_motion_embeddings = []
+    #     with torch.no_grad():
+    #         for idx, batch in enumerate(mm_motion_loader):
+    #             # (1, mm_replications, dim_pos)
+    #             motions, m_lens = batch
+    #             motion_embedings = eval_wrapper.get_motion_embeddings(motions[0], m_lens[0])
+    #             mm_motion_embeddings.append(motion_embedings.unsqueeze(0))
+    #     if len(mm_motion_embeddings) == 0:
+    #         multimodality = 0
+    #     else:
+    #         mm_motion_embeddings = torch.cat(mm_motion_embeddings, dim=0).cpu().numpy()
+    #         multimodality = calculate_multimodality(mm_motion_embeddings, mm_num_times)
+    #     print(f'---> [{model_name}] Multimodality: {multimodality:.4f}')
+    #     print(f'---> [{model_name}] Multimodality: {multimodality:.4f}', file=file, flush=True)
+    #     eval_dict[model_name] = multimodality
+    mm_motion_embeddings = feats 
+    score = calculate_multimodality(mm_motion_embeddings, mm_num_times)
+    return score
 
 
 # GT_vectors_path = 'outputs/humanml3d_feats_gt/feats_test.pt'
 # Pred_vectors_path = 'outputs/mocap_mixed_v1/unimfm/unimfm_test_st_g8/version_0/text_feats/feats.pt'
 
-# GT_vectors_path = 'outputs/humanml3d_feats_gt/feats_test_humanml3d_format.pt.npy'
-# Pred_vectors_path = 'outputs/mocap_mixed_v1/unimfm/unimfm_test_st_g8/version_0/text_feats/feats_humanml3d_format.npy'
-GT_vectors_path = 'outputs/ground_truth_motions.npy'
-Pred_vectors_path = 'outputs/mdm_vald_motions.npy'
-
+GT_vectors_path = 'outputs/humanml3d_feats_gt/feats_test_humanml3d_format.pt.npy'
+Pred_vectors_path = 'outputs/mocap_mixed_v1/unimfm/unimfm_test_st_g8/version_0/text_feats/feats_humanml3d_format.npy'
+# GT_vectors_path = 'outputs/ground_truth_motions.npy'
+# Pred_vectors_path = 'outputs/mdm_vald_motions.npy'
 
 GT_feats = np.load(GT_vectors_path)
 Pred_feats = np.load(Pred_vectors_path)
 
 mean = np.load('outputs/humanml3d_mean.npy')
 std = np.load('outputs/humanml3d_std.npy')
-GT_feats = GT_feats * std + mean
-Pred_feats = Pred_feats * std + mean
-
-feat_dim = GT_feats.shape[-1]
-GT_feats = GT_feats.reshape(-1, feat_dim)
-Pred_feats = Pred_feats.reshape(-1, feat_dim)
+# GT_feats = GT_feats * std + mean
+# Pred_feats = Pred_feats * std + mean
 
 
 def compute_fid(feats1, feats2):
@@ -209,8 +251,24 @@ def compute_fid(feats1, feats2):
     fid = calculate_frechet_distance(mu1, sigma1, mu2, sigma2)
     return fid
 
-fid = compute_fid(GT_feats, Pred_feats)
+GT_multi_modality = evaluate_multimodality(GT_feats)
+Pred_multi_modality = evaluate_multimodality(Pred_feats)
 
+print(f'GT_multi_modality: {GT_multi_modality}')
+print(f'Pred_multi_modality: {Pred_multi_modality}')
+
+feat_dim = GT_feats.shape[-1]
+GT_feats_flat = GT_feats.reshape(-1, feat_dim)
+Pred_feats_flat = Pred_feats.reshape(-1, feat_dim)
+fid = compute_fid(GT_feats_flat, Pred_feats_flat)
+print(f'FID: {fid}')
+
+GT_diversity = evaluate_diversity(GT_feats_flat)
+Pred_diversity = evaluate_diversity(Pred_feats_flat)
+print(f'GT_diversity: {GT_diversity}')
+print(f'Pred_diversity: {Pred_diversity}')
+
+breakpoint()
 
 
 # FID:
