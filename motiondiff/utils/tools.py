@@ -134,7 +134,11 @@ def get_checkpoint_path(checkpoint_dir, cp, return_name=False):
 
 
 def subprocess_run(cmd, ignore_err=False, **kwargs):
-    result = subprocess.run(cmd, **kwargs)
+    try:
+        result = subprocess.run(cmd, **kwargs)
+    except subprocess.CalledProcessError as err:    
+        print("####### subprocess-run error message ######")
+        print(f"{err} {err.stderr.decode('utf8')}")
     if result.returncode != 0:
         if not ignore_err:
             raise Exception('error in subprocess_run!')
