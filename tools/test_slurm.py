@@ -38,7 +38,6 @@ args = parser.parse_args()
 
 
 cmd = args.command
-cmd.replace('python ', '')
 tag = cmd.replace(' ', '-').replace('=', '+').replace('/', '_').replace('.', '_').replace(':', '_')
 if len(tag) > 50:
     tag = tag[:50]

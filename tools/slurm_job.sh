@@ -22,6 +22,6 @@ echo "==========="
 echo "pwd:"
 pwd
 echo "cmd:"
-echo "python $python_cmd"
-python $python_cmd
+echo "$python_cmd"
+$python_cmd
 
