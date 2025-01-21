@@ -17,6 +17,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-c', '--cfg_query', nargs='+', default=[])
 parser.add_argument('-d', '--dir_query', nargs='+', default=[])
 parser.add_argument("-v", "--cfg_var", type=str, default='', help="exp name var")
+parser.add_argument('-env', '--env_var', default="DUMMYFLAG=1")
 parser.add_argument("-g", "--gpus", type=int, default=1, help="gpus used per node")
 parser.add_argument("-n", "--nodes", type=int, default=1, help="number of nodes")
 parser.add_argument('-ar_bt', '--autoresume_before_timelimit', type=int, default=20)
@@ -138,7 +139,7 @@ if not args.debug:
     subprocess_run(rsync_cmd, shell=True)
 
 for cmd, tag in slurm_cmds:
-    job_cmd = f"cd {exp_folder}; tools/slurm_job.sh {args.user} {args.branch} {cmd}"
+    job_cmd = f"cd {exp_folder}; tools/slurm_job.sh {args.user} {args.branch} {args.env_var} {cmd}"
     print('job_cmd:', job_cmd)
 
     autoresume_str = f'--autoresume_timer {args.test_autoresume_timer}' if args.test_autoresume_timer > 0 else f'--autoresume_before_timelimit {args.autoresume_before_timelimit}'

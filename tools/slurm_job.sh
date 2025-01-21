@@ -1,10 +1,12 @@
 user=${1:-jiefengl}
 branch=${2:-main}
-python_cmd=${@:3}
+env_var=${3}
+python_cmd=${@:4}
 
 
 echo "slurm_job_id: $SLURM_JOB_ID"
 echo "slurm_job_name: $SLURM_JOB_NAME"
+echo "env_var: $env_var"
 echo "python_cmd: $python_cmd"
 echo "user: $user"
 echo "branch: $branch"
@@ -23,5 +25,10 @@ echo "pwd:"
 pwd
 echo "cmd:"
 echo "$python_cmd"
+
+if [ -n "$env_var" ]; then
+    export $env_var
+fi
+
 $python_cmd
 
