@@ -41,13 +41,14 @@ from hmr4d.model.gvhmr.utils.vis_utils import (
 
 
 class VisText(pl.Callback):
-    def __init__(self, vis_every_n_val=1, save_feats=False, save_dir=None, dataset_part_ind=-1, endecoder=None, trial_ind=0):
+    def __init__(self, vis_every_n_val=1, save_feats=False, save_dir=None, dataset_part_ind=-1, endecoder=None, trial_ind=0, text_len=120):
         super().__init__()
         self.vis_every_n_val = vis_every_n_val
         self.num_val = 0
         self.save_feats = save_feats
         self.trial_ind = trial_ind
         self.save_dir = save_dir
+        self.text_len = text_len
         self.dataset_part_ind = dataset_part_ind
         if endecoder is not None:
             self.endecoder = hydra.utils.instantiate(endecoder).cuda()
@@ -180,9 +181,9 @@ class VisText(pl.Callback):
             }
             os.makedirs(self.save_dir, exist_ok=True)
             if self.dataset_part_ind >= 0:
-                fname = self.save_dir + f'/feats_part{self.dataset_part_ind}_{self.trial_ind}.pt'
+                fname = self.save_dir + f'/feats_part{self.dataset_part_ind}_len{self.text_len}_{self.trial_ind}.pt'
             else:
-                fname = self.save_dir + f'/feats_{self.trial_ind}.pt'
+                fname = self.save_dir + f'/feats_len{self.text_len}_{self.trial_ind}.pt'
             torch.save(results, fname)
             os.chmod(fname, 0o755)
             print(f"text-to-motion features saved to {fname}")

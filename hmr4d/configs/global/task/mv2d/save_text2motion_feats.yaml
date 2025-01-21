@@ -31,6 +31,7 @@ callbacks:
     save_feats: true
     dataset_part_ind: ${part_ind}
     trial_ind: ${trial_ind}
+    text_len: ${pipeline.args.test_motion_len}
     endecoder:
       _target_: hmr4d.model.gvhmr.utils.endecoder.EnDecoder
       stats_name: 'DEFAULT_01'
