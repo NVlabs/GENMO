@@ -1,0 +1,9 @@
+motionx_test:
+  _target_: hmr4d.dataset.motionx.motionx.MotionXDataset
+  split: test
+  version: vglobal
+  motion_start_mode: first
+  max_num_motions: 64
+  random_permute: true
+  random_seed: 7
+  wo_img_feat: true

@@ -717,15 +717,15 @@ class UNIMFM(pl.LightningModule):
         if "inpainting_3d" in self.model_cfg:
             batch_['observed_motion_3d'] = self.endecoder.encode(batch)
             motion_mask_3d = torch.zeros_like(batch_['observed_motion_3d']).cuda()
-            L = motion_mask_3d.shape[1]
+            L = batch["length"][0]
             keyframes = [i for i in range(L)]
             if self.model_cfg['inpainting_3d']['mode'] == 'body_pose_dense':
                 motion_mask_3d[:, :, :126+10] = 1
             elif self.model_cfg['inpainting_3d']['mode'] == 'body_pose_root_rot_dense':
                 motion_mask_3d[:, :, :126+10+12] = 1
             elif self.model_cfg['inpainting_3d']['mode'] == 'body_pose_root_rot_keyframe2':
-                # keyframes = [0, motion_mask_3d.shape[1]-1]
-                keyframes = [0, np.random.choice(keyframes[L//2:], 1)[0]]
+                # keyframes = [0, L-1] # start and fix end
+                keyframes = [0, np.random.choice(keyframes[L//2:], 1)[0]] # start and random end
                 motion_mask_3d[:, keyframes, :126+10+12] = 1
             elif self.model_cfg['inpainting_3d']['mode'] == 'body_pose_root_rot_keyframe5':
                 keyframes = [int((L-1) * i / 4) for i in range(5)]

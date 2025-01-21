@@ -90,9 +90,6 @@ class MetricInpainting(pl.Callback):
     def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
         """The behaviour is the same for val/test/predict"""
         assert batch["B"] == 1
-        dataset_id = batch["meta"][0]["dataset_id"]
-        if dataset_id not in ['humanml3d']:
-            return
 
         # Move to cuda if not
         for g in ["male", "female", "neutral"]:
@@ -174,6 +171,7 @@ class MetricInpainting(pl.Callback):
         self.num_val += 1
         if len(self.wandb_html_dict) > 0:
             pl_module.logger.log_metrics(self.wandb_html_dict)
+        
         if self.save_feats:
             feats_arr = torch.cat(self.feats_arr, dim=0).cpu()
             os.makedirs(self.save_dir, exist_ok=True)
@@ -182,4 +180,5 @@ class MetricInpainting(pl.Callback):
         
         for metric_name in sorted(self.metrics):
             metric_avg = np.average(self.metrics[metric_name])
-            print(f"Metric [{metric_name}]: {metric_avg:.02f}")
+            print(f"Metric [{metric_name}]: {metric_avg:.05f}")
+            pl_module.logger.log_metrics({f"metrics/{metric_name}": metric_avg}, step=pl_module.current_epoch)
