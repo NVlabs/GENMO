@@ -497,6 +497,8 @@ class UNIMFM(pl.LightningModule):
             batch['encoded_text'] = batch['text_embed'].cuda()
         elif self.use_text_encoder:
             batch['encoded_text'] = self.encode_text(batch['caption'], batch['has_text'])
+        if 'cam_angvel' not in batch:
+            batch["cam_angvel"] = torch.zeros(batch["obs"].shape[:2] + (6,), device=batch["obs"].device)
         self.init_condition_exists(batch)
         # Forward and get loss
         if self.infer_mode == 'regression':

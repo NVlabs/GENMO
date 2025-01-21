@@ -14,14 +14,26 @@ defaults:
       # - metric_3dpw
   - _self_
 
+text_feats_dir: 'text_feats'
+text_data_name: 'humanml3d'
+part_ind: -1
+num_parts: -1
+
+test_datasets:
+  humanml3d_test:
+    part_ind: ${part_ind}
+    num_parts: ${num_parts}
+
+
 callbacks:
   vis_text:
     save_feats: true
+    dataset_part_ind: ${part_ind}
     endecoder:
       _target_: hmr4d.model.gvhmr.utils.endecoder.EnDecoder
       stats_name: 'DEFAULT_01'
       encode_type: 'humanml3d'
-    save_dir: ${output_dir}/text_feats
+    save_dir: ${output_dir}/${text_feats_dir}_${text_data_name}
 
 
 

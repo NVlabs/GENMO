@@ -41,12 +41,13 @@ from hmr4d.model.gvhmr.utils.vis_utils import (
 
 
 class VisText(pl.Callback):
-    def __init__(self, vis_every_n_val=1, save_feats=False, save_dir=None, endecoder=None):
+    def __init__(self, vis_every_n_val=1, save_feats=False, save_dir=None, dataset_part_ind=-1, endecoder=None):
         super().__init__()
         self.vis_every_n_val = vis_every_n_val
         self.num_val = 0
         self.save_feats = save_feats
         self.save_dir = save_dir
+        self.dataset_part_ind = dataset_part_ind
         if endecoder is not None:
             self.endecoder = hydra.utils.instantiate(endecoder).cuda()
         # vid->result
@@ -131,6 +132,7 @@ class VisText(pl.Callback):
             }
             feats = self.endecoder.encode_humanml3d(encoder_inputs)
             self.feats_arr.append(feats)
+            self.text_arr.append(text)
         else:
             # Visualize
             if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
@@ -155,6 +157,7 @@ class VisText(pl.Callback):
         self.wandb_html_dict = {}
         if self.save_feats:
             self.feats_arr = []
+            self.text_arr = []
             print(f"start generating text-to-motion features which will be saved at {self.save_dir}")
         
 
@@ -165,8 +168,15 @@ class VisText(pl.Callback):
             pl_module.logger.log_metrics(self.wandb_html_dict)
         if self.save_feats:
             feats_arr = torch.cat(self.feats_arr, dim=0).cpu()
+            results = {
+                'feats': feats_arr,
+                'text': self.text_arr,
+            }
             os.makedirs(self.save_dir, exist_ok=True)
-            fname = self.save_dir + '/feats.pt'
-            torch.save(feats_arr, fname)
+            if self.dataset_part_ind >= 0:
+                fname = self.save_dir + f'/feats_part{self.dataset_part_ind}.pt'
+            else:
+                fname = self.save_dir + '/feats.pt'
+            torch.save(results, fname)
             os.chmod(fname, 0o755)
             print(f"text-to-motion features saved to {fname}")

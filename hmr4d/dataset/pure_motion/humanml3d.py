@@ -49,6 +49,8 @@ class Humanml3dDataset(BaseDataset):
         random1024=False,  # DEBUG
         limit_size=None,
         max_text_len=50,
+        part_ind=-1,
+        num_parts=-1,
         eval_text_only=False,
         use_random_subset=False,
         random_subset_size=32,
@@ -74,6 +76,8 @@ class Humanml3dDataset(BaseDataset):
         }
         self.max_text_len = max_text_len
         self.split = split
+        self.num_parts = num_parts
+        self.part_ind = part_ind
         self.eval_text_only = eval_text_only
         self.use_random_subset = use_random_subset
         self.random_subset_seed = random_subset_seed
@@ -123,6 +127,13 @@ class Humanml3dDataset(BaseDataset):
             seq_lengths.append(seq_length)
             self.idx2meta.extend([(vid, start_id)] * num_samples)
             assert start_id == 0, f"start_id is not 0 for {vid}"
+        
+        if self.num_parts > 0:
+            part_size = len(self.idx2meta) // self.num_parts
+            start_idx = self.part_ind * part_size
+            end_idx = (self.part_ind + 1) * part_size
+            self.idx2meta = self.idx2meta[start_idx:end_idx]
+            seq_lengths = seq_lengths[start_idx:end_idx]
             
         if self.use_random_subset:
             rng = np.random.RandomState(self.random_subset_seed)
