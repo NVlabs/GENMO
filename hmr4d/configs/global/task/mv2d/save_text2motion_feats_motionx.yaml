@@ -18,10 +18,14 @@ text_feats_dir: 'text_feats'
 text_data_name: 'motionx'
 trial_ind: 0
 
+args:
+  test_motion_len: null
+
 callbacks:
   vis_text:
     save_feats: true
     trial_ind: ${trial_ind}
+    text_len: ${pipeline.args.test_motion_len}
     endecoder:
       _target_: hmr4d.model.gvhmr.utils.endecoder.EnDecoder
       stats_name: 'DEFAULT_01'
