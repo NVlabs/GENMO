@@ -16,17 +16,19 @@ defaults:
 
 text_feats_dir: 'text_feats'
 text_data_name: 'motionx'
+trial_ind: 0
 
 callbacks:
   vis_text:
     save_feats: true
+    trial_ind: ${trial_ind}
     endecoder:
       _target_: hmr4d.model.gvhmr.utils.endecoder.EnDecoder
       stats_name: 'DEFAULT_01'
       encode_type: 'humanml3d'
     save_dir: ${output_dir}/${text_feats_dir}_${text_data_name}
 
-
+seed: ${trial_ind}
 
 task: test
 remote_results_path: /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/yey/gvhmr
