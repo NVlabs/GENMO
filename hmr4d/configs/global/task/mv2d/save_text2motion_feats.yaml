@@ -14,6 +14,8 @@ defaults:
       # - metric_3dpw
   - _self_
 
+text_feats_dir: 'text_feats'
+
 callbacks:
   vis_text:
     save_feats: true
@@ -21,7 +23,7 @@ callbacks:
       _target_: hmr4d.model.gvhmr.utils.endecoder.EnDecoder
       stats_name: 'DEFAULT_01'
       encode_type: 'humanml3d'
-    save_dir: ${output_dir}/text_feats
+    save_dir: ${output_dir}/${text_feats_dir}
 
 
 

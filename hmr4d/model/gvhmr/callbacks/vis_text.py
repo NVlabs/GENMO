@@ -131,6 +131,7 @@ class VisText(pl.Callback):
             }
             feats = self.endecoder.encode_humanml3d(encoder_inputs)
             self.feats_arr.append(feats)
+            self.text_arr.append(text)
         else:
             # Visualize
             if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
@@ -155,6 +156,7 @@ class VisText(pl.Callback):
         self.wandb_html_dict = {}
         if self.save_feats:
             self.feats_arr = []
+            self.text_arr = []
             print(f"start generating text-to-motion features which will be saved at {self.save_dir}")
         
 
@@ -165,8 +167,12 @@ class VisText(pl.Callback):
             pl_module.logger.log_metrics(self.wandb_html_dict)
         if self.save_feats:
             feats_arr = torch.cat(self.feats_arr, dim=0).cpu()
+            results = {
+                'feats': feats_arr,
+                'text': self.text_arr,
+            }
             os.makedirs(self.save_dir, exist_ok=True)
             fname = self.save_dir + '/feats.pt'
-            torch.save(feats_arr, fname)
+            torch.save(results, fname)
             os.chmod(fname, 0o755)
             print(f"text-to-motion features saved to {fname}")
