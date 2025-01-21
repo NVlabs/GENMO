@@ -43,6 +43,7 @@ class AutoResumeCallback(Callback):
             filepath,
         )
         # trainer.strategy.barrier("Trainer.save_checkpoint")
+        os.chmod(filepath, 0o755)
 
     def _save_last_checkpoints(self, trainer):
         cp = trainer.checkpoint_callback
