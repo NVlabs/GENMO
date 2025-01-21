@@ -18,6 +18,7 @@ text_feats_dir: 'text_feats'
 text_data_name: 'humanml3d'
 part_ind: -1
 num_parts: -1
+trial_ind: -1
 
 test_datasets:
   humanml3d_test:
@@ -29,6 +30,7 @@ callbacks:
   vis_text:
     save_feats: true
     dataset_part_ind: ${part_ind}
+    trial_ind: ${trial_ind}
     endecoder:
       _target_: hmr4d.model.gvhmr.utils.endecoder.EnDecoder
       stats_name: 'DEFAULT_01'

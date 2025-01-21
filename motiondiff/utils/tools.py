@@ -8,7 +8,7 @@ import subprocess
 import importlib
 import wandb
 import time
-from torch.utils.data import DataLoader, Dataset, Sampler
+# from torch.utils.data import DataLoader, Dataset, Sampler
 
 
 class AverageMeter(object):
@@ -38,16 +38,16 @@ class AverageMeter(object):
             self.avg = self.sum / self.count
 
 
-class IndexSampler(Sampler):
+# class IndexSampler(Sampler):
     
-    def __init__(self, index):
-        self.index = index
+#     def __init__(self, index):
+#         self.index = index
 
-    def __iter__(self):
-        return iter(self.index)
+#     def __iter__(self):
+#         return iter(self.index)
 
-    def __len__(self):
-        return len(self.index)
+#     def __len__(self):
+#         return len(self.index)
 
 
 def worker_init_fn(worker_id):
