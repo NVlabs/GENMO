@@ -159,7 +159,12 @@ class VisText(pl.Callback):
         if self.save_feats:
             self.feats_arr = []
             self.text_arr = []
-            print(f"start generating text-to-motion features which will be saved at {self.save_dir}")
+            print(f"start generating text-to-motion features which will be saved at {self.save_dir}\n")
+            print("#### saving a dump feature first to check the correctness of the path #### \n")
+            dump_feats = torch.randn(1, 1, 1, 1)
+            os.makedirs(self.save_dir, exist_ok=True)
+            torch.save(dump_feats, self.save_dir + '/dump.pt')
+            print(f"dump feature saved to {self.save_dir}/dump.pt\n")
         
 
     # ================== Epoch Summary  ================== #
