@@ -15,7 +15,7 @@ defaults:
   - _self_
 
 text_feats_dir: 'text_feats'
-text_data_name: 'humanl3d'
+text_data_name: 'humanml3d'
 
 callbacks:
   vis_text:
