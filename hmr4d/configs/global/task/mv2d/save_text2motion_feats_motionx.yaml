@@ -18,8 +18,9 @@ text_feats_dir: 'text_feats'
 text_data_name: 'motionx'
 trial_ind: 0
 
-args:
-  test_motion_len: null
+pipeline:
+  args:
+    test_motion_len: 120
 
 callbacks:
   vis_text:

@@ -370,8 +370,9 @@ class UNIMFMDiffusion(nn.Module):
 
         f_condition = inputs["f_condition"]
         
-        if self.args.get("test_motion_len", None) is not None:
-            L = self.args.test_motion_len
+        test_motion_len = self.args.get("test_motion_len", None)
+        if test_motion_len is not None and test_motion_len > self.max_len:
+            L = test_motion_len
             length = torch.ones_like(length) * L
             f_condition_exists = inputs["f_condition_exists"]
             for k in f_condition:
