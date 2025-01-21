@@ -77,12 +77,15 @@ def train(cfg: DictConfig) -> None:
         version = find_last_version(remote_run_dir, cp=test_cp)
         checkpoint_dir = f'{remote_run_dir}/version_{version}/checkpoints'
         remote_ckpt_path = get_checkpoint_path(checkpoint_dir, test_cp)
-        cfg.ckpt_path = remote_ckpt_path.replace(cfg.remote_results_path, 'outputs')
-        if not os.path.exists(cfg.ckpt_path):
-            print("ckpt path:", cfg.ckpt_path)
-            print(f"rsyncing from remote: {remote_ckpt_path}")
-            print(f"output_dir: {cfg.output_dir}")
-            rsync_file_from_remote(cfg.ckpt_path, remote_run_dir, cfg.output_dir, hostname='cs-oci-ord-dc-03')
+        if cfg.get('rsync_ckpt', False):
+            cfg.ckpt_path = remote_ckpt_path.replace(cfg.remote_results_path, 'outputs')
+            if not os.path.exists(cfg.ckpt_path):
+                print(f"rsyncing from remote: {remote_ckpt_path}")
+                print(f"output_dir: {cfg.output_dir}")
+                rsync_file_from_remote(cfg.ckpt_path, remote_run_dir, cfg.output_dir, hostname='cs-oci-ord-dc-03')
+        else:
+            cfg.ckpt_path = remote_ckpt_path
+        print("ckpt path:", cfg.ckpt_path)
         cfg.output_dir = f'{cfg.output_dir}/version_{version}'
         cfg.logger.name = f"{cfg.exp_name}_v{version}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
     else:    
