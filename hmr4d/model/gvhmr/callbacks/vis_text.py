@@ -166,5 +166,7 @@ class VisText(pl.Callback):
         if self.save_feats:
             feats_arr = torch.cat(self.feats_arr, dim=0).cpu()
             os.makedirs(self.save_dir, exist_ok=True)
-            torch.save(feats_arr, self.save_dir + '/feats.pt')
-            print(f"text-to-motion features saved at {self.save_dir}")
+            fname = self.save_dir + '/feats.pt'
+            torch.save(feats_arr, fname)
+            os.chmod(fname, 0o755)
+            print(f"text-to-motion features saved to {fname}")
