@@ -18,7 +18,7 @@ text_feats_dir: 'text_feats'
 text_data_name: 'humanml3d'
 part_ind: -1
 num_parts: -1
-trial_ind: -1
+trial_ind: 0
 
 test_datasets:
   humanml3d_test:
