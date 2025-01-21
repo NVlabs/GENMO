@@ -346,8 +346,6 @@ class Pipeline(nn.Module):
             }
             
         if not train:
-            if eval_text_only:
-                inputs["cam_angvel"] = torch.zeros(decode_dict["global_orient_gv"].shape[:2] + (6,), device=decode_dict["global_orient_gv"].device)
             if self.endecoder.encode_type == 'gvhmr':
                 pred_smpl_params_global = get_smpl_params_w_Rt_v2(  # This function has for-loop
                     global_orient_gv=decode_dict["global_orient_gv"],
