@@ -32,12 +32,15 @@ from hmr4d.model.gvhmr.utils.endecoder import EnDecoder
 encoder = EnDecoder(stats_name='DEFAULT_01', encode_type='humanml3d').cuda()
 
 smpl_data_path = 'inputs/smpl_data'
-humanml3d_raw_data = 'outputs/mdm_gen_motions.npy'
-save_path = 'outputs/converted_mdm_gen_motions.npy'
+humanml3d_raw_data = 'outputs/mdm_gt_motions.npy'
+save_path = 'outputs/converted_mdm_gt_motions.npy'
 humanml3d_raw_path = '/home/jinkunc/fsw_datasets/HumanML3D'
 
-mean = np.load(os.path.join(humanml3d_raw_path, 'Mean.npy'))
-std = np.load(os.path.join(humanml3d_raw_path, 'Std.npy'))
+# mean = np.load(os.path.join(humanml3d_raw_path, 'Mean.npy'))
+# std = np.load(os.path.join(humanml3d_raw_path, 'Std.npy'))
+
+mean = np.load('outputs/humanml3d_mean.npy')
+std = np.load('outputs/humanml3d_std.npy')
 
 smpl = SMPL(smpl_data_path)
 
@@ -46,7 +49,7 @@ smpl = SMPL(smpl_data_path)
     root_linear_velocity (B, seq_len,2)
     root_y (B, seq_len, 1)
     ric_data (B, seq_len, (joint_num - 1)*3)
-    rot_data (B, seq_len, (joint_num - 1)6)
+    rot_data (B, seq_len, (joint_num - 1)*6)
     local_velocity (B, seq_len,joint_num * 3)
     foot contact (B, seq_len, 4)
 """
@@ -78,8 +81,9 @@ for i in tqdm(range(num_batches)):
     batch_size, seq_len, _ = raw_motions_batch.shape
     raw_motions_batch = raw_motions_batch.view(batch_size * seq_len, 1, -1)
     raw_motions_batch = raw_motions_batch.permute(0, 2, 1).unsqueeze(2) # [batch, nfeat, 1, seq_len]
-
-    converted_batch = humanml_to_smpl(raw_motions_batch.float(), mean, std, smpl)
+    
+    # real_motions_batch = raw_motions_batch * std[None, ..., None, None] + mean[None, ..., None, None]
+    converted_batch = humanml_to_smpl(raw_motions_batch.float(), mean.float(), std.float(), smpl)
     smpl_pose, smpl_trans, joints_3d = converted_batch
     # HumanML3D removes the last two joints from SMPL (left and right hands)
     # see: https://github.com/EricGuo5513/HumanML3D/issues/67
@@ -98,6 +102,7 @@ for i in tqdm(range(num_batches)):
 
     feats = encoder.encode_humanml3d(inputs)
     feats_arr.append(feats)
+    
 
 save_feats = torch.cat(feats_arr, dim=0).cpu()
 torch.save(save_feats, save_path)

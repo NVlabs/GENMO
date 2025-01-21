@@ -87,7 +87,6 @@ def humanml_to_smpl(sample_raw, mean, std, smpl, debug=False, time=False, render
         smpl_pose = rotation_matrix_to_angle_axis(rotmat)
         smpl_pose = torch.cat([r_rot_aa.unsqueeze(2), smpl_pose, torch.zeros_like(smpl_pose[:, :, :2])], dim=2).reshape(sample.shape[0], -1, 72)
         joints_3d = None
-
     else:
         hand_joints = sample[:, :, -2:].clone()
         hand_joints[..., 1] += 1e-2
