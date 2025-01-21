@@ -73,8 +73,11 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
     return (diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * tr_covmean)
 
 
-GT_vectors_path = 'outputs/humanml3d_feats_gt/feats_test.pt'
-Pred_vectors_path = 'outputs/mocap_mixed_v1/unimfm/unimfm_test_st_g8/version_0/text_feats/feats.pt'
+# GT_vectors_path = 'outputs/humanml3d_feats_gt/feats_test.pt'
+# Pred_vectors_path = 'outputs/mocap_mixed_v1/unimfm/unimfm_test_st_g8/version_0/text_feats/feats.pt'
+
+GT_vectors_path = 'outputs/converted_mdm_gt_motions.npy'
+Pred_vectors_path = 'outputs/converted_mdm_gen_motions.npy'
 
 GT_feats = torch.load(GT_vectors_path)
 Pred_feats = torch.load(Pred_vectors_path)
