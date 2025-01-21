@@ -8,6 +8,8 @@ def create_gaussian_diffusion(cfg, training):
     steps = 1000
     scale_beta = 1.  # no scaling
     timestep_respacing = cfg.train_timestep_respacing if training else cfg.test_timestep_respacing # ''  # can be used for ddim sampling, we don't use it.
+    if type(timestep_respacing) is not str:
+        timestep_respacing = str(timestep_respacing)
     learn_sigma = False
     rescale_timesteps = False
 
