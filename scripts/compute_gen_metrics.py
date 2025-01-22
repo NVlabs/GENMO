@@ -11,9 +11,10 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 from motiondiff.utils.mdm_modules import MovementConvEncoder, TextEncoderBiGRUCo, MotionEncoderBiGRUCo
-
+import clip
 import pickle
 from os.path import join as pjoin
+from transformers import AutoTokenizer, CLIPTextModelWithProjection
 
 dataset_name = 'humanml'
 POS_enumerator = {
@@ -384,12 +385,38 @@ def evaluate_multimodality(feats, mm_num_times=10):
 t2m_path = 'inputs/t2m'
 kit_path = 'inputs/kit'
 
+feats_path = '/lustre/fs12/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/yey/gvhmr/mocap_mixed_v1/unimfm/unimfm_est_st_norm_di_lg_g8/version_0/text_feats_humanml3d'
+feats_1_path = os.path.join(feats_path, 'feats_part1.pt')
+feats1 = torch.load(feats_1_path)
+texts = feats1['text']
+motions = feats1['feats']
+model = CLIPTextModelWithProjection.from_pretrained("openai/clip-vit-base-patch32")
+tokenizer = AutoTokenizer.from_pretrained("openai/clip-vit-base-patch32")
 
-w_vectorizer = WordVectorizer(pjoin('./', 'glove'), 'our_vab')
+# Choice #1: we use CLIP to get text embeddings from raw texts
+bs = 128
+total_text_num = len(texts)
+batch_num = total_text_num // bs
+all_text_embeds = []
+print("Generating text embbedings...")
+for i in tqdm(range(batch_num+1)):
+    # texts = clip.tokenize(raw_text, context_length=196, truncate=True).to('cuda')
+    # breakpoint()
+    text_batch = texts[i*bs:(i+1)*bs]
+    inputs = tokenizer(text_batch, padding='max_length', truncation=True,max_length=77, return_tensors="pt")
+    outputs = model(**inputs)
+    text_embeds = outputs.text_embeds
+    all_text_embeds.append(text_embeds)
+
+text_embeds = torch.cat(all_text_embeds, dim=0)
+torch.save(text_embeds, 'inputs/humanml3d_part1_text_clip_embds.pth')
+
+breakpoint()
+
 text_encoder, motion_encoder, movement_encoder = build_evaluators(opt)
+# Choice #2: the vectorizer and text embedding model used by MDM for evaluation, tokens required
+w_vectorizer = WordVectorizer(pjoin('./', 'glove'), 'our_vab')
 text_encoder = text_encoder.to('cuda')
-motion_encoder = motion_encoder.to('cuda')
-movement_encoder = movement_encoder.to('cuda')
 
 def encode_tokens(tokens, w_vectorizer):
     if len(tokens) < opt.max_text_len:
@@ -434,6 +461,11 @@ def get_motion_embedding(motions, m_lens):
         motion_embedding = motion_encoder(movements, m_lens)
 
     return motion_embedding
+
+# motion encoders used by MDM for evaluation, we follow this convention.
+motion_encoder = motion_encoder.to('cuda')
+movement_encoder = movement_encoder.to('cuda')
+
 
 # GT_vectors_path = 'outputs/humanml3d_feats_gt/feats_test.pt'
 # Pred_vectors_path = 'outputs/mocap_mixed_v1/unimfm/unimfm_test_st_g8/version_0/text_feats/feats.pt'
@@ -504,3 +536,5 @@ Pred_multi_modality = evaluate_multimodality(pred_motion_embs.cpu().numpy())
 # FID:
 # mdm: 1.7330507772884864
 # ours: 0.13503613421584149
+
+# texts = clip.tokenize(raw_text, context_length=context_length, truncate=True).to(device)

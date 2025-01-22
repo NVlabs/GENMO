@@ -181,9 +181,9 @@ class VisText(pl.Callback):
             }
             os.makedirs(self.save_dir, exist_ok=True)
             if self.dataset_part_ind >= 0:
-                fname = self.save_dir + f'/feats_part{self.dataset_part_ind}_len{self.text_len}_{self.trial_ind}.pt'
+                fname = self.save_dir + f'/new_feats_part{self.dataset_part_ind}_len{self.text_len}_{self.trial_ind}.pt'
             else:
-                fname = self.save_dir + f'/feats_len{self.text_len}_{self.trial_ind}.pt'
+                fname = self.save_dir + f'/new_feats_len{self.text_len}_{self.trial_ind}.pt'
             torch.save(results, fname)
             os.chmod(fname, 0o755)
             print(f"text-to-motion features saved to {fname}")
