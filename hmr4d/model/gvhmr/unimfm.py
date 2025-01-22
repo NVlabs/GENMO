@@ -549,6 +549,7 @@ class UNIMFM(pl.LightningModule):
             "cam_angvel": batch["cam_angvel"],
             "f_imgseq": batch["f_imgseq"],
             "eval_text_only": eval_text_only,
+            "meta": batch["meta"],
         }
         if infer_version == 3:
             batch_['R_w2c'] = batch['R_w2c']
@@ -588,6 +589,7 @@ class UNIMFM(pl.LightningModule):
                 "K_fullimg": batch["K_fullimg"],
                 "cam_angvel": flip_test["cam_angvel"],
                 "f_imgseq": flip_test["f_imgseq"],
+                "meta": batch["meta"],
             }
             if infer_version == 3:
                 batch_['R_w2c'] = flip_test['R_w2c']

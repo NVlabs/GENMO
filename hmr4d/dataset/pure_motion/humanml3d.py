@@ -57,7 +57,7 @@ class Humanml3dDataset(BaseDataset):
         random_subset_size=32,
         random_subset_seed=7,
         use_multi_text=False,
-        num_multi_text=3
+        num_multi_text=3,
     ):
         self.root = Path("inputs/HumanML3D_SMPL/hmr4d_support")
         if split == "train":
@@ -214,6 +214,8 @@ class Humanml3dDataset(BaseDataset):
         )
 
         data_interpolated["data_name"] = "humanml3d"
+        data_interpolated["mid"] = mid
+        data_interpolated["text_ind"] = text_ind
         data_interpolated["gender"] = raw_data["gender"]
         data_interpolated["caption"] = caption
         data_interpolated["text_embed"] = text_embed
@@ -230,6 +232,8 @@ class Humanml3dDataset(BaseDataset):
             }
         """
         data_name = data["data_name"]
+        mid = data["mid"]
+        text_ind = data["text_ind"]
         length = data["body_pose"].shape[0]
         # Augmentation: betas, SMPL (gravity-axis)
         gender = str(data['gender'])
@@ -340,7 +344,7 @@ class Humanml3dDataset(BaseDataset):
         # NOTE: bbx_xys and f_imgseq will be added later
         max_len = length
         return_data = {
-            "meta": {"data_name": data_name, "dataset_id": 'humanml3d', "idx": idx, "T_w2c": T_w2c, "eval_text_only": self.eval_text_only},
+            "meta": {"data_name": data_name, "dataset_id": 'humanml3d', "idx": idx, "T_w2c": T_w2c, "eval_text_only": self.eval_text_only, "mid": mid, "text_ind": text_ind},
             "length": length,
             "smpl_params_c": smpl_params_c,
             "smpl_params_w": smpl_params_w,
@@ -382,19 +386,23 @@ class Humanml3dDataset(BaseDataset):
         if self.use_multi_text:
             all_data = [data]
             for i in range(1, self.num_multi_text):
-                new_idx = self.rng.randint(0, len(self))
+                new_idx = self.rng.randint(0, len(self.idx2meta))
                 data_i = self._load_data(new_idx)
                 data_i = self._process_data(data_i, new_idx)
                 all_data.append(data_i)
             multi_text_data = {
+                'vid': [],
                 'caption': [],
+                'text_ind': [],
                 'text_embed': [],
                 'window_start': [],
                 'window_end': [],
             }
             window_stride = 1 / self.num_multi_text
             for i, data_i in enumerate(all_data):
+                multi_text_data["vid"].append(data_i["meta"]["mid"])
                 multi_text_data["caption"].append(data_i["caption"])
+                multi_text_data["text_ind"].append(data_i["meta"]["text_ind"])
                 multi_text_data["text_embed"].append(data_i["text_embed"])
                 multi_text_data["window_start"].append(i * window_stride)
                 multi_text_data["window_end"].append((i + 1) * window_stride)
