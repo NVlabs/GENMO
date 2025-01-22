@@ -12,7 +12,7 @@ if parent_dir not in sys.path:
 from hmr4d.model.gvhmr.utils.endecoder import EnDecoder
 
 import numpy as np
-
+import pickle
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -53,7 +53,7 @@ data_path = (
 )
 
 for seed in [0, 1, 2, 3, 4]:
-    save_data_name = 'feats_seed{}_263d.pt'.format(seed)
+    save_data_name = 'feats_seed{}_263d.pkl'.format(seed)
     # np.save(data_path + save_data_name, all_humanml3d_data)
     final_save_path = data_path + save_data_name
     final_save_path = final_save_path.replace('yey', 'jinkunc')
@@ -104,5 +104,7 @@ for seed in [0, 1, 2, 3, 4]:
     final_feats['text'] = raw_text1 + raw_text2
     final_save_dir = os.path.dirname(final_save_path)
     os.makedirs(final_save_dir, exist_ok=True)
-    torch.save(final_feats, final_save_path)
+    # torch.save(final_feats, final_save_path)
+    with open(final_save_path, 'wb') as f:
+        pickle.dump(final_feats, f)
     print('Saved to: ', final_save_path)

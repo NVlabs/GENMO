@@ -385,13 +385,21 @@ def evaluate_multimodality(feats, mm_num_times=10):
     score = calculate_multimodality(mm_motion_embeddings, mm_num_times)
     return score
 
+def compute_fid(feats1, feats2):
+    mu1, sigma1 = calculate_activation_statistics(feats1)
+    mu2, sigma2 = calculate_activation_statistics(feats2)
+    fid = calculate_frechet_distance(mu1, sigma1, mu2, sigma2)
+    return fid
+
 
 t2m_path = 'inputs/t2m'
 kit_path = 'inputs/kit'
 
-feats_path = '/lustre/fs12/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/yey/gvhmr/mocap_mixed_v1/unimfm/unimfm_est_st_norm_di_lg_g8/version_0/text_feats_ts10_humanml3d'
-feats_file = os.path.join(feats_path, 'feats_seed{}_263d.npy'.format(0))
-motions = torch.tensor(np.load(feats_file)).cuda()
+feats_path = '/lustre/fs12/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jinkunc/gvhmr/mocap_mixed_v1/unimfm/unimfm_est_st_norm_di_lg_g8/version_0/text_feats_ts10_humanml3d'
+feats_file = os.path.join(feats_path, 'feats_seed{}_263d.pkl'.format(0))
+feats = pickle.load(open(feats_file, 'rb'))
+motions = feats['feats']
+texts = feats['text']
 # breakpoint()
 
 # feats_1_path = os.path.join(feats_path, 'feats_part0_len196_0.pt')
@@ -433,6 +441,9 @@ motions = torch.tensor(np.load(feats_file)).cuda()
 humanml3d_text_embeds = torch.load('inputs/humanml3d_text_clip_embds.pth')
 
 text_encoder, motion_encoder, movement_encoder = build_evaluators(opt)
+# motion encoders used by MDM for evaluation, we follow this convention.
+motion_encoder = motion_encoder.to('cuda')
+movement_encoder = movement_encoder.to('cuda')
 # Choice #2: the vectorizer and text embedding model used by MDM for evaluation, tokens required
 w_vectorizer = WordVectorizer(pjoin('./', 'glove'), 'our_vab')
 text_encoder = text_encoder.to('cuda')
@@ -481,17 +492,21 @@ def get_motion_embedding(motions, m_lens):
 
     return motion_embedding
 
-# motion encoders used by MDM for evaluation, we follow this convention.
-motion_encoder = motion_encoder.to('cuda')
-movement_encoder = movement_encoder.to('cuda')
 
 # smpl_data = encoder.decode_humanml3d(raw_data)
 m_lens = torch.tensor([motions.shape[1]]).float().cuda().repeat(motions.shape[0])
+
+mean = np.load('outputs/humanml3d_mean.npy')
+std = np.load('outputs/humanml3d_std.npy')
+
+mean = torch.tensor(mean).cuda()
+std = torch.tensor(std).cuda()
+# motions = (motions - torch.tensor(mean).cuda()) / torch.tensor(std).cuda()
+# motions = motions * std + mean
+
 motion_embs = get_motion_embedding(motions, m_lens)
 
-matching_score, R_precision, all_motion_embeddings = evaluate_matching_score(humanml3d_text_embeds, motion_embs)
-
-# GT_vectors_path = 'outputs/humanml3d_feats_gt/feats_test.pt'
+humanml_gt_motions_path = 'outputs/humanml3d_feats_gt/feats_test.pt'
 # Pred_vectors_path = 'outputs/mocap_mixed_v1/unimfm/unimfm_test_st_g8/version_0/text_feats/feats.pt'
 
 # texts = 'outputs/humanml3d_test_texts.pt'
@@ -501,39 +516,81 @@ matching_score, R_precision, all_motion_embeddings = evaluate_matching_score(hum
 # Pred_vectors_path = 'outputs/mdm_vald_motions.npy'
 
 
-GT_feats = np.load(GT_vectors_path)
-Pred_feats = np.load(Pred_vectors_path)
+# gt_motions = torch.load(humanml_gt_motions_path).cuda()
+# gt_m_lens = torch.tensor([gt_motions.shape[1]]).float().cuda().repeat(gt_motions.shape[0])
+# gt_motion_embs = get_motion_embedding(gt_motions, gt_m_lens)
+
+# matching_score, R_precision, all_motion_embeddings = evaluate_matching_score(humanml3d_text_embeds, motion_embs)
+
+humanml_text_embs = pickle.load(open('inputs/humanml_text_embs.pkl', 'rb'))
+
+batch_size = 64
+batch_num = len(texts) // batch_size
+
+all_word_embs = []
+all_pos_ohots = []
+all_sent_lens = []
+all_text_embeddings = []
+
+print("Extrating pre-saved text embeddings")
+for i in tqdm(range(len(texts))):
+    text = texts[i]
+    saved_embds = humanml_text_embs[text]
+    word_embs = saved_embds['word_embeddings']
+    pos_ohots = saved_embds['pose_one_hots']
+    sent_len = saved_embds['sent_len']
+    all_word_embs.append(word_embs[None])
+    all_pos_ohots.append(pos_ohots[None])
+    all_sent_lens.append(sent_len)
+    
+    word_embs = torch.tensor(word_embs).float().cuda()[None]
+    pos_ohots = torch.tensor(pos_ohots).float().cuda()[None]
+    sent_len = torch.tensor(sent_len).float().cuda()[None]
+    text_embedding = get_text_embedding(word_embs, pos_ohots, sent_len)
+    all_text_embeddings.append(text_embedding)
+    
+# all_word_embs = torch.tensor(np.concatenate(all_word_embs, axis=0))
+# all_pos_ohots = torch.tensor(np.concatenate(all_pos_ohots, axis=0))
+# all_sent_lens = torch.tensor(np.array(all_sent_lens))
+
+# text_embedding = get_text_embedding(all_word_embs, all_pos_ohots, all_sent_lens)
+all_text_embedding = torch.cat(all_text_embeddings, dim=0)
+
+matching_score, R_precision, all_motion_embeddings = evaluate_matching_score(all_text_embedding, motion_embs)
 
 # GT_feats = (GT_feats - mean) / std
 # Pred_feats = (Pred_feats - mean) / std
 
+
+GT_vectors_path = 'outputs/humanml3d_feats_gt/feats_test_humanml3d_format.pt.npy'
+GT_feats = np.load(GT_vectors_path)
 gt_m_lens = torch.tensor([GT_feats.shape[1]]).float().cuda().repeat(GT_feats.shape[0])
-pred_m_lens = torch.tensor([Pred_feats.shape[1]]).float().cuda().repeat(Pred_feats.shape[0])
-
+# pred_m_lens = torch.tensor([Pred_feats.shape[1]]).float().cuda().repeat(Pred_feats.shape[0])
 GT_feats = torch.tensor(GT_feats).float().cuda()
-Pred_feats = torch.tensor(Pred_feats).float().cuda()
-
+# Pred_feats = torch.tensor(Pred_feats).float().cuda()
 # raw_texts = torch.load(texts)
-
 gt_motion_embs = get_motion_embedding(GT_feats, gt_m_lens)
-pred_motion_embs = get_motion_embedding(Pred_feats, pred_m_lens)
+# pred_motion_embs = get_motion_embedding(Pred_feats, pred_m_lens)
+# fid = compute_fid(gt_motion_embs.cpu().numpy(), all_motion_embeddings)
 
 # GT_feats = GT_feats * std + mean
 # Pred_feats = Pred_feats * std + mean
 
-def compute_fid(feats1, feats2):
-    mu1, sigma1 = calculate_activation_statistics(feats1)
-    mu2, sigma2 = calculate_activation_statistics(feats2)
-    fid = calculate_frechet_distance(mu1, sigma1, mu2, sigma2)
-    return fid
+multimodal_dist = matching_score
 
-fid = compute_fid(gt_motion_embs.cpu().numpy(), pred_motion_embs.cpu().numpy())
+fid = compute_fid(gt_motion_embs.cpu().numpy(), all_motion_embeddings)
 
-GT_diversity = evaluate_diversity(gt_motion_embs.cpu().numpy())
-Pred_diversity = evaluate_diversity(pred_motion_embs.cpu().numpy())
+div = evaluate_diversity(all_motion_embeddings)
 
-GT_multi_modality = evaluate_multimodality(gt_motion_embs.cpu().numpy())
-Pred_multi_modality = evaluate_multimodality(pred_motion_embs.cpu().numpy())
+print("Multimodal Distance: ", multimodal_dist)
+print("FID: ", fid)
+print("Diversity: ", div)
+
+# GT_diversity = evaluate_diversity(gt_motion_embs.cpu().numpy())
+# Pred_diversity = evaluate_diversity(pred_motion_embs.cpu().numpy())
+
+# GT_multi_modality = evaluate_multimodality(gt_motion_embs.cpu().numpy())
+# Pred_multi_modality = evaluate_multimodality(pred_motion_embs.cpu().numpy())
 
 # GT_multi_modality = evaluate_multimodality(GT_feats)
 # Pred_multi_modality = evaluate_multimodality(Pred_feats)

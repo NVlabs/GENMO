@@ -20,7 +20,7 @@ trial_ind: 0
 
 pipeline:
   args:
-    test_motion_len: 120
+    test_motion_len: 196
 
 callbacks:
   vis_text:
