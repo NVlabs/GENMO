@@ -25,8 +25,9 @@ test_datasets:
     part_ind: ${part_ind}
     num_parts: ${num_parts}
 
-args:
-  test_motion_len: null
+pipeline:
+  args:
+    test_motion_len: 196
 
 callbacks:
   vis_text:

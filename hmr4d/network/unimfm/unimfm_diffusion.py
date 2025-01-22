@@ -365,11 +365,14 @@ class UNIMFMDiffusion(nn.Module):
         denoiser = self.denoiser
         length = inputs["length"]  # (B,) effective length of each sample
         regression_only = self.args.get('regression_only', False) and not eval_text_only
+        if self.args.get('force_regression_only', False):
+            regression_only = True
 
         f_condition = inputs["f_condition"]
         
-        if self.args.get("test_motion_len", None) is not None:
-            L = self.args.test_motion_len
+        test_motion_len = self.args.get("test_motion_len", None)
+        if test_motion_len is not None and test_motion_len > self.max_len:
+            L = test_motion_len
             length = torch.ones_like(length) * L
             f_condition_exists = inputs["f_condition_exists"]
             for k in f_condition:
@@ -424,12 +427,15 @@ class UNIMFMDiffusion(nn.Module):
                 kwargs = {"eta": self.model_cfg.diffusion.ddim_eta}
             else:
                 raise NotImplementedError(f"Sampler {diff_sampler} not implemented")
-                
-            if eval_text_only:
-                noise = torch.randn_like(motion)
-            else:
+            
+            if self.args.get('force_zero_noise', False):
                 noise = torch.zeros_like(motion)
-
+            else:    
+                if eval_text_only:
+                    noise = torch.randn_like(motion)
+                else:
+                    noise = torch.zeros_like(motion)
+            
             if self.args.get("return_mid", False):
                 kwargs['return_mid'] = True
 
