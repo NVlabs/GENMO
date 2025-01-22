@@ -9,6 +9,7 @@ from hmr4d.utils.smplx_utils import make_smplx
 from hmr4d.model.gvhmr.utils.vis_utils import visualize_smpl_scene, visualize_intermediate_smpl_scene
 from motiondiff.models.mdm.rotation_conversions import axis_angle_to_quaternion
 from hmr4d.utils.geo.quaternion import qinv_np, qrot_np
+from hmr4d.utils.eval.eval_utils import batch_compute_similarity_transform_torch
 
 
 def normalize(x, eps: float = 1e-9):
@@ -84,7 +85,7 @@ class MetricInpainting(pl.Callback):
 
         self.test_start_time = int(time.time())
 
-        self.metrics = {}
+        self.metrics = {'mpjpe_one': [], 'pa_mpjpe_one': [], 'mpjpe_min': [], 'pa_mpjpe_min': []}
 
     # ================== Batch-based Computation  ================== #
     def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
@@ -110,36 +111,34 @@ class MetricInpainting(pl.Callback):
         target_w_j3d = target_w_j3d + offset
         # Canonicalize the motion so that it always starts facing Z+
         target_j3d_can = canonicalize(target_w_j3d.cpu(), target_w_params['global_orient'].cpu()).cuda()
-        # target_w_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in target_w_output.vertices])
-        # target_w_j3d = torch.matmul(self.J_regressor, target_w_verts)
 
         # 2. ay
-        pred_smpl_params_global = outputs["pred_smpl_params_global"]
-        pred_ay_j3d = self.smplx_model["neutral"](**pred_smpl_params_global)
-        pred_j3d_can = canonicalize(pred_ay_j3d.cpu(), pred_smpl_params_global['global_orient'].cpu()).cuda()
-        # Hack: aligns the root position at the first frame with GT
-        pred_j3d_can[:, :] = pred_j3d_can[:, :] + target_j3d_can[[0], [0]] - pred_j3d_can[[0], [0]]
+        mpjpe_best, pa_mpjpe_best, pred_j3d_can_best = 1e9, 1e9, None
+        for res_idx, out in enumerate(outputs):
+            pred_smpl_params_global = out["pred_smpl_params_global"]
+            pred_ay_j3d = self.smplx_model["neutral"](**pred_smpl_params_global)
+            pred_j3d_can = canonicalize(pred_ay_j3d.cpu(), pred_smpl_params_global['global_orient'].cpu()).cuda()
+            # Hack: aligns the root position at the first frame with GT
+            pred_j3d_can[:, :] = pred_j3d_can[:, :] + target_j3d_can[[0], [0]] - pred_j3d_can[[0], [0]]
 
-        if 'intermediate_pred_smpl_params_global' in outputs:
-            intermediate_pred_ay_j3d = [self.smplx_model["neutral"](**pred_smpl_params_global).squeeze(0) for pred_smpl_params_global in outputs["intermediate_pred_smpl_params_global"]]
-        # pred_ay_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in smpl_out.vertices])
-        # pred_ay_j3d = einsum(self.J_regressor, pred_ay_verts, "j v, l v i -> l j i")
-        
-        # Compute metrics
-        if trainer.model.model_cfg.inpainting_3d.mode.startswith('body_pose_root_rot_keyframe'):
-            # if trainer.model.model_cfg.inpainting_3d.mode == 'body_pose_root_rot_keyframe2':
-            #     keyframes = [0, target_j3d_can.shape[0]-1]
-            # elif trainer.model.model_cfg.inpainting_3d.mode == 'body_pose_root_rot_keyframe5':
-            #     keyframes = [int((target_j3d_can.shape[0]-1) * i / 4) for i in range(5)]
-            keyframes = batch["keyframes"]
+            # Compute metrics
+            if trainer.model.model_cfg.inpainting_3d.mode.startswith('body_pose_root_rot_keyframe'):
+                keyframes = batch["keyframes"]
+                pred_kf_j3d_relative = pred_j3d_can[keyframes[1:]] - pred_j3d_can[keyframes[1:], :1]
+                target_kf_j3d_relative = target_j3d_can[keyframes[1:]] - target_j3d_can[keyframes[1:], :1]
+                mpjpe = (pred_kf_j3d_relative - target_kf_j3d_relative).norm(dim=-1).mean() * 1000
+                pred_kf_j3d_relative_pa = batch_compute_similarity_transform_torch(pred_kf_j3d_relative, target_kf_j3d_relative)
+                pa_mpjpe = (pred_kf_j3d_relative_pa - target_kf_j3d_relative).norm(dim=-1).mean() * 1000
 
-            pred_kf_j3d_relative = pred_j3d_can[keyframes[1:]] - pred_j3d_can[keyframes[1:], :1]
-            target_kf_j3d_relative = target_j3d_can[keyframes[1:]] - target_j3d_can[keyframes[1:], :1]
-            joint_pos_diff = (pred_kf_j3d_relative - target_kf_j3d_relative).norm(dim=-1).mean()
-            if 'joint_keyframe' not in self.metrics:
-                self.metrics['joint_keyframe'] = []
-            self.metrics['joint_keyframe'] += [joint_pos_diff.item()]
-            print(joint_pos_diff.item())
+                if mpjpe.item() < mpjpe_best:
+                    mpjpe_best = mpjpe.item()
+                    pa_mpjpe_best = pa_mpjpe.item()
+                    pred_j3d_can_best = pred_j3d_can
+
+        self.metrics['mpjpe_one'] += [mpjpe.item()]
+        self.metrics['pa_mpjpe_one'] += [pa_mpjpe.item()]
+        self.metrics['mpjpe_min'] += [mpjpe_best]
+        self.metrics['pa_mpjpe_min'] += [pa_mpjpe_best]
         
         if self.save_feats:
             encoder_inputs = {
@@ -151,10 +150,8 @@ class MetricInpainting(pl.Callback):
         if self.vis:
             # Visualize
             if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
-                wandb_dict = visualize_smpl_scene(f'vis_inpainting_3d_{trainer.model.model_cfg.inpainting_3d.mode}_{self.test_start_time}', batch_idx, vid, pred_j3d_can, target_j3d_can, transform_mode='global')
+                wandb_dict = visualize_smpl_scene(f'vis_inpainting_3d_{trainer.model.model_cfg.inpainting_3d.mode}_{self.test_start_time}', batch_idx, f'{res_idx:02d}-{vid}', pred_j3d_can_best, target_j3d_can, transform_mode='global')
                 self.wandb_html_dict.update(wandb_dict)
-                if 'intermediate_pred_smpl_params_global' in outputs:
-                    wandb_dict = visualize_intermediate_smpl_scene('vis_intermediate_text_global', batch_idx, vid, intermediate_pred_ay_j3d, target_w_j3d, transform_mode='global')
 
         return
 

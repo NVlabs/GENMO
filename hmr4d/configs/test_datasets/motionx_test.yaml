@@ -7,3 +7,4 @@ motionx_test:
   random_permute: true
   random_seed: 7
   wo_img_feat: true
+  eval_text_only: true

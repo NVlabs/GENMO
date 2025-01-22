@@ -48,6 +48,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         max_motion_frames=120,
         wo_img_feat=False,
         subset=None,
+        eval_text_only=False,
     ):
         self.hmr4d_support_dir = Path("inputs/MotionXpp/hmr4d_support")
         self.root = Path("inputs/MotionXpp/hmr4d_support")
@@ -66,6 +67,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         self.random_seed = random_seed
         self.wo_img_feat = wo_img_feat
         self.subset = subset
+        self.eval_text_only = eval_text_only
         super().__init__()
 
     def _load_dataset(self):
@@ -121,6 +123,8 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
             length = min(max_motion_len, mlength)
         if self.motion_start_mode == "sample":
             start = np.random.randint(0, max(mlength - length + 1, 1))
+        elif self.motion_start_mode == "sample_early":
+            start = np.random.randint(0, max(mlength // 4, 1))
         else:
             start = 0
         end = start + length
@@ -179,13 +183,13 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         return data
 
     def _process_data(self, data, idx):
-        length = data["length"]
+        length = data["pose"].shape[0] #data["length"]
 
         start, end = data["start_end"]
 
         # SMPL params in cam
-        body_pose = data["pose"][start:end]  # (F, 63)
-        betas = data["beta"][start:end]  # (F, 10)
+        body_pose = data["pose"] #[start:end]  # (F, 63)
+        betas = data["beta"] #[start:end]  # (F, 10)
         global_orient_c = data["global_orient_c"]  # (F, 3)
         transl_c = data["trans_c"]
         smpl_params_c = {
@@ -262,7 +266,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
             return_data["text_embed"] = data["text_embed"]
         else:
             return_data = {
-                "meta": {"data_name": "bedlam", "idx": idx},
+                "meta": {"data_name": "bedlam", "idx": idx, "eval_text_only": self.eval_text_only},
                 "length": length,
                 "smpl_params_c": smpl_params_c,
                 "smpl_params_w": smpl_params_w,
