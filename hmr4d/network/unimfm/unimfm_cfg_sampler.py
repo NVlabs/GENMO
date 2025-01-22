@@ -13,6 +13,8 @@ class ClassifierFreeSampleModel:
     def __call__(self, x, timesteps, y=None, **kwargs):
         y_uncond = deepcopy(y)
         y_uncond['encoded_text'] = torch.zeros_like(y['encoded_text'])
+        if 'multi_text_data' in y:
+            y_uncond['multi_text_data']['text_embed'] = torch.zeros_like(y['multi_text_data']['text_embed'])
 
         out = self.model(x, timesteps, y, **kwargs)
         out_uncond = self.model(x, timesteps, y_uncond, **kwargs)
