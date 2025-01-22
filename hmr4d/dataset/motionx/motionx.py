@@ -30,6 +30,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         max_num_motions=None,
         random_permute=False,
         random_seed=7,
+        max_motion_frames=120,
     ):
         self.hmr4d_support_dir = Path("inputs/MotionXpp/hmr4d_support")
         self.root = Path("inputs/MotionXpp/hmr4d_support")
@@ -38,7 +39,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         self.split = split
         # Setting
         self.min_motion_frames = 60
-        self.max_motion_frames = 120
+        self.max_motion_frames = max_motion_frames
         self.version = version
         self.motion_start_mode = motion_start_mode
         self.max_num_motions = max_num_motions
