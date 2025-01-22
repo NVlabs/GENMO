@@ -182,6 +182,7 @@ class NetworkEncoderRoPE(nn.Module):
         """
         x = y['f_cond']
         length = y['length']
+        multi_text_data = y.get('multi_text_data', None)
         L = xt.size(1)
         B = xt.size(0)
         
@@ -206,6 +207,11 @@ class NetworkEncoderRoPE(nn.Module):
         emb_text = self.embed_text(enc_text)
         if self.use_text_pos_enc:
             emb_text = self.sequence_pos_encoder(emb_text, batch_first=True)
+        
+        if multi_text_data is not None:
+            multi_text_data['text_embed_feats'] = self.embed_text(multi_text_data['text_embed'])
+            if self.use_text_pos_enc:
+                multi_text_data['text_embed_feats'] = self.sequence_pos_encoder(multi_text_data['text_embed_feats'], batch_first=True)
 
         # Setup length and make padding mask
         assert B == length.size(0)
@@ -226,7 +232,7 @@ class NetworkEncoderRoPE(nn.Module):
         for i, block in enumerate(self.blocks):
             if i in self.text_encode_layer_idx:
                 text_block = self.text_encoder_layers[f'{i}']
-                x = text_block(x, emb_text, attn_mask=attnmask, tgt_key_padding_mask=pmask)
+                x = text_block(x, emb_text, attn_mask=attnmask, tgt_key_padding_mask=pmask, multi_text_data=multi_text_data)
             x = block(x, attn_mask=attnmask, tgt_key_padding_mask=pmask)
 
         # Output

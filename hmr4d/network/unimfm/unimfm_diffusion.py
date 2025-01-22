@@ -403,6 +403,8 @@ class UNIMFMDiffusion(nn.Module):
         }
         if 'encoded_text' in inputs:
             cond['y']['encoded_text'] = inputs['encoded_text']
+        if "meta" in inputs and "multi_text_data" in inputs["meta"][0]:
+            cond["y"]["multi_text_data"] = inputs["meta"][0]["multi_text_data"]
                 
         if regression_only:
             t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)

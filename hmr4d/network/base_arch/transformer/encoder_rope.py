@@ -117,13 +117,13 @@ class DecoderRoPEBlock(nn.Module):
         nn.init.constant_(self.gate_cross_attn, 0)
         nn.init.constant_(self.gate_mlp, 0)
 
-    def forward(self, x, context, attn_mask=None, tgt_key_padding_mask=None, memory_key_padding_mask=None):
+    def forward(self, x, context, attn_mask=None, tgt_key_padding_mask=None, memory_key_padding_mask=None, multi_text_data=None):
         if self.use_self_attn:
             x = x + self.gate_msa * self._sa_block(
                 self.norm1(x), attn_mask=attn_mask, key_padding_mask=tgt_key_padding_mask
             )
         x = x + self.gate_cross_attn * self._ca_block(
-            self.norm2(x), context=context, key_padding_mask=memory_key_padding_mask
+            self.norm2(x), context=context, key_padding_mask=memory_key_padding_mask, multi_text_data=multi_text_data
         )
         x = x + self.gate_mlp * self.mlp(self.norm3(x))
         return x
@@ -133,12 +133,25 @@ class DecoderRoPEBlock(nn.Module):
         x = self.self_attn(x, attn_mask=attn_mask, key_padding_mask=key_padding_mask)
         return x
 
-    def _ca_block(self, x, context, key_padding_mask=None):
+    def _ca_block(self, x, context, key_padding_mask=None, multi_text_data=None):
         # x: (B, L, C)
         if self.cross_attn_type == 'rope':
             x = self.cross_attn(x, context=context, key_padding_mask=key_padding_mask)
         elif self.cross_attn_type == 'mha':
-            x = self.cross_attn(x, context, context, key_padding_mask=key_padding_mask)[0]
+            if multi_text_data is not None:
+                out = []
+                window_start = (multi_text_data['window_start'] * x.size(1)).round().long()
+                window_end = (multi_text_data['window_end'] * x.size(1)).round().long()
+                for i in range(len(multi_text_data['text_embed_feats'])):
+                    text_embed_i = multi_text_data['text_embed_feats'][i].unsqueeze(0)
+                    attn_mask = torch.ones(x.size(1), text_embed_i.size(1)).to(x.device).bool()
+                    attn_mask[window_start[i]:window_end[i], :] = 0
+                    out_i = self.cross_attn(x, text_embed_i, text_embed_i, attn_mask=attn_mask, key_padding_mask=key_padding_mask)[0]
+                    out_i[out_i.isnan()] = 0
+                    out.append(out_i)
+                x = torch.sum(torch.stack(out), dim=0)
+            else:
+                x = self.cross_attn(x, context, context, key_padding_mask=key_padding_mask)[0]
         else:
             raise ValueError(f"Invalid cross_attn_type: {self.cross_attn_type}")
         return x

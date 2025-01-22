@@ -57,7 +57,7 @@ class Humanml3dDataset(BaseDataset):
         random_subset_size=32,
         random_subset_seed=7,
         use_multi_text=False,
-        num_multi_text=3
+        num_multi_text=3,
     ):
         self.root = Path("inputs/HumanML3D_SMPL/hmr4d_support")
         if split == "train":
@@ -382,7 +382,7 @@ class Humanml3dDataset(BaseDataset):
         if self.use_multi_text:
             all_data = [data]
             for i in range(1, self.num_multi_text):
-                new_idx = self.rng.randint(0, len(self))
+                new_idx = self.rng.randint(0, len(self.idx2meta))
                 data_i = self._load_data(new_idx)
                 data_i = self._process_data(data_i, new_idx)
                 all_data.append(data_i)
