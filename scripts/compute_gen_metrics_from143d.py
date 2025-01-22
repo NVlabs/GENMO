@@ -215,7 +215,7 @@ def evaluate_matching_score(text_embeddings_all, motion_embeddings_all):
     top_k_count = 0
     # print(motion_loader_name)
     batch_size = 64
-    batch_num = len(text_embeddings) // batch_size
+    batch_num = len(text_embeddings_all) // batch_size
     with torch.no_grad():
         for i in tqdm(range(batch_num)):
             text_embeddings = text_embeddings_all[i*batch_size:(i+1)*batch_size]
@@ -252,8 +252,8 @@ def evaluate_matching_score(text_embeddings_all, motion_embeddings_all):
     # print(f'---> [{motion_loader_name}] Matching Score: {matching_score:.4f}', file=file, flush=True)
 
     # line = f'---> [{motion_loader_name}] R_precision: '
-    for i in range(len(R_precision)):
-        line += '(top %d): %.4f ' % (i+1, R_precision[i])
+    # for i in range(len(R_precision)):
+    #     line += '(top %d): %.4f ' % (i+1, R_precision[i])
     # print(line)
     # print(line, file=file, flush=True)
 
@@ -390,34 +390,45 @@ t2m_path = 'inputs/t2m'
 kit_path = 'inputs/kit'
 
 feats_path = '/lustre/fs12/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/yey/gvhmr/mocap_mixed_v1/unimfm/unimfm_est_st_norm_di_lg_g8/version_0/text_feats_ts10_humanml3d'
-feats_1_path = os.path.join(feats_path, 'feats_part0_len196_0.pt')
-feats1 = torch.load(feats_1_path)
-texts = feats1['text']
-motions = feats1['feats']
-model = CLIPTextModelWithProjection.from_pretrained("openai/clip-vit-base-patch32")
-tokenizer = AutoTokenizer.from_pretrained("openai/clip-vit-base-patch32")
+feats_file = os.path.join(feats_path, 'feats_seed{}_263d.npy'.format(0))
+motions = torch.tensor(np.load(feats_file)).cuda()
+# breakpoint()
 
-# Choice #1: we use CLIP to get text embeddings from raw texts
-bs = 128
-total_text_num = len(texts)
-batch_num = total_text_num // bs
-all_text_embeds = []
-print("Generating text embbedings...")
-for i in tqdm(range(batch_num+1)):
-    # texts = clip.tokenize(raw_text, context_length=196, truncate=True).to('cuda')
-    # breakpoint()
-    text_batch = texts[i*bs:(i+1)*bs]
-    inputs = tokenizer(text_batch, padding='max_length', truncation=True,max_length=77, return_tensors="pt")
-    outputs = model(**inputs)
-    text_embeds = outputs.text_embeds
-    all_text_embeds.append(text_embeds)
+# feats_1_path = os.path.join(feats_path, 'feats_part0_len196_0.pt')
+# feats_2_path = os.path.join(feats_path, 'feats_part1_len196_0.pt')
+# feats1 = torch.load(feats_1_path)
+# # texts = feats1['text']
+# motions_1 = feats1['feats']
+# feats2 = torch.load(feats_2_path)
+# motions_2 = feats2['feats']
 
-text_embeds = torch.cat(all_text_embeds, dim=0)
-torch.save(text_embeds, 'inputs/humanml3d_part0_text_clip_embds.pth')
+# motions = torch.cat([motions_1, motions_2], dim=0)
+# motions_padded = torch.zeros(motions.shape[0], motions.shape[1], 263)
+# motions_padded[:, :, :motions.shape[2]] = motions
+# model = CLIPTextModelWithProjection.from_pretrained("openai/clip-vit-base-patch32")
+# tokenizer = AutoTokenizer.from_pretrained("openai/clip-vit-base-patch32")
 
-motions_smpl_format = encoder.decode_humanml3d(motions)
+# # Choice #1: we use CLIP to get text embeddings from raw texts
+# bs = 128
+# total_text_num = len(texts)
+# batch_num = total_text_num // bs
+# all_text_embeds = []
+# print("Generating text embbedings...")
+# for i in tqdm(range(batch_num+1)):
+#     # texts = clip.tokenize(raw_text, context_length=196, truncate=True).to('cuda')
+#     # breakpoint()
+#     text_batch = texts[i*bs:(i+1)*bs]
+#     inputs = tokenizer(text_batch, padding='max_length', truncation=True,max_length=77, return_tensors="pt")
+#     outputs = model(**inputs)
+#     text_embeds = outputs.text_embeds
+#     all_text_embeds.append(text_embeds)
 
-breakpoint()
+# text_embeds = torch.cat(all_text_embeds, dim=0)
+# torch.save(text_embeds, 'inputs/humanml3d_part0_text_clip_embds.pth')
+
+# motions_smpl_format = encoder.decode_humanml3d(motions)
+
+# breakpoint()
 
 humanml3d_text_embeds = torch.load('inputs/humanml3d_text_clip_embds.pth')
 
@@ -474,19 +485,20 @@ def get_motion_embedding(motions, m_lens):
 motion_encoder = motion_encoder.to('cuda')
 movement_encoder = movement_encoder.to('cuda')
 
-smpl_data = encoder.decode_humanml3d(raw_data)
+# smpl_data = encoder.decode_humanml3d(raw_data)
+m_lens = torch.tensor([motions.shape[1]]).float().cuda().repeat(motions.shape[0])
+motion_embs = get_motion_embedding(motions, m_lens)
 
+matching_score, R_precision, all_motion_embeddings = evaluate_matching_score(humanml3d_text_embeds, motion_embs)
 
 # GT_vectors_path = 'outputs/humanml3d_feats_gt/feats_test.pt'
 # Pred_vectors_path = 'outputs/mocap_mixed_v1/unimfm/unimfm_test_st_g8/version_0/text_feats/feats.pt'
 
-texts = 'outputs/humanml3d_test_texts.pt'
-GT_vectors_path = 'outputs/humanml3d_feats_gt/feats_test_humanml3d_format.pt.npy'
-Pred_vectors_path = 'outputs/mocap_mixed_v1/unimfm/unimfm_test_st_g8/version_0/text_feats/feats_humanml3d_format.npy'
+# texts = 'outputs/humanml3d_test_texts.pt'
+# GT_vectors_path = 'outputs/humanml3d_feats_gt/feats_test_humanml3d_format.pt.npy'
+# Pred_vectors_path = 'outputs/mocap_mixed_v1/unimfm/unimfm_test_st_g8/version_0/text_feats/feats_humanml3d_format.npy'
 # GT_vectors_path = 'outputs/ground_truth_motions.npy'
 # Pred_vectors_path = 'outputs/mdm_vald_motions.npy'
-mean = np.load('outputs/humanml3d_mean.npy')
-std = np.load('outputs/humanml3d_std.npy')
 
 
 GT_feats = np.load(GT_vectors_path)
