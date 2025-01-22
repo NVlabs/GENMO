@@ -93,7 +93,10 @@ class VisText(pl.Callback):
         self.smplx2smpl = self.smplx2smpl.cuda()
         
         if 'multi_text_data' in batch['meta'][0]:
-            print(batch_idx, batch['meta'][0]['multi_text_data']['caption'])
+            print(batch_idx)
+            multi_text_data = batch['meta'][0]['multi_text_data']
+            for i in range(len(multi_text_data['vid'])):
+                print(multi_text_data['vid'][i], multi_text_data['caption'][i])
 
         text = batch['caption'][0]
         vid = text.replace(' ', '_').replace('.', '_').replace(',', '_')
