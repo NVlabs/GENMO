@@ -173,7 +173,7 @@ class EnDecoder(nn.Module):
         r_velocity = torch.cat([r_velocity, r_velocity[:, [-1]]], axis=1)
         
         root_data = torch.cat([r_velocity, l_velocity, root_y, root_quat_wo_heading], axis=-1)
-    
+        # 126 + 10 + 7 = 143d
         x = torch.cat([body_pose_r6d, betas, root_data], dim=-1)
         x_norm = (x - self.mean) / self.std
         return x_norm

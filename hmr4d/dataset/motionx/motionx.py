@@ -150,6 +150,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         length = data["length"]
 
         start, end = data['start_end']
+
         # SMPL params in cam
         body_pose = data["pose"][start:end]  # (F, 63)
         betas = data["beta"][start:end]  # (F, 10)
