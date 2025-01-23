@@ -156,7 +156,7 @@ def build_evaluators(opt):
     #     ckpt_dir = './inputs/t2m'
     ckpt_dir = './t2m_checkpoints/motionx'
 
-    checkpoint = torch.load(pjoin(opt['checkpoints_dir'], ckpt_dir, 'text_mot_match/model_10.0_clip', 'finest.tar'), map_location=opt['device'])
+    checkpoint = torch.load(pjoin(opt['checkpoints_dir'], ckpt_dir, 'text_mot_match/model_10.0_clip_fullset', 'finest.tar'), map_location=opt['device'])
     movement_enc.load_state_dict(checkpoint['movement_encoder'])
     text_enc.load_state_dict(checkpoint['text_encoder'])
     motion_enc.load_state_dict(checkpoint['motion_encoder'])
@@ -208,17 +208,13 @@ def calculate_R_precision(embedding1, embedding2, top_k, sum_all=False):
 # from action2motion
 
 def evaluate_matching_score(text_embeddings_all, motion_embeddings_all):
-    # match_score_dict = OrderedDict({})
-    # R_precision_dict = OrderedDict({})
-    # activation_dict = OrderedDict({})
-
     all_motion_embeddings = []
     score_list = []
     all_size = 0
     matching_score_sum = 0
     top_k_count = 0
     # print(motion_loader_name)
-    batch_size = 32
+    batch_size = 8
     batch_num = len(text_embeddings_all) // batch_size
     with torch.no_grad():
         for i in tqdm(range(batch_num)):
@@ -387,22 +383,6 @@ motion_enc = motion_enc.to('cuda')
 movement_enc = movement_enc.to('cuda')
 
 total_num = len(gt_texts)
-
-# test_str = "The person is performing a coin toss. He flips the coin with one hand, watches it as it spins in the air, and then catches it with the same hand before revealing the result on his opposite hand's back."
-# texts = [test_str]
-# with torch.no_grad():
-#     # texts = [t[0] for t in texts]
-#     tokenized_inputs = clip_tokenizer(texts, padding='max_length', truncation=True, return_tensors="pt")
-#     # Remove 'token_type_ids' (not used by CLIP models)
-#     tokenized_inputs.pop("token_type_ids", None)
-#     for key in tokenized_inputs:
-#         tokenized_inputs[key] = tokenized_inputs[key].to(device)
-#     clip_text_feat = clip_model(**tokenized_inputs)
-#     text_embeds_batch = clip_text_feat.text_embeds
-
-
-# text = clip.tokenize(texts).to(device)
-# text_features = model.encode_text(text)
 
 
 
