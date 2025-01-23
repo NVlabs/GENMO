@@ -13,3 +13,7 @@ model_cfg.inpainting_3d.mode=body_pose_root_rot_keyframe2 +test_datasets.humanml
 # without estimation mode
 python tools/train_v2.py global/task=mv2d/test_inpainting exp=unimfm/gen_wtext_grep_reg_mx exp_name_var='humanml3d' +test_checkpoint=s200000 model_cfg.diffusion.test_timestep_respacing="'50'" remote_results_path=/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jiefengl/gvhmr \
 model_cfg.inpainting_3d.mode=body_pose_root_rot_keyframe2 +test_datasets.humanml3d_test.motion_start_mode=sample +test_datasets.humanml3d_test.use_random_subset=true +test_datasets.humanml3d_test.random_subset_size=128
+
+# ours new
+python tools/train_v2.py global/task=mv2d/test_inpainting exp=unimfm/unimfm_est_st_norm_di_lg_mx3_cp4 exp_name_var=g8 +test_checkpoint=s050000 model_cfg.diffusion.test_timestep_respacing="'50'" \
+model_cfg.inpainting_3d.mode=body_pose_root_rot_keyframe2 +test_datasets.humanml3d_test.motion_start_mode=sample +test_datasets.humanml3d_test.use_random_subset=true +test_datasets.humanml3d_test.random_subset_size=128 +rsync_ckpt=true

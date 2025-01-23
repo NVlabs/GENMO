@@ -131,6 +131,7 @@ class MetricInpainting(pl.Callback):
                 pa_mpjpe = (pred_kf_j3d_relative_pa - target_kf_j3d_relative).norm(dim=-1).mean() * 1000
 
                 if mpjpe.item() < mpjpe_best:
+                # if pa_mpjpe.item() < pa_mpjpe_best:
                     mpjpe_best = mpjpe.item()
                     pa_mpjpe_best = pa_mpjpe.item()
                     pred_j3d_can_best = pred_j3d_can
