@@ -17,13 +17,26 @@ import pickle
 from os.path import join as pjoin
 from transformers import AutoTokenizer, CLIPTextModelWithProjection
 
-device = 'cuda'
-clip_model = CLIPTextModelWithProjection.from_pretrained("bert-base-uncased").to(device)
-clip_tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
+device = 'cuda'
+# clip_model = CLIPTextModelWithProjection.from_pretrained("sentence-transformers/all-MiniLM-L6-v2", do_sample=False).to(device).eval()
+# clip_tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+
+import clip
+clip_model, preprocess = clip.load("ViT-B/32", device=device)
 
 # from hmr4d.model.gvhmr.utils.endecoder import EnDecoder
 # encoder = EnDecoder(stats_name='DEFAULT_01', encode_type='humanml3d').cuda()
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
+import random
+import numpy as np
+random.seed(42)
+np.random.seed(42)
+torch.manual_seed(42)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(42)
 
 dataset_name = 'motionx'
 POS_enumerator = {
@@ -143,7 +156,7 @@ def build_evaluators(opt):
     #     ckpt_dir = './inputs/t2m'
     ckpt_dir = './t2m_checkpoints/motionx'
 
-    checkpoint = torch.load(pjoin(opt['checkpoints_dir'], ckpt_dir, 'text_mot_match/model_1.0', 'finest.tar'), map_location=opt['device'])
+    checkpoint = torch.load(pjoin(opt['checkpoints_dir'], ckpt_dir, 'text_mot_match/model_10.0_clip', 'finest.tar'), map_location=opt['device'])
     movement_enc.load_state_dict(checkpoint['movement_encoder'])
     text_enc.load_state_dict(checkpoint['text_encoder'])
     motion_enc.load_state_dict(checkpoint['motion_encoder'])
@@ -182,7 +195,6 @@ def calculate_top_k(mat, top_k):
     top_k_mat = np.concatenate(top_k_list, axis=1)
     return top_k_mat
 
-
 def calculate_R_precision(embedding1, embedding2, top_k, sum_all=False):
     dist_mat = euclidean_distance_matrix(embedding1, embedding2)
     argmax = np.argsort(dist_mat, axis=1)
@@ -191,6 +203,7 @@ def calculate_R_precision(embedding1, embedding2, top_k, sum_all=False):
         return top_k_mat.sum(axis=0)
     else:
         return top_k_mat
+
 
 # from action2motion
 
@@ -205,7 +218,7 @@ def evaluate_matching_score(text_embeddings_all, motion_embeddings_all):
     matching_score_sum = 0
     top_k_count = 0
     # print(motion_loader_name)
-    batch_size = 64
+    batch_size = 32
     batch_num = len(text_embeddings_all) // batch_size
     with torch.no_grad():
         for i in tqdm(range(batch_num)):
@@ -215,9 +228,11 @@ def evaluate_matching_score(text_embeddings_all, motion_embeddings_all):
                                                     motion_embeddings.cpu().numpy())
             matching_score_sum += dist_mat.trace()
 
+            
             argsmax = np.argsort(dist_mat, axis=1)
             top_k_mat = calculate_top_k(argsmax, top_k=3)
             top_k_count += top_k_mat.sum(axis=0)
+            # print(top_k_mat.sum(axis=0))
 
             all_size += text_embeddings.shape[0]
 
@@ -343,7 +358,7 @@ gt_texts = gt_features['texts']
 
 
 save_parent_dir = '/lustre/fs12/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jinkunc/gvhmr/mocap_mixed_v1/unimfm/'
-exp_path = 'unimfm_est_st_norm_di_lg_mx3_cp2_g8/version_1/text_feats_196_motionx'
+exp_path = 'unimfm_est_st_norm_di_lg_mx3_cp1_g8/version_1/text_feats_196_motionx'
 ckpt_name = 'new_feats_len196_0.pt'
 feats_path = os.path.join(save_parent_dir, exp_path, ckpt_name)
 
@@ -354,7 +369,7 @@ test_texts = feats['text']
 gt_motions = torch.tensor(gt_motions).float().to(device)
 test_motions = torch.tensor(test_motions).float().to(device)
 
-test_motions[:, :, 126:136] = gt_motions[:, :, 126:136]
+# test_motions[:, :, 126:136] = gt_motions[:, :, 126:136]
 
 motionx_mean = np.load('inputs/motion_x_mean_train.npy')
 motionx_std = np.load('inputs/motion_x_std_train.npy')
@@ -372,6 +387,23 @@ motion_enc = motion_enc.to('cuda')
 movement_enc = movement_enc.to('cuda')
 
 total_num = len(gt_texts)
+
+# test_str = "The person is performing a coin toss. He flips the coin with one hand, watches it as it spins in the air, and then catches it with the same hand before revealing the result on his opposite hand's back."
+# texts = [test_str]
+# with torch.no_grad():
+#     # texts = [t[0] for t in texts]
+#     tokenized_inputs = clip_tokenizer(texts, padding='max_length', truncation=True, return_tensors="pt")
+#     # Remove 'token_type_ids' (not used by CLIP models)
+#     tokenized_inputs.pop("token_type_ids", None)
+#     for key in tokenized_inputs:
+#         tokenized_inputs[key] = tokenized_inputs[key].to(device)
+#     clip_text_feat = clip_model(**tokenized_inputs)
+#     text_embeds_batch = clip_text_feat.text_embeds
+
+
+# text = clip.tokenize(texts).to(device)
+# text_features = model.encode_text(text)
+
 
 
 batch_size = 64
@@ -395,14 +427,19 @@ def get_co_embeds(motions, texts, movement_encoder, motion_encoder, text_enc, op
     '''Text Encoding'''
     with torch.no_grad():
         # texts = [t[0] for t in texts]
-        tokenized_inputs = clip_tokenizer(texts, padding='max_length', truncation=True, return_tensors="pt")
-        # Remove 'token_type_ids' (not used by CLIP models)
-        tokenized_inputs.pop("token_type_ids", None)
-        for key in tokenized_inputs:
-            tokenized_inputs[key] = tokenized_inputs[key].to(device)
-        clip_text_feat = clip_model(**tokenized_inputs)
-        text_embeds_batch = clip_text_feat.text_embeds
-        text_embeds_ours = text_enc(text_embeds_batch)[align_idx]
+        # tokenized_inputs = clip_tokenizer(texts, padding='max_length', truncation=True, return_tensors="pt")
+        
+        # # Remove 'token_type_ids' (not used by CLIP models)
+        # tokenized_inputs.pop("token_type_ids", None)
+        # for key in tokenized_inputs:
+        #     tokenized_inputs[key] = tokenized_inputs[key].to(device)
+        # clip_text_feat = clip_model(**tokenized_inputs)
+        # text_embeds_batch = clip_text_feat.text_embeds
+
+        text = clip.tokenize(texts, truncate=True).to(device)
+        text_embeds_clip = clip_model.encode_text(text).float()
+    
+    text_embeds_ours = text_enc(text_embeds_clip)[align_idx]
 
     return motion_embedding, text_embeds_ours
 

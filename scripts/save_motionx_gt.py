@@ -14,7 +14,7 @@ from motiondiff.utils.torch_utils import tensor_to
 
 encoder = EnDecoder(stats_name='DEFAULT_01', encode_type='humanml3d').cuda()
 
-test_dataset = MotionXDataset(split='test', version='vlocal', max_motion_frames=196, motion_start_mode='fixed')
+test_dataset = MotionXDataset(split='aligned', version='vlocal', max_motion_frames=196, motion_start_mode='fixed')
 dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=0)
 
 texts = []
@@ -30,7 +30,7 @@ motions = torch.cat(motions, dim=0).cpu().numpy()
 
 result_dict = {'motions': motions, 'texts': texts}
 
-with open('inputs/motionx_test_gt_feats.pkl', 'wb') as f:
+with open('inputs/motionx_all_gt_feats.pkl', 'wb') as f:
     pickle.dump(result_dict, f)
 
 breakpoint()
