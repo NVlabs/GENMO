@@ -30,8 +30,9 @@ motions = torch.cat(motions, dim=0).cpu().numpy()
 
 result_dict = {'motions': motions, 'texts': texts}
 
-with open('inputs/motionx_gt_feats.pkl', 'wb') as f:
+with open('inputs/motionx_test_gt_feats.pkl', 'wb') as f:
     pickle.dump(result_dict, f)
 
+breakpoint()
 
 
