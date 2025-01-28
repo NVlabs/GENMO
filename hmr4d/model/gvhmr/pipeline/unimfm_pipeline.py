@@ -109,6 +109,7 @@ class Pipeline(nn.Module):
                 )
         for k in self.args.mask_out_attr:
             f_condition[k] = torch.zeros_like(f_condition[k])
+            inputs["f_condition_exists"][k][:] = False
         f_condition_mask = inputs.get("f_condition_mask", {})
         for k in f_condition_mask:
             if k in f_condition:
