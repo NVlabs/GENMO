@@ -515,7 +515,13 @@ class UNIMFM(pl.LightningModule):
         
     def validation_3d(self, batch, batch_idx, dataloader_idx=0):
         # Options & Check
-        do_postproc = self.trainer.state.stage == "test"  # Only apply postproc in test
+        try:
+            stage = self.trainer.state.stage
+            global_step = self.trainer.global_step
+        except:
+            stage = "test"
+            global_step = 0
+        do_postproc = stage == "test"  # Only apply postproc in test
         do_flip_test = "flip_test" in batch
         do_postproc_not_flip_test = do_postproc and not do_flip_test  # later pp when flip_test
         assert batch["B"] == 1, "Only support batch size 1 in evalution."
@@ -567,7 +573,7 @@ class UNIMFM(pl.LightningModule):
         elif self.use_text_encoder:
             batch_['encoded_text'] = self.encode_text(batch['caption'], batch['has_text'])
         self.init_condition_exists(batch_)
-        outputs = self.pipeline.forward(batch_, train=False, postproc=do_postproc_not_flip_test, global_step=self.trainer.global_step)
+        outputs = self.pipeline.forward(batch_, train=False, postproc=do_postproc_not_flip_test, global_step=global_step)
         outputs["pred_smpl_params_global"] = {k: v[0] for k, v in outputs["pred_smpl_params_global"].items()}
         if 'pred_smpl_params_incam' in outputs:
             outputs["pred_smpl_params_incam"] = {k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()}
@@ -603,7 +609,7 @@ class UNIMFM(pl.LightningModule):
             elif self.use_text_encoder:
                 batch_['encoded_text'] = self.encode_text(batch['caption'], batch['has_text'])
             self.init_condition_exists(batch_)
-            flipped_outputs = self.pipeline.forward(batch_, train=False, global_step=self.trainer.global_step)
+            flipped_outputs = self.pipeline.forward(batch_, train=False, global_step=global_step)
 
             # First update incam results
             flipped_outputs["pred_smpl_params_incam"] = {

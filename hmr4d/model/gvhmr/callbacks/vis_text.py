@@ -92,11 +92,14 @@ class VisText(pl.Callback):
         self.J_regressor = self.J_regressor.cuda()
         self.smplx2smpl = self.smplx2smpl.cuda()
         
-        if 'multi_text_data' in batch['meta'][0]:
-            print(batch_idx)
-            multi_text_data = batch['meta'][0]['multi_text_data']
-            for i in range(len(multi_text_data['vid'])):
-                print(multi_text_data['vid'][i], multi_text_data['caption'][i])
+        
+        # print(batch_idx)
+        # os.makedirs('out/motions', exist_ok=True)
+        # torch.save(outputs, f'out/motions/outputs_{batch_idx}.pt')
+        # if 'multi_text_data' in batch['meta'][0]:
+        #     multi_text_data = batch['meta'][0]['multi_text_data']
+        #     for i in range(len(multi_text_data['vid'])):
+        #         print(multi_text_data['vid'][i], multi_text_data['caption'][i])
 
         text = batch['caption'][0]
         vid = text.replace(' ', '_').replace('.', '_').replace(',', '_')
