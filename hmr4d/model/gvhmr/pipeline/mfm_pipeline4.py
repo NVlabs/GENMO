@@ -306,7 +306,6 @@ class Pipeline(nn.Module):
                     outputs["pred_smpl_params_global"]["transl"] = pp_static_joint_cam(outputs, self.endecoder)
                 else:
                     outputs["pred_smpl_params_global"]["transl"] = pp_static_joint(outputs, self.endecoder)
-
                 body_pose = process_ik(outputs, self.endecoder)
                 decode_dict["body_pose"] = body_pose
                 outputs["pred_smpl_params_global"]["body_pose"] = body_pose
