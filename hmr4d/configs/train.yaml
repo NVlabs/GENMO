@@ -38,6 +38,7 @@ exp_name: ???
 data_name: ???
 
 # utilities in the entry file
+remote_results_path: /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/yey/gvhmr
 output_dir: "outputs/${data_name}/${exp_name}"
 ckpt_path: null
 resume_mode: null

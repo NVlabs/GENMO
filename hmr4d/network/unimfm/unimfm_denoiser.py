@@ -59,7 +59,6 @@ class NetworkEncoderRoPE(nn.Module):
         use_text_pos_enc=True,
         text_encoder_cfg={},
         text_mask_prob=0.0,
-        input_remove_static_conf=False,
         input_remove_global=False,
         input_remove_condition=False,
         **kwargs,
@@ -85,7 +84,6 @@ class NetworkEncoderRoPE(nn.Module):
         self.encoded_text_dim = encoded_text_dim
         self.text_mask_prob = text_mask_prob
         self.use_text_pos_enc = use_text_pos_enc
-        self.input_remove_static_conf = input_remove_static_conf
         self.input_remove_global = input_remove_global
         self.input_remove_condition = input_remove_condition
 
@@ -214,8 +212,6 @@ class NetworkEncoderRoPE(nn.Module):
         if self.input_remove_condition:
             x = torch.zeros_like(x)
 
-        if self.input_remove_static_conf:
-            xt[..., :6] = 0
         if self.input_remove_global:
             xt[..., -15:] = 0
 
@@ -294,7 +290,7 @@ class NetworkEncoderRoPE(nn.Module):
         output = {
             "pred_context": x,
             "pred_x": sample,
-            "pred_x_start": torch.cat([static_conf_logits, sample], dim=-1),
+            "pred_x_start": sample,
             "pred_cam": pred_cam,
             "static_conf_logits": static_conf_logits,
         }

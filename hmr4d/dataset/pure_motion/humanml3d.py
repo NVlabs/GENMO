@@ -97,12 +97,13 @@ class Humanml3dDataset(BaseDataset):
         self.use_multi_text = use_multi_text
         self.num_multi_text = num_multi_text
         self.multi_text_vid = multi_text_vid
-        if self.use_multi_text is not None:
+        if self.use_multi_text:
             self.num_multi_text = len(self.multi_text_vid)
             self.vid_to_idx = {}
         super().__init__(cam_augmentation, limit_size)
-        for i, (vid, _) in enumerate(self.idx2meta):
-            self.vid_to_idx[vid] = i
+        if self.use_multi_text:
+            for i, (vid, _) in enumerate(self.idx2meta):
+                self.vid_to_idx[vid] = i
         return
 
     def _load_dataset(self):

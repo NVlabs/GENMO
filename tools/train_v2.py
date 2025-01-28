@@ -123,14 +123,26 @@ def train(cfg: DictConfig) -> None:
         and cfg.ckpt_path is None
         and cfg.resume_mode is None
     ):
-        load_pretrained_model(model, cfg.pretrain_ckpt)
-        print(f"Loaded pretrained model from {cfg.pretrain_ckpt}")
+        cfg.ckpt_path = cfg.pretrain_ckpt
 
     wandb_cfg = OmegaConf.to_container(cfg, resolve=True)
     if cfg.ckpt_path is not None:
+        if cfg.get("rsync_ckpt", False):
+            print(f"rsyncing from remote: {cfg.ckpt_path}")
+            cfg.ckpt_path = cfg.ckpt_path.replace(cfg.remote_results_path, "outputs")
+            local_dir = cfg.ckpt_path.split("/version_")[0]
+            os.makedirs(local_dir, exist_ok=True)
+            rsync_file_from_remote(
+                cfg.ckpt_path,
+                cfg.remote_results_path,
+                "outputs",
+                hostname="cs-oci-ord-dc-03",
+            )
+
         ckpt = load_pretrained_model(model, cfg.ckpt_path)
+        print(f"Loaded pretrained model from {cfg.ckpt_path}")
         if ckpt is not None:
-            wandb_cfg["ckpt_info"] = {
+            wandb_cfg["pretrained_ckpt_info"] = {
                 "global_step": ckpt["global_step"],
                 "epoch": ckpt["epoch"],
             }

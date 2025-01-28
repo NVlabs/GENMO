@@ -119,9 +119,9 @@ network:
   model_cfg:
     diffusion: ${model_cfg.diffusion}
     denoiser:
-      type: hmr4d.network.unimfm.unimfm_denoiser.NetworkEncoderRoPE
+      _target_: hmr4d.network.unimfm.unimfm_denoiser.NetworkEncoderRoPE
       output_dim: 151
-      xt_dim: 157
+      xt_dim: ${.output_dim}
       njoints: ${.xt_dim}
       text_mask_prob: 0.1
       use_text_pos_enc: true

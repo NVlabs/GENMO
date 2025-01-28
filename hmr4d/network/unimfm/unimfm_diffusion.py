@@ -6,33 +6,16 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from hydra.utils import instantiate
 from skimage.util.shape import view_as_windows
 from timm.models.vision_transformer import Mlp
 
 from hmr4d.network.base_arch.transformer.layer import zero_module
-from hmr4d.utils.geo.hmr_cam import (
-    compute_bbox_info_bedlam,
-    compute_transl_full_cam,
-    get_a_pred_cam,
-    project_to_bi01,
-)
-from hmr4d.utils.geo.hmr_global import (
-    get_static_joint_mask,
-    get_tgtcoord_rootparam,
-    rollout_local_transl_vel,
-)
 from hmr4d.utils.net_utils import length_to_mask
 from motiondiff.diffusion.resample import create_named_schedule_sampler
 from motiondiff.models.model_util import create_gaussian_diffusion
 
 from .unimfm_cfg_sampler import ClassifierFreeSampleModel
-
-
-def import_type_from_str(s):
-    module_name, type_name = s.rsplit(".", 1)
-    module = importlib.import_module(module_name)
-    type_to_import = getattr(module, type_name)
-    return type_to_import
 
 
 class UNIMFMDiffusion(nn.Module):
@@ -145,9 +128,7 @@ class UNIMFMDiffusion(nn.Module):
                 zero_module(nn.Linear(latent_dim, latent_dim)),
             )
 
-        self.denoiser = import_type_from_str(self.model_cfg.denoiser.type)(
-            pl_module=self, **self.model_cfg.denoiser
-        )
+        self.denoiser = instantiate(self.model_cfg.denoiser)
         self.init_diffusion()
         return
 
@@ -173,11 +154,11 @@ class UNIMFMDiffusion(nn.Module):
         )
         return
 
-    def generate_motion_rep(self, batch, target_x, static_gt):
-        f_condition = batch["f_condition"]
-        f_condition_exists = batch["f_condition_exists"]
+    def generate_motion_rep(self, inputs, target_x):
+        f_condition = inputs["f_condition"]
+        f_condition_exists = inputs["f_condition_exists"]
 
-        length = batch["length"]
+        length = inputs["length"]
         assert "obs" in f_condition
         f_cond_dict = {}
         if "obs" in f_condition:
@@ -240,36 +221,40 @@ class UNIMFMDiffusion(nn.Module):
 
         vis_mask = length_to_mask(length, L)  # (B, L)
 
-        motion = torch.cat([static_gt, target_x], dim=-1)
-        motion = motion * vis_mask[..., None]
+        motion = target_x * vis_mask[..., None]
         return f_cond, motion
 
-    def get_diffusion_pred_target(self, batch, mode):
+    def forward_train(
+        self, inputs, train=False, postproc=False, static_cam=False, mode=None
+    ):
+        assert self.training, "forward_train should only be called during training"
         diffusion = self.train_diffusion if self.training else self.test_diffusion
-        length = batch["length"]
+        length = inputs["length"]
+        target_x = inputs["target_x"]
 
-        target_x = batch["target_x"]
-        static_gt = batch["static_gt"]
-
-        f_cond, motion = self.generate_motion_rep(batch, target_x, static_gt)
+        f_cond, motion = self.generate_motion_rep(inputs, target_x)
         B, L, _ = motion.shape
         vis_mask = length_to_mask(length, L)  # (B, L)
-        valid_mask = batch["mask"]["valid"]
+        valid_mask = inputs["mask"]["valid"]
         assert (vis_mask == valid_mask).all()
 
         denoiser_kwargs = {
             "y": {
-                "text": batch.get("caption", [""] * B),
+                "text": inputs.get("caption", [""] * B),
                 "f_cond": f_cond,
                 "mask": vis_mask,
                 "length": length,
             },
         }
-        if "encoded_text" in batch:
-            denoiser_kwargs["y"]["encoded_text"] = batch["encoded_text"]
+        if "encoded_text" in inputs:
+            denoiser_kwargs["y"]["encoded_text"] = inputs["encoded_text"]
 
         if mode == "regression":
-            t = (torch.ones(B) * 999).long().to(motion.device)
+            t = (
+                (torch.ones(B) * (diffusion.original_num_steps - 1))
+                .long()
+                .to(motion.device)
+            )
             t_weights = torch.ones(B).to(motion.device)
             if self.regression_input_type == "zero":
                 x_t = torch.zeros_like(motion)
@@ -281,8 +266,8 @@ class UNIMFMDiffusion(nn.Module):
                 )
         elif mode == "diffusion":
             t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
-            if "regression_outputs" in batch:
-                pred_x_start_regression = batch["regression_outputs"]["model_output"][
+            if "regression_outputs" in inputs:
+                pred_x_start_regression = inputs["regression_outputs"]["model_output"][
                     "pred_x_start"
                 ].detach()
             else:
@@ -299,8 +284,8 @@ class UNIMFMDiffusion(nn.Module):
             regression_mask = (
                 torch.rand(B).to(motion.device) < self.args.use_regression_outputs_prob
             ).float()
-            if "text_only" in batch and self.args.get("use_gt_for_text_only", True):
-                regression_mask[batch["text_only"]] = 0
+            if "text_only" in inputs and self.args.get("use_gt_for_text_only", True):
+                regression_mask[inputs["text_only"]] = 0
             x_start = x_start_reg * regression_mask[:, None, None] + x_start_gt * (
                 1 - regression_mask[:, None, None]
             )
@@ -311,29 +296,14 @@ class UNIMFMDiffusion(nn.Module):
             x_t, diffusion._scale_timesteps(t), return_aux=False, **denoiser_kwargs
         )
 
-        target_x_start = motion
-        pred_x_start = denoise_out["pred_x_start"]
-        static_conf_logits = denoise_out["static_conf_logits"]
-        sample = denoise_out["pred_x"]
-
         output = {
-            "pred_x_start": pred_x_start,
-            "target_x_start": target_x_start,
-            "pred_x": sample,
-            "static_conf_logits": static_conf_logits,
+            "target_x_start": motion,
             "t_weights": t_weights,
         }
+        output.update(denoise_out)
         for x in self.args.out_attr:
-            output[x] = denoise_out[x]
+            assert x in output, f"Output {x} not found in denoise_out"
 
-        return output
-
-    def forward_train(
-        self, inputs, train=False, postproc=False, static_cam=False, mode=None
-    ):
-        assert self.training, "forward_train should only be called during training"
-
-        output = self.get_diffusion_pred_target(batch=inputs, mode=mode)
         return output
 
     def forward_train_2d(self, inputs, mode):
@@ -347,9 +317,8 @@ class UNIMFMDiffusion(nn.Module):
 
         mdim = self.endecoder.get_motion_dim()
         target_x = torch.zeros(B, L, mdim).to(obs)
-        static_gt = torch.zeros(B, L, 6).to(obs)
 
-        f_cond, motion = self.generate_motion_rep(inputs, target_x, static_gt)
+        f_cond, motion = self.generate_motion_rep(inputs, target_x)
         # Setup length and make padding mask
         vis_mask = length_to_mask(length, L)  # (B, L)
 
@@ -365,7 +334,11 @@ class UNIMFMDiffusion(nn.Module):
             denoiser_kwargs["y"]["encoded_text"] = inputs["encoded_text"]
 
         if mode == "regression":
-            t = (torch.ones(B) * 999).long().to(motion.device)
+            t = (
+                (torch.ones(B) * (diffusion.original_num_steps - 1))
+                .long()
+                .to(motion.device)
+            )
             t_weights = torch.ones(B).to(motion.device)
             if self.regression_input_type == "zero":
                 x_t = torch.zeros_like(motion)
@@ -388,19 +361,12 @@ class UNIMFMDiffusion(nn.Module):
             x_t, diffusion._scale_timesteps(t), return_aux=False, **denoiser_kwargs
         )
 
-        pred_x_start = denoise_out["pred_x_start"]
-
-        static_conf_logits = denoise_out["static_conf_logits"]
-        sample = denoise_out["pred_x"]
-
         output = {
-            "pred_x_start": pred_x_start,
-            "pred_x": sample,
-            "static_conf_logits": static_conf_logits,
             "t_weights": t_weights,
         }
+        output.update(denoise_out)
         for x in self.args.out_attr:
-            output[x] = denoise_out[x]
+            assert x in output, f"Output {x} not found in denoise_out"
         return output
 
     def forward_test(
@@ -465,8 +431,8 @@ class UNIMFMDiffusion(nn.Module):
 
         mdim = self.endecoder.get_motion_dim()
         target_x = torch.zeros(B, L, mdim).to(obs)
-        static_gt = torch.zeros(B, L, 6).to(obs)
-        f_cond, motion = self.generate_motion_rep(inputs, target_x, static_gt)
+
+        f_cond, motion = self.generate_motion_rep(inputs, target_x)
 
         vis_mask = length_to_mask(length, L)  # (B, L)
 
@@ -485,17 +451,13 @@ class UNIMFMDiffusion(nn.Module):
 
         if regression_only:
             t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
-            t = (torch.ones_like(t) * 999).long()
+            t = (torch.ones_like(t) * diffusion.original_num_steps).long()
             t_weights = torch.ones_like(t_weights)
             x_t = torch.zeros_like(motion)
 
             denoise_out = denoiser(
                 x_t, self.train_diffusion._scale_timesteps(t), return_aux=False, **cond
             )
-            sample = denoise_out["pred_x"]
-            pred_cam = denoise_out["pred_cam"]
-            static_conf_logits = denoise_out["static_conf_logits"]
-
         else:
             if self.args.get("use_cfg_sampler_for_text", False) and eval_text_only:
                 denoiser = ClassifierFreeSampleModel(denoiser)
@@ -518,7 +480,7 @@ class UNIMFMDiffusion(nn.Module):
             if self.args.get("return_mid", False):
                 kwargs["return_mid"] = True
 
-            samples_out = sample_fn(
+            denoise_out = sample_fn(
                 denoiser,
                 motion.shape,
                 clip_denoised=False,
@@ -531,34 +493,16 @@ class UNIMFMDiffusion(nn.Module):
                 const_noise=False,
                 **kwargs,
             )
-            if "pred_cam" in self.args.out_attr:
-                pred_cam = samples_out["pred_cam"]
-            if "cam_t_vel" in self.args.out_attr:
-                pred_cam_t_vel = samples_out["pred_cam_t_vel"]
-            if "cam_scale" in self.args.out_attr:
-                pred_cam_scale = samples_out["pred_cam_scale"]
 
-            static_conf_logits = samples_out["static_conf_logits"]
-            sample = samples_out["pred_x"]
-            # sample = inputs['gt']
-            # static_conf_logits = inputs['static_gt']
-
-        output = {
-            "pred_x": sample,
-            "static_conf_logits": static_conf_logits,
-        }
+        output = denoise_out.copy()
 
         if self.args.get("return_mid", False):
             output["intermediate_pred_x"] = [
-                sample_i["pred_x"] for sample_i in samples_out["intermediates"]
+                sample_i["pred_x"] for sample_i in denoise_out["intermediates"]
             ]
 
-        if "pred_cam" in self.args.out_attr:
-            output["pred_cam"] = pred_cam
-        if "cam_t_vel" in self.args.out_attr:
-            output["pred_cam_t_vel"] = pred_cam_t_vel
-        if "cam_scale" in self.args.out_attr:
-            output["pred_cam_scale"] = pred_cam_scale
+        for x in self.args.out_attr:
+            assert x in output, f"Output {x} not found in denoise_out"
         return output
 
     def forward(self, inputs, train=False, postproc=False, static_cam=False, mode=None):

@@ -82,26 +82,22 @@ class Pipeline(nn.Module):
 
     # ========== Training ========== #
 
-    def forward(
-        self,
-        inputs,
-        train=False,
-        postproc=False,
-        static_cam=False,
-        global_step=0,
-        mode=None,
-    ):
-        outputs = dict()
+    def prepare_inputs(self, inputs, train):
         B, L = inputs["obs"].shape[:2]
 
-        # *. Conditions
-        inputs["f_cliffcam"] = compute_bbox_info_bedlam(
-            inputs["bbx_xys"], inputs["K_fullimg"]
-        )  # (B, L, 3)
-        f_cam_angvel = inputs["cam_angvel"]
-        if self.args.normalize_cam_angvel:
-            f_cam_angvel = (f_cam_angvel - self.cam_angvel_mean) / self.cam_angvel_std
-        inputs["f_cam_angvel"] = f_cam_angvel
+        if "use_cliffcam" not in inputs or inputs["use_cliffcam"].any():
+            inputs["f_cliffcam"] = compute_bbox_info_bedlam(
+                inputs["bbx_xys"], inputs["K_fullimg"]
+            )  # (B, L, 3)
+            if "use_cliffcam" in inputs:
+                inputs["f_cliffcam"][~inputs["use_cliffcam"]] = 0
+        if "cam_angvel" in inputs:
+            f_cam_angvel = inputs["cam_angvel"]
+            if self.args.normalize_cam_angvel:
+                f_cam_angvel = (
+                    f_cam_angvel - self.cam_angvel_mean
+                ) / self.cam_angvel_std
+            inputs["f_cam_angvel"] = f_cam_angvel
 
         f_condition = dict()
         for k in self.args.in_attr:
@@ -122,8 +118,6 @@ class Pipeline(nn.Module):
                     else f_condition_mask[k][:, None, None]
                 )
                 f_condition[k] = f_condition[k] * (1 - mask.float())
-        # for k, v in f_condition.items():
-        #     print(k, v[1].norm())
 
         if inputs.get("text_mask", None) is not None:
             inputs["encoded_text"] = inputs["encoded_text"] * (
@@ -140,6 +134,20 @@ class Pipeline(nn.Module):
                 inputs["f_condition_exists"][k][:] = False
 
         inputs["f_condition"] = f_condition
+        return inputs
+
+    def forward(
+        self,
+        inputs,
+        train=False,
+        postproc=False,
+        static_cam=False,
+        global_step=0,
+        mode=None,
+    ):
+        outputs = dict()
+        inputs = self.prepare_inputs(inputs, train)
+
         # Forward & output
         model_output = self.denoiser3d(
             inputs, train=train, postproc=postproc, static_cam=static_cam, mode=mode
@@ -372,58 +380,7 @@ class Pipeline(nn.Module):
         mode=None,
     ):
         outputs = dict()
-        device = inputs["obs"].device
-        B, L = inputs["obs"].shape[:2]
-
-        if inputs["use_cliffcam"].any():
-            inputs["f_cliffcam"] = compute_bbox_info_bedlam(
-                inputs["bbx_xys"], inputs["K_fullimg"]
-            )  # (B, L, 3)
-            inputs["f_cliffcam"][~inputs["use_cliffcam"]] = 0
-        if "cam_angvel" in inputs:
-            f_cam_angvel = inputs["cam_angvel"]
-            if self.args.normalize_cam_angvel:
-                f_cam_angvel = (
-                    f_cam_angvel - self.cam_angvel_mean
-                ) / self.cam_angvel_std
-            inputs["f_cam_angvel"] = f_cam_angvel
-
-        # input view generation
-        f_condition = dict()
-        for k in self.args.in_attr:
-            if k in inputs:
-                f_condition[k] = inputs[k]
-            else:
-                f_condition[k] = torch.zeros(B, L, self.f_condition_dim[k]).to(
-                    inputs["obs"]
-                )
-        for k in self.args.mask_out_attr:
-            f_condition[k] = torch.zeros_like(f_condition[k])
-        f_condition_mask = inputs.get("f_condition_mask", {})
-        for k in f_condition_mask:
-            if k in f_condition:
-                mask = (
-                    f_condition_mask[k][:, None, None, None]
-                    if k in ["obs"]
-                    else f_condition_mask[k][:, None, None]
-                )
-                f_condition[k] = f_condition[k] * (1 - mask.float())
-
-        if inputs.get("text_mask", None) is not None:
-            inputs["encoded_text"] = inputs["encoded_text"] * (
-                1 - inputs["text_mask"][:, None, None].float()
-            )
-
-        if train:
-            f_condition = randomly_set_null_condition(f_condition, 0.1)
-
-        eval_text_only = inputs.get("eval_text_only", False)
-        if eval_text_only:
-            for k in f_condition.keys():
-                f_condition[k] = torch.zeros_like(f_condition[k])
-                inputs["f_condition_exists"][k][:] = False
-
-        inputs["f_condition"] = f_condition
+        inputs = self.prepare_inputs(inputs, train)
 
         if train:
             model_output = self.denoiser3d.forward_train_2d(
