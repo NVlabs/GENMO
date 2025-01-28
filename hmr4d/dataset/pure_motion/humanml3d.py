@@ -60,7 +60,7 @@ class Humanml3dDataset(BaseDataset):
         use_multi_text=False,
         num_multi_text=3,
         multi_text_vid=None,
-        motion_start_mode='first',
+        motion_start_mode="first",
     ):
         self.root = Path("inputs/HumanML3D_SMPL/hmr4d_support")
         if split == "train":
@@ -272,7 +272,7 @@ class Humanml3dDataset(BaseDataset):
         if self.motion_start_mode == "sample":
             start = np.random.randint(0, max(data["body_pose"].shape[0] // 4, 1))
             for k, v in data.items():
-                if v in ['body_pose', 'betas', 'global_orient', 'transl']:
+                if v in ["body_pose", "betas", "global_orient", "transl"]:
                     data[k] = v[start:]
 
         data_name = data["data_name"]

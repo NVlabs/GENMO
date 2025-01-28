@@ -1,6 +1,6 @@
 # humanml3d only
 python tools/train_v2.py global/task=mv2d/test_inpainting exp=unimfm/unimfm_test_st_mha_n1_lg exp_name_var=g8 +test_checkpoint=s050000 model_cfg.diffusion.test_timestep_respacing="'50'" \
-model_cfg.inpainting_3d.mode=body_pose_root_rot_keyframe5 test_datasets=[motionx_test] test_datasets.motionx_test.motion_start_mode=sample_early test_datasets.motionx_test.max_num_motions=128 
+model_cfg.inpainting_3d.mode=body_pose_root_rot_keyframe5 test_datasets=[motionx_test] test_datasets.motionx_test.motion_start_mode=sample_early test_datasets.motionx_test.max_num_motions=128
 
 # without motionx
 python tools/train_v2.py global/task=mv2d/test_inpainting exp=unimfm/unimfm_est_st_norm_di_lg exp_name_var=g8 +test_checkpoint=s050000 model_cfg.diffusion.test_timestep_respacing="'50'" \

@@ -85,7 +85,10 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         seq_lengths = []
         self.idx2meta = []
         for vid in self.train_labels:
-            if self.subset is not None and self.train_labels[vid]["subset"] not in self.subset:
+            if (
+                self.subset is not None
+                and self.train_labels[vid]["subset"] not in self.subset
+            ):
                 continue
             seq_length = self.train_labels[vid]["pose"].shape[0]
             seq_lengths.append(seq_length)
@@ -150,7 +153,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         if not self.wo_img_feat:
             imgfeat_file = self.f_img_folder / f"{subset}/{file_name}.pth"
             features = torch.load(imgfeat_file)
-        bbx_xywh = data['bbox']
+        bbx_xywh = data["bbox"]
         x1, y1, w, h = bbx_xywh[:, 0], bbx_xywh[:, 1], bbx_xywh[:, 2], bbx_xywh[:, 3]
         bbx_xyxy = torch.stack([x1, y1, x1 + w, y1 + h], dim=1)
 
@@ -164,7 +167,9 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         if not self.wo_img_feat:
             data["f_imgseq"] = features[start:end].float()  # (L, 1024)
         else:
-            data["f_imgseq"] = torch.zeros((bbx_xys.shape[0], 1024)) # NOTE: a placeholder
+            data["f_imgseq"] = torch.zeros(
+                (bbx_xys.shape[0], 1024)
+            )  # NOTE: a placeholder
 
         data["bbx_xys"] = bbx_xys.float()  # (L, 4)
         data["img_wh"] = torch.tensor([width, height])  # (2)
@@ -183,13 +188,13 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         return data
 
     def _process_data(self, data, idx):
-        length = data["pose"].shape[0] #data["length"]
+        length = data["pose"].shape[0]  # data["length"]
 
         start, end = data["start_end"]
 
         # SMPL params in cam
-        body_pose = data["pose"] #[start:end]  # (F, 63)
-        betas = data["beta"] #[start:end]  # (F, 10)
+        body_pose = data["pose"]  # [start:end]  # (F, 63)
+        betas = data["beta"]  # [start:end]  # (F, 10)
         global_orient_c = data["global_orient_c"]  # (F, 3)
         transl_c = data["trans_c"]
         smpl_params_c = {
@@ -204,9 +209,16 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         transl_w = data["trans"]  # (F, 3)
         # Covert from Z-up to Y-up
         base_rot = torch.FloatTensor([[1, 0, 0], [0, 0, 1], [0, -1, 0]])
-        global_orient_w = matrix_to_axis_angle(base_rot @ axis_angle_to_matrix(global_orient_w))
+        global_orient_w = matrix_to_axis_angle(
+            base_rot @ axis_angle_to_matrix(global_orient_w)
+        )
         transl_w = (base_rot @ transl_w.T).T
-        smpl_params_w = {"body_pose": body_pose, "betas": betas, "transl": transl_w, "global_orient": global_orient_w}
+        smpl_params_w = {
+            "body_pose": body_pose,
+            "betas": betas,
+            "transl": transl_w,
+            "global_orient": global_orient_w,
+        }
 
         gravity_vec = torch.tensor([0, -1, 0], dtype=torch.float32)  # (3), BEDLAM is ay
         R_w2c = data["cam_R"]
@@ -266,7 +278,11 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
             return_data["text_embed"] = data["text_embed"]
         else:
             return_data = {
-                "meta": {"data_name": "bedlam", "idx": idx, "eval_text_only": self.eval_text_only},
+                "meta": {
+                    "data_name": "bedlam",
+                    "idx": idx,
+                    "eval_text_only": self.eval_text_only,
+                },
                 "length": length,
                 "smpl_params_c": smpl_params_c,
                 "smpl_params_w": smpl_params_w,
