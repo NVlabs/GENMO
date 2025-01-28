@@ -42,23 +42,22 @@ class ViPNAS_MobileNetV3(BaseBackbone):
             Default: False.
     """
 
-    def __init__(self,
-                 wid=[16, 16, 24, 40, 80, 112, 160],
-                 expan=[None, 1, 5, 4, 5, 5, 6],
-                 dep=[None, 1, 4, 4, 4, 4, 4],
-                 ks=[3, 3, 7, 7, 5, 7, 5],
-                 group=[None, 8, 120, 20, 100, 280, 240],
-                 att=[None, True, True, False, True, True, True],
-                 stride=[2, 1, 2, 2, 2, 1, 2],
-                 act=[
-                     'HSwish', 'ReLU', 'ReLU', 'ReLU', 'HSwish', 'HSwish',
-                     'HSwish'
-                 ],
-                 conv_cfg=None,
-                 norm_cfg=dict(type='BN'),
-                 frozen_stages=-1,
-                 norm_eval=False,
-                 with_cp=False):
+    def __init__(
+        self,
+        wid=[16, 16, 24, 40, 80, 112, 160],
+        expan=[None, 1, 5, 4, 5, 5, 6],
+        dep=[None, 1, 4, 4, 4, 4, 4],
+        ks=[3, 3, 7, 7, 5, 7, 5],
+        group=[None, 8, 120, 20, 100, 280, 240],
+        att=[None, True, True, False, True, True, True],
+        stride=[2, 1, 2, 2, 2, 1, 2],
+        act=["HSwish", "ReLU", "ReLU", "ReLU", "HSwish", "HSwish", "HSwish"],
+        conv_cfg=None,
+        norm_cfg=dict(type="BN"),
+        frozen_stages=-1,
+        norm_eval=False,
+        with_cp=False,
+    ):
         # Protect mutable default arguments
         norm_cfg = copy.deepcopy(norm_cfg)
         super().__init__()
@@ -84,7 +83,8 @@ class ViPNAS_MobileNetV3(BaseBackbone):
             padding=self.ks[0] // 2,
             conv_cfg=conv_cfg,
             norm_cfg=norm_cfg,
-            act_cfg=dict(type=self.act[0]))
+            act_cfg=dict(type=self.act[0]),
+        )
 
         self.layers = self._make_layer()
 
@@ -98,7 +98,8 @@ class ViPNAS_MobileNetV3(BaseBackbone):
                 se_cfg = dict(
                     channels=mid_channels,
                     ratio=4,
-                    act_cfg=(dict(type='ReLU'), dict(type='HSigmoid')))
+                    act_cfg=(dict(type="ReLU"), dict(type="HSigmoid")),
+                )
             else:
                 se_cfg = None
 
@@ -127,9 +128,10 @@ class ViPNAS_MobileNetV3(BaseBackbone):
                     conv_cfg=self.conv_cfg,
                     norm_cfg=self.norm_cfg,
                     act_cfg=dict(type=self.act[i + 1]),
-                    with_cp=self.with_cp)
+                    with_cp=self.with_cp,
+                )
                 layer_index += 1
-                layer_name = f'layer{layer_index}'
+                layer_name = f"layer{layer_index}"
                 self.add_module(layer_name, layer)
                 layers.append(layer_name)
         return layers
@@ -143,13 +145,13 @@ class ViPNAS_MobileNetV3(BaseBackbone):
                 if isinstance(m, nn.Conv2d):
                     nn.init.normal_(m.weight, std=0.001)
                     for name, _ in m.named_parameters():
-                        if name in ['bias']:
+                        if name in ["bias"]:
                             nn.init.constant_(m.bias, 0)
                 elif isinstance(m, nn.BatchNorm2d):
                     nn.init.constant_(m.weight, 1)
                     nn.init.constant_(m.bias, 0)
         else:
-            raise TypeError('pretrained must be a str or None')
+            raise TypeError("pretrained must be a str or None")
 
     def forward(self, x):
         x = self.conv1(x)
@@ -165,7 +167,7 @@ class ViPNAS_MobileNetV3(BaseBackbone):
             for param in self.conv1.parameters():
                 param.requires_grad = False
         for i in range(1, self.frozen_stages + 1):
-            layer = getattr(self, f'layer{i}')
+            layer = getattr(self, f"layer{i}")
             layer.eval()
             for param in layer.parameters():
                 param.requires_grad = False

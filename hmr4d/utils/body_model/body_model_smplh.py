@@ -1,6 +1,6 @@
+import smplx
 import torch
 import torch.nn as nn
-import smplx
 
 kwargs_disable_member_var = {
     "create_body_pose": False,
@@ -23,14 +23,20 @@ class BodyModelSMPLH(nn.Module):
         self.faces = self.bm.faces
         self.is_smpl = kwargs.get("model_type", "smpl") == "smpl"
         if not self.is_smpl:
-            self.hand_pose_dim = self.bm.num_pca_comps if self.bm.use_pca else 3 * self.bm.NUM_HAND_JOINTS
+            self.hand_pose_dim = (
+                self.bm.num_pca_comps
+                if self.bm.use_pca
+                else 3 * self.bm.NUM_HAND_JOINTS
+            )
 
         # For fast computing of skeleton under beta
         shapedirs = self.bm.shapedirs  # (V, 3, 10)
         J_regressor = self.bm.J_regressor[:22, :]  # (22, V)
         v_template = self.bm.v_template  # (V, 3)
         J_template = J_regressor @ v_template  # (22, 3)
-        J_shapedirs = torch.einsum("jv, vcd -> jcd", J_regressor, shapedirs)  # (22, 3, 10)
+        J_shapedirs = torch.einsum(
+            "jv, vcd -> jcd", J_regressor, shapedirs
+        )  # (22, 3, 10)
         self.register_buffer("J_template", J_template, False)
         self.register_buffer("J_shapedirs", J_shapedirs, False)
 
@@ -42,12 +48,18 @@ class BodyModelSMPLH(nn.Module):
         body_pose=None,
         left_hand_pose=None,
         right_hand_pose=None,
-        **kwargs
+        **kwargs,
     ):
-
         device, dtype = self.bm.shapedirs.device, self.bm.shapedirs.dtype
 
-        model_vars = [betas, global_orient, body_pose, transl, left_hand_pose, right_hand_pose]
+        model_vars = [
+            betas,
+            global_orient,
+            body_pose,
+            transl,
+            left_hand_pose,
+            right_hand_pose,
+        ]
         batch_size = 1
         for var in model_vars:
             if var is None:
@@ -58,7 +70,9 @@ class BodyModelSMPLH(nn.Module):
             global_orient = torch.zeros([batch_size, 3], dtype=dtype, device=device)
         if body_pose is None:
             body_pose = (
-                torch.zeros(3 * self.bm.NUM_BODY_JOINTS, device=device, dtype=dtype)[None]
+                torch.zeros(3 * self.bm.NUM_BODY_JOINTS, device=device, dtype=dtype)[
+                    None
+                ]
                 .expand(batch_size, -1)
                 .contiguous()
             )
@@ -76,7 +90,9 @@ class BodyModelSMPLH(nn.Module):
                     .contiguous()
                 )
         if betas is None:
-            betas = torch.zeros([batch_size, self.bm.num_betas], dtype=dtype, device=device)
+            betas = torch.zeros(
+                [batch_size, self.bm.num_betas], dtype=dtype, device=device
+            )
         if transl is None:
             transl = torch.zeros([batch_size, 3], dtype=dtype, device=device)
 
@@ -87,12 +103,14 @@ class BodyModelSMPLH(nn.Module):
             left_hand_pose=left_hand_pose,
             right_hand_pose=right_hand_pose,
             transl=transl,
-            **kwargs
+            **kwargs,
         )
 
         return bm_out
 
     def get_skeleton(self, betas):
         """betas: (*, 10) -> skeleton_beta: (*, 22, 3)"""
-        skeleton_beta = self.J_template + torch.einsum("...d, jcd -> ...jc", betas, self.J_shapedirs)  # (22, 3)
+        skeleton_beta = self.J_template + torch.einsum(
+            "...d, jcd -> ...jc", betas, self.J_shapedirs
+        )  # (22, 3)
         return skeleton_beta

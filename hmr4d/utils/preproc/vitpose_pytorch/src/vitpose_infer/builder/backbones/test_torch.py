@@ -4,7 +4,6 @@ import torch.nn.functional as F
 
 
 class Net(nn.Module):
-
     def __init__(self):
         super(Net, self).__init__()
         # 1 input image channel, 6 output channels, 5x5 square convolution
@@ -21,7 +20,7 @@ class Net(nn.Module):
         x = F.max_pool2d(F.relu(self.conv1(x)), (2, 2))
         # If the size is a square, you can specify with a single number
         x = F.max_pool2d(F.relu(self.conv2(x)), 2)
-        x = torch.flatten(x, 1) # flatten all dimensions except the batch dimension
+        x = torch.flatten(x, 1)  # flatten all dimensions except the batch dimension
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
@@ -49,12 +48,12 @@ import torch.optim as optim
 optimizer = optim.SGD(net.parameters(), lr=0.01)
 
 # in your training loop:
-optimizer.zero_grad()   # zero the gradient buffers
+optimizer.zero_grad()  # zero the gradient buffers
 output = net(input)
 loss = criterion(output, target)
 
 loss.backward()
 
-optimizer.step()  
+optimizer.step()
 
 # print(loss)

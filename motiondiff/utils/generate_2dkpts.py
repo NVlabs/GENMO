@@ -5,7 +5,6 @@ from tqdm import tqdm
 
 # from rtmlib import Wholebody, Body
 # from rtmlib.visualization.draw import draw_mmpose
-
 from .mmpose_wraper import BodyPose, draw_mmpose
 
 coco17 = dict(

@@ -66,70 +66,83 @@ class RegNet(ResNet):
         (1, 432, 2, 2)
         (1, 1008, 1, 1)
     """
+
     arch_settings = {
-        'regnetx_400mf':
-        dict(w0=24, wa=24.48, wm=2.54, group_w=16, depth=22, bot_mul=1.0),
-        'regnetx_800mf':
-        dict(w0=56, wa=35.73, wm=2.28, group_w=16, depth=16, bot_mul=1.0),
-        'regnetx_1.6gf':
-        dict(w0=80, wa=34.01, wm=2.25, group_w=24, depth=18, bot_mul=1.0),
-        'regnetx_3.2gf':
-        dict(w0=88, wa=26.31, wm=2.25, group_w=48, depth=25, bot_mul=1.0),
-        'regnetx_4.0gf':
-        dict(w0=96, wa=38.65, wm=2.43, group_w=40, depth=23, bot_mul=1.0),
-        'regnetx_6.4gf':
-        dict(w0=184, wa=60.83, wm=2.07, group_w=56, depth=17, bot_mul=1.0),
-        'regnetx_8.0gf':
-        dict(w0=80, wa=49.56, wm=2.88, group_w=120, depth=23, bot_mul=1.0),
-        'regnetx_12gf':
-        dict(w0=168, wa=73.36, wm=2.37, group_w=112, depth=19, bot_mul=1.0),
+        "regnetx_400mf": dict(
+            w0=24, wa=24.48, wm=2.54, group_w=16, depth=22, bot_mul=1.0
+        ),
+        "regnetx_800mf": dict(
+            w0=56, wa=35.73, wm=2.28, group_w=16, depth=16, bot_mul=1.0
+        ),
+        "regnetx_1.6gf": dict(
+            w0=80, wa=34.01, wm=2.25, group_w=24, depth=18, bot_mul=1.0
+        ),
+        "regnetx_3.2gf": dict(
+            w0=88, wa=26.31, wm=2.25, group_w=48, depth=25, bot_mul=1.0
+        ),
+        "regnetx_4.0gf": dict(
+            w0=96, wa=38.65, wm=2.43, group_w=40, depth=23, bot_mul=1.0
+        ),
+        "regnetx_6.4gf": dict(
+            w0=184, wa=60.83, wm=2.07, group_w=56, depth=17, bot_mul=1.0
+        ),
+        "regnetx_8.0gf": dict(
+            w0=80, wa=49.56, wm=2.88, group_w=120, depth=23, bot_mul=1.0
+        ),
+        "regnetx_12gf": dict(
+            w0=168, wa=73.36, wm=2.37, group_w=112, depth=19, bot_mul=1.0
+        ),
     }
 
-    def __init__(self,
-                 arch,
-                 in_channels=3,
-                 stem_channels=32,
-                 base_channels=32,
-                 strides=(2, 2, 2, 2),
-                 dilations=(1, 1, 1, 1),
-                 out_indices=(3, ),
-                 style='pytorch',
-                 deep_stem=False,
-                 avg_down=False,
-                 frozen_stages=-1,
-                 conv_cfg=None,
-                 norm_cfg=dict(type='BN', requires_grad=True),
-                 norm_eval=False,
-                 with_cp=False,
-                 zero_init_residual=True):
+    def __init__(
+        self,
+        arch,
+        in_channels=3,
+        stem_channels=32,
+        base_channels=32,
+        strides=(2, 2, 2, 2),
+        dilations=(1, 1, 1, 1),
+        out_indices=(3,),
+        style="pytorch",
+        deep_stem=False,
+        avg_down=False,
+        frozen_stages=-1,
+        conv_cfg=None,
+        norm_cfg=dict(type="BN", requires_grad=True),
+        norm_eval=False,
+        with_cp=False,
+        zero_init_residual=True,
+    ):
         # Protect mutable default arguments
         norm_cfg = copy.deepcopy(norm_cfg)
         super(ResNet, self).__init__()
 
         # Generate RegNet parameters first
         if isinstance(arch, str):
-            assert arch in self.arch_settings, \
-                f'"arch": "{arch}" is not one of the' \
-                ' arch_settings'
+            assert arch in self.arch_settings, (
+                f'"arch": "{arch}" is not one of the arch_settings'
+            )
             arch = self.arch_settings[arch]
         elif not isinstance(arch, dict):
-            raise TypeError('Expect "arch" to be either a string '
-                            f'or a dict, got {type(arch)}')
+            raise TypeError(
+                f'Expect "arch" to be either a string or a dict, got {type(arch)}'
+            )
 
         widths, num_stages = self.generate_regnet(
-            arch['w0'],
-            arch['wa'],
-            arch['wm'],
-            arch['depth'],
+            arch["w0"],
+            arch["wa"],
+            arch["wm"],
+            arch["depth"],
         )
         # Convert to per stage format
         stage_widths, stage_blocks = self.get_stages_from_blocks(widths)
         # Generate group widths and bot muls
-        group_widths = [arch['group_w'] for _ in range(num_stages)]
-        self.bottleneck_ratio = [arch['bot_mul'] for _ in range(num_stages)]
+        group_widths = [arch["group_w"] for _ in range(num_stages)]
+        self.bottleneck_ratio = [arch["bot_mul"] for _ in range(num_stages)]
         # Adjust the compatibility of stage_widths and group_widths
         stage_widths, group_widths = self.adjust_width_group(
-            stage_widths, self.bottleneck_ratio, group_widths)
+            stage_widths, self.bottleneck_ratio, group_widths
+        )
 
         # Group params by stage
         self.stage_widths = stage_widths
@@ -147,8 +160,7 @@ class RegNet(ResNet):
         self.style = style
         self.deep_stem = deep_stem
         if self.deep_stem:
-            raise NotImplementedError(
-                'deep_stem has not been implemented for RegNet')
+            raise NotImplementedError("deep_stem has not been implemented for RegNet")
         self.avg_down = avg_down
         self.frozen_stages = frozen_stages
         self.conv_cfg = conv_cfg
@@ -184,9 +196,10 @@ class RegNet(ResNet):
                 norm_cfg=self.norm_cfg,
                 base_channels=self.stage_widths[i],
                 groups=stage_groups,
-                width_per_group=group_width)
+                width_per_group=group_width,
+            )
             _in_channels = self.stage_widths[i]
-            layer_name = f'layer{i + 1}'
+            layer_name = f"layer{i + 1}"
             self.add_module(layer_name, res_layer)
             self.res_layers.append(layer_name)
 
@@ -202,18 +215,16 @@ class RegNet(ResNet):
             kernel_size=3,
             stride=2,
             padding=1,
-            bias=False)
+            bias=False,
+        )
         self.norm1_name, norm1 = build_norm_layer(
-            self.norm_cfg, base_channels, postfix=1)
+            self.norm_cfg, base_channels, postfix=1
+        )
         self.add_module(self.norm1_name, norm1)
         self.relu = nn.ReLU(inplace=True)
 
     @staticmethod
-    def generate_regnet(initial_width,
-                        width_slope,
-                        width_parameter,
-                        depth,
-                        divisor=8):
+    def generate_regnet(initial_width, width_slope, width_parameter, depth, divisor=8):
         """Generates per block width from RegNet parameters.
 
         Args:
@@ -232,8 +243,7 @@ class RegNet(ResNet):
         assert width_parameter > 1
         assert initial_width % divisor == 0
         widths_cont = np.arange(depth) * width_slope + initial_width
-        ks = np.round(
-            np.log(widths_cont / initial_width) / np.log(width_parameter))
+        ks = np.round(np.log(widths_cont / initial_width) / np.log(width_parameter))
         widths = initial_width * np.power(width_parameter, ks)
         widths = np.round(np.divide(widths, divisor)) * divisor
         num_stages = len(np.unique(widths))
@@ -264,17 +274,13 @@ class RegNet(ResNet):
         Returns:
             tuple(list): The adjusted widths and groups of each stage.
         """
-        bottleneck_width = [
-            int(w * b) for w, b in zip(widths, bottleneck_ratio)
-        ]
+        bottleneck_width = [int(w * b) for w, b in zip(widths, bottleneck_ratio)]
         groups = [min(g, w_bot) for g, w_bot in zip(groups, bottleneck_width)]
         bottleneck_width = [
-            self.quantize_float(w_bot, g)
-            for w_bot, g in zip(bottleneck_width, groups)
+            self.quantize_float(w_bot, g) for w_bot, g in zip(bottleneck_width, groups)
         ]
         widths = [
-            int(w_bot / b)
-            for w_bot, b in zip(bottleneck_width, bottleneck_ratio)
+            int(w_bot / b) for w_bot, b in zip(bottleneck_width, bottleneck_ratio)
         ]
         return widths, groups
 
@@ -288,16 +294,12 @@ class RegNet(ResNet):
             tuple(list): width and depth of each stage
         """
         width_diff = [
-            width != width_prev
-            for width, width_prev in zip(widths + [0], [0] + widths)
+            width != width_prev for width, width_prev in zip(widths + [0], [0] + widths)
         ]
-        stage_widths = [
-            width for width, diff in zip(widths, width_diff[:-1]) if diff
-        ]
-        stage_blocks = np.diff([
-            depth for depth, diff in zip(range(len(width_diff)), width_diff)
-            if diff
-        ]).tolist()
+        stage_widths = [width for width, diff in zip(widths, width_diff[:-1]) if diff]
+        stage_blocks = np.diff(
+            [depth for depth, diff in zip(range(len(width_diff)), width_diff) if diff]
+        ).tolist()
         return stage_widths, stage_blocks
 
     def forward(self, x):

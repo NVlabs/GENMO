@@ -1,41 +1,41 @@
 # @package _global_
 # based on diff2d_base2_net1_w2d_infill_j2d
 defaults:
-    - /diffusion@model_cfg.diffusion: ddim
-    - override /data: mocap/trainX_testY_with2D
-    - override /model: gvhmr/unimfm
-    - override /endecoder: gvhmr/v1_amass_local_bedlam_cam
-    - override /optimizer: adamw_2e-4
-    - override /scheduler_cfg: epoch_half_200_350
-    - override /train_datasets:
-        #   - pure_motion_amass/v11
-          - pure_motion_humanml3d/static_train
-        #   - imgfeat_bedlam/v2
-        #   - imgfeat_h36m/v1
-        #   - imgfeat_3dpw/v1
-        #   - imgfeat_3dpw_occ/v1
-    - override /train_2d_datasets:
-          - bones_2d
-    - override /test_datasets:
-        - humanml3d_eval
-        #   - emdb1/v1_fliptest
-        #   - emdb2/v1_fliptest
-        #   - rich/all
-        #   - 3dpw/fliptest
-        #   - 3dpw_occ/fliptest
-        #   - bones_2d_test
-    - override /callbacks:
-          - simple_ckpt_saver/every10000s_top100
-          - prog_bar/prog_reporter_every0.1
-          - train_speed_timer/base
-          - lr_monitor/pl
-          - vis_text
-        #   - metric_emdb1
-        #   - metric_emdb2
-        #   - metric_rich
-        #   - metric_3dpw
-        #   - metric_3dpw_occ
-    - _self_
+  - /diffusion@model_cfg.diffusion: ddim
+  - override /data: mocap/trainX_testY_with2D
+  - override /model: gvhmr/unimfm
+  - override /endecoder: gvhmr/v1_amass_local_bedlam_cam
+  - override /optimizer: adamw_2e-4
+  - override /scheduler_cfg: epoch_half_200_350
+  - override /train_datasets:
+      #   - pure_motion_amass/v11
+      - pure_motion_humanml3d/static_train
+      #   - imgfeat_bedlam/v2
+      #   - imgfeat_h36m/v1
+      #   - imgfeat_3dpw/v1
+      #   - imgfeat_3dpw_occ/v1
+  - override /train_2d_datasets:
+      - bones_2d
+  - override /test_datasets:
+      - humanml3d_eval
+      #   - emdb1/v1_fliptest
+      #   - emdb2/v1_fliptest
+      #   - rich/all
+      #   - 3dpw/fliptest
+      #   - 3dpw_occ/fliptest
+      #   - bones_2d_test
+  - override /callbacks:
+      - simple_ckpt_saver/every10000s_top100
+      - prog_bar/prog_reporter_every0.1
+      - train_speed_timer/base
+      - lr_monitor/pl
+      - vis_text
+      #   - metric_emdb1
+      #   - metric_emdb2
+      #   - metric_rich
+      #   - metric_3dpw
+      #   - metric_3dpw_occ
+  - _self_
 exp_name_base: ${hydra:runtime.choices.exp}
 exp_name_var: ""
 exp_name: ${exp_name_base}_${exp_name_var}
@@ -43,113 +43,112 @@ data_name: mocap_mixed_v1
 # pretrain_2d_ckpt: "/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/yey/gvhmr/mocap_mixed_v1/mv2d/diff2d/diff2d_base_tt/version_0/checkpoints/last.ckpt"
 
 model_cfg:
-    train_3d_modes: ["diffusion"]
-    train_2d_modes: []
-    start_2d_training_steps: 0
-    noisy_2d_obs: true
-    kp2d_noise_scale: 0.5
+  train_3d_modes: ["diffusion"]
+  train_2d_modes: []
+  start_2d_training_steps: 0
+  noisy_2d_obs: true
+  kp2d_noise_scale: 0.5
 
-    diffusion:
-        test_timestep_respacing: '50'
-        guidance_param: 2.5
+  diffusion:
+    test_timestep_respacing: "50"
+    guidance_param: 2.5
 
-    text_encoder:
-        load_llm: false
-        llm_version: 't5-3b'
-        max_text_len: 50
+  text_encoder:
+    load_llm: false
+    llm_version: "t5-3b"
+    max_text_len: 50
 
-    mask_cfg:
-        drop_prob: 0.75
-        max_num_drops: 3
-        min_drop_nframes: 1
-        max_drop_nframes: 30
-    body_mask_cfg:
-        drop_prob: 0.75
-        joint_drop_prob: 0.25
-        max_num_drops: 3
-        min_drop_nframes: 1
-        max_drop_nframes: 30
+  mask_cfg:
+    drop_prob: 0.75
+    max_num_drops: 3
+    min_drop_nframes: 1
+    max_drop_nframes: 30
+  body_mask_cfg:
+    drop_prob: 0.75
+    joint_drop_prob: 0.25
+    max_num_drops: 3
+    min_drop_nframes: 1
+    max_drop_nframes: 30
 
 pipeline:
-    _target_: hmr4d.model.gvhmr.pipeline.unimfm_pipeline.Pipeline
-    args_denoiser3d: ${network}
-    args:
-        endecoder_opt: ${endecoder}
-        normalize_cam_angvel: true
-        use_regression_outputs_prob: 0.
-        use_cfg_sampler_for_text: true
-        weights:
-            cr_j3d: 0.
-            transl_c: 0.
-            cr_verts: 0.
-            j2d: 0.
-            verts2d: 0.
+  _target_: hmr4d.model.gvhmr.pipeline.unimfm_pipeline.Pipeline
+  args_denoiser3d: ${network}
+  args:
+    endecoder_opt: ${endecoder}
+    normalize_cam_angvel: true
+    use_regression_outputs_prob: 0.
+    use_cfg_sampler_for_text: true
+    weights:
+      cr_j3d: 0.
+      transl_c: 0.
+      cr_verts: 0.
+      j2d: 0.
+      verts2d: 0.
 
-            j2d_train2d: 0.
-            # norm_j2d: 1000.
-            train2d_skip_regression: false
+      j2d_train2d: 0.
+      # norm_j2d: 1000.
+      train2d_skip_regression: false
 
-            transl_w: 0.
-            static_conf_bce: 1.
+      transl_w: 0.
+      static_conf_bce: 1.
 
-        static_conf:
-            vel_thr: 0.15
+    static_conf:
+      vel_thr: 0.15
 
-        in_attr:
-            - obs
-            - f_cliffcam
-            - f_imgseq
-            - f_cam_angvel
-        mask_out_attr: ${.in_attr}
-        out_attr:
-            pred_cam: 3
+    in_attr:
+      - obs
+      - f_cliffcam
+      - f_imgseq
+      - f_cam_angvel
+    mask_out_attr: ${.in_attr}
+    out_attr:
+      pred_cam: 3
 
 network:
-    _target_: hmr4d.network.unimfm.unimfm_diffusion.UNIMFMDiffusion
-    args: ${pipeline.args}
-    model_cfg:
-        diffusion: ${model_cfg.diffusion}
-        denoiser:
-            type: hmr4d.network.unimfm.unimfm_denoiser.NetworkEncoderRoPE
-            output_dim: 151
-            xt_dim: 157
-            njoints: ${.xt_dim}
-            text_mask_prob: 0.1
-            use_text_pos_enc: true
-            text_encoder_cfg:
-                mode: first
-                cross_attn_type: mha
-            input_remove_static_conf: true
-
+  _target_: hmr4d.network.unimfm.unimfm_diffusion.UNIMFMDiffusion
+  args: ${pipeline.args}
+  model_cfg:
+    diffusion: ${model_cfg.diffusion}
+    denoiser:
+      type: hmr4d.network.unimfm.unimfm_denoiser.NetworkEncoderRoPE
+      output_dim: 151
+      xt_dim: 157
+      njoints: ${.xt_dim}
+      text_mask_prob: 0.1
+      use_text_pos_enc: true
+      text_encoder_cfg:
+        mode: first
+        cross_attn_type: mha
+      input_remove_static_conf: true
 
 data:
-    loader_opts:
-        train:
-            batch_size: 256
-            num_workers: 6
-        train_2d:
-            batch_size: 128
-            num_workers: 6
-    # train_2d_only: true
+  loader_opts:
+    train:
+      batch_size: 256
+      num_workers: 6
+    train_2d:
+      batch_size: 128
+      num_workers: 6
+  # train_2d_only: true
 
 pl_trainer:
-    precision: 16-mixed
-    log_every_n_steps: 10
-    gradient_clip_val: 0.5
-    max_epochs: null
-    check_val_every_n_epoch: null
-    val_check_interval: 3000
-    max_steps: 200000
-    devices: 1
-    strategy: ddp_find_unused_parameters_true
+  precision: 16-mixed
+  log_every_n_steps: 10
+  gradient_clip_val: 0.5
+  max_epochs: null
+  check_val_every_n_epoch: null
+  val_check_interval: 3000
+  max_steps: 200000
+  devices: 1
+  strategy: ddp_find_unused_parameters_true
 
 logger:
-    _target_: pytorch_lightning.loggers.WandbLogger
-    project: 'mfm-hmr'
-    entity: 'nvr-lpr'
-    save_dir: "/tmp" # /save_dir/name/version/sub_dir
-    name: ""
-    version: ""
-    resume: 'allow'
-    dir: "/tmp"
-    id: null
+  _target_: pytorch_lightning.loggers.WandbLogger
+  project: "mfm-hmr"
+  entity: "nvr-lpr"
+  save_dir: "/tmp" # /save_dir/name/version/sub_dir
+  name: ""
+  version: ""
+  resume: "allow"
+  dir: "/tmp"
+  id: null

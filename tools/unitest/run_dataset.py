@@ -14,6 +14,7 @@ def get_dataset(DATA_TYPE):
 
         return ThreedpwSmplDataset()
 
+
 if __name__ == "__main__":
     DATA_TYPE = "3DPW_TRAIN"
     dataset = get_dataset(DATA_TYPE)

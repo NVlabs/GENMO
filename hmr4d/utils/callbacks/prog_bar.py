@@ -1,19 +1,23 @@
-from collections import OrderedDict
-from numbers import Number
-from datetime import datetime, timedelta
-from typing import Any, Dict, Union
-from pytorch_lightning.utilities.types import STEP_OUTPUT
-import torch
-from pytorch_lightning.callbacks.progress.tqdm_progress import TQDMProgressBar, Tqdm, convert_inf
-from pytorch_lightning.callbacks.progress import ProgressBar
-from pytorch_lightning.utilities import rank_zero_only
-import pytorch_lightning as pl
-
-from hmr4d.utils.pylogger import Log
-from time import time
-from collections import deque
 import sys
+from collections import OrderedDict, deque
+from datetime import datetime, timedelta
+from numbers import Number
+from time import time
+from typing import Any, Dict, Union
+
+import pytorch_lightning as pl
+import torch
+from pytorch_lightning.callbacks.progress import ProgressBar
+from pytorch_lightning.callbacks.progress.tqdm_progress import (
+    Tqdm,
+    TQDMProgressBar,
+    convert_inf,
+)
+from pytorch_lightning.utilities import rank_zero_only
+from pytorch_lightning.utilities.types import STEP_OUTPUT
+
 from hmr4d.configs import MainStore, builds
+from hmr4d.utils.pylogger import Log
 
 # ========== Helper functions ========== #
 
@@ -115,7 +119,9 @@ class ProgressReporter(ProgressBar, pl.Callback):
     def disable(self):
         self.enable = False
 
-    def setup(self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage: str) -> None:
+    def setup(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage: str
+    ) -> None:
         # Connect to the trainer object.
         super().setup(trainer, pl_module, stage)
         self.stage = stage
@@ -136,7 +142,9 @@ class ProgressReporter(ProgressBar, pl.Callback):
     def print(self, *args: Any, **kwargs: Any) -> None:
         print(*args)
 
-    def get_metrics(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> Dict[str, Union[str, float]]:
+    def get_metrics(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ) -> Dict[str, Union[str, float]]:
         """Get metrics from trainer for progress bar."""
         items = super().get_metrics(trainer, pl_module)
         items.pop("v_num", None)
@@ -163,7 +171,9 @@ class ProgressReporter(ProgressBar, pl.Callback):
 
     @rank_zero_only
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
-        super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)  # don't forget this :)
+        super().on_train_batch_end(
+            trainer, pl_module, outputs, batch, batch_idx
+        )  # don't forget this :)
         total = self.total_train_batches
 
         # Speed
@@ -176,7 +186,9 @@ class ProgressReporter(ProgressBar, pl.Callback):
         if len(self.batch_time_queue) == 1:  # cannot compute speed
             speed = 1 / time_elapsed
         else:
-            speed = (len(self.batch_time_queue) - 1) / (self.batch_time_queue[-1] - self.batch_time_queue[0])
+            speed = (len(self.batch_time_queue) - 1) / (
+                self.batch_time_queue[-1] - self.batch_time_queue[0]
+            )
 
         # Skip if not update
         if not self._should_update(n_finished, total):
@@ -189,11 +201,9 @@ class ProgressReporter(ProgressBar, pl.Callback):
         # Speed: Get elapsed time and estimated remaining time
         time_elapsed_str = convert_t_to_str(time_elapsed)
         time_remaining_str = convert_t_to_str(time_remaining)
-        speed_str = f"{speed:.2f}it/s" if speed > 1 else f"{1/speed:.1f}s/it"
+        speed_str = f"{speed:.2f}it/s" if speed > 1 else f"{1 / speed:.1f}s/it"
         n_digit = len(str(total))
-        desc_speed = (
-            f"[{n_finished:{n_digit}d}/{total}={percent:3.0f}%, {time_elapsed_str} → {time_remaining_str}, {speed_str}]"
-        )
+        desc_speed = f"[{n_finished:{n_digit}d}/{total}={percent:3.0f}%, {time_elapsed_str} → {time_remaining_str}, {speed_str}]"
 
         # ===== Set postfix string ===== #
         # 1. maximum GPU usage
@@ -202,7 +212,11 @@ class ProgressReporter(ProgressBar, pl.Callback):
 
         # 2. training step metrics
         train_metrics = self.get_metrics(trainer, pl_module)
-        train_metrics = {k: v for k, v in train_metrics.items() if ("train" in k and "epoch" not in k)}
+        train_metrics = {
+            k: v
+            for k, v in train_metrics.items()
+            if ("train" in k and "epoch" not in k)
+        }
         post_fix_str += ", " + convert_kwargs_to_str(**train_metrics)
 
         # extra message if applicable
@@ -215,7 +229,9 @@ class ProgressReporter(ProgressBar, pl.Callback):
         self.print(bar_output)
 
     @rank_zero_only
-    def on_train_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+    def on_train_epoch_end(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ) -> None:
         super().on_train_epoch_end(trainer, pl_module)
 
         # Clear
@@ -233,7 +249,9 @@ class ProgressReporter(ProgressBar, pl.Callback):
         # Metrics
         # training epoch metrics
         train_metrics = self.get_metrics(trainer, pl_module)
-        train_metrics = {k: v for k, v in train_metrics.items() if ("train" in k and "epoch" in k)}
+        train_metrics = {
+            k: v for k, v in train_metrics.items() if ("train" in k and "epoch" in k)
+        }
         train_metrics_str = convert_kwargs_to_str(**train_metrics)
 
         Log.info(
@@ -246,7 +264,9 @@ class ProgressReporter(ProgressBar, pl.Callback):
         self.time_val_epoch_start = time()
 
     @rank_zero_only
-    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+    def on_validation_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
+    ):
         self.n_finished += 1
         n_finished = self.n_finished
         total = self.total_val_batches
@@ -269,7 +289,9 @@ class ProgressReporter(ProgressBar, pl.Callback):
         bar_output = f"{desc} {desc_speed}"
         self.print(bar_output)
 
-    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+    def on_validation_epoch_end(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ) -> None:
         # Reset
         self.n_finished = 0
 
@@ -277,7 +299,9 @@ class ProgressReporter(ProgressBar, pl.Callback):
 class EmojiProgressReporter(ProgressBar, pl.Callback):
     def __init__(
         self,
-        refresh_rate_batch: Union[int, None] = 1,  # report interval of batch, set None to disable it
+        refresh_rate_batch: Union[
+            int, None
+        ] = 1,  # report interval of batch, set None to disable it
         refresh_rate_epoch: int = 1,  # report interval of epoch
         **kwargs,
     ):
@@ -307,12 +331,16 @@ class EmojiProgressReporter(ProgressBar, pl.Callback):
             self.exp_name = pl_module.exp_name
         else:
             self.exp_name = "Unnamed Experiment"
-            Log.warn("Experiment name not found, please set it to `pl_module.exp_name`!")
+            Log.warn(
+                "Experiment name not found, please set it to `pl_module.exp_name`!"
+            )
 
     def print(self, *args: Any, **kwargs: Any):
         print(*args)
 
-    def get_metrics(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> Dict[str, Union[str, float]]:
+    def get_metrics(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ) -> Dict[str, Union[str, float]]:
         """Get metrics from trainer for progress bar."""
         items = super().get_metrics(trainer, pl_module)
         items.pop("v_num", None)
@@ -354,7 +382,13 @@ class EmojiProgressReporter(ProgressBar, pl.Callback):
         return time_str
 
     @rank_zero_only
-    def on_train_batch_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule, batch: Any, batch_idx: int):
+    def on_train_batch_start(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        batch: Any,
+        batch_idx: int,
+    ):
         super().on_train_batch_start(trainer, pl_module, batch, batch_idx)
         # Initialize some meta data.
         if self.time_start_batch is None:
@@ -362,7 +396,9 @@ class EmojiProgressReporter(ProgressBar, pl.Callback):
 
     @rank_zero_only
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
-        super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)  # don't forget this :)
+        super().on_train_batch_end(
+            trainer, pl_module, outputs, batch, batch_idx
+        )  # don't forget this :)
         # Get some meta data.
         epoch_idx = trainer.current_epoch
         percent = 100 * (batch_idx + 1) / (self.total_train_batches + 1)
@@ -372,18 +408,24 @@ class EmojiProgressReporter(ProgressBar, pl.Callback):
         time_cur_stamp = datetime.now().timestamp()
         time_cur_str = datetime.fromtimestamp(time_cur_stamp).strftime("%m-%d %H:%M:%S")
         # Rest time.
-        time_rest_stamp = (time_cur_stamp - self.time_start_batch) * (100 - percent) / percent
+        time_rest_stamp = (
+            (time_cur_stamp - self.time_start_batch) * (100 - percent) / percent
+        )
         time_rest_str = self.timestamp_delta_to_str(time_rest_stamp)
 
         if not self._should_log_batch(batch_idx):
             return
 
         # Print the logs.
-        self.print(f"{self.title_prompt} [{self.stage.upper()}] Exp: {self.exp_name}...")
+        self.print(
+            f"{self.title_prompt} [{self.stage.upper()}] Exp: {self.exp_name}..."
+        )
         self.print(
             f"{self.prog_prompt} Ep {epoch_idx}: {int(percent):02d}% <= [{batch_idx}/{self.total_train_batches}]"
         )
-        self.print(f"{self.timer_prompt} Time: {time_cur_str} | Ep Rest: {time_rest_str}")
+        self.print(
+            f"{self.timer_prompt} Time: {time_cur_str} | Ep Rest: {time_rest_str}"
+        )
         for k, v in metrics.items():
             self.print(f"{self.metric_prompt} {k}: {v}")
         self.print("")  # Add a blank line.
@@ -432,5 +474,11 @@ prog_reporter_base = builds(
     data_name="${data_name}",
     populate_full_signature=True,
 )
-MainStore.store(name="prog_reporter_every0.1", node=prog_reporter_base, group=group_name)
-MainStore.store(name="prog_reporter_every0.2", node=prog_reporter_base(log_every_percent=0.2), group=group_name)
+MainStore.store(
+    name="prog_reporter_every0.1", node=prog_reporter_base, group=group_name
+)
+MainStore.store(
+    name="prog_reporter_every0.2",
+    node=prog_reporter_base(log_every_percent=0.2),
+    group=group_name,
+)

@@ -74,4 +74,3 @@ logger:
     resume: 'allow'
     dir: "/tmp"
     id: null
-

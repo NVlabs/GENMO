@@ -37,7 +37,7 @@
 # python tools/test_slurm.py -u jinkunc -cmd "python tools/train_v2.py part_ind=1 num_parts=2 trial_ind=4 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_test_st_mha_n1_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 text_feats_dir=text_feats_196 logger.entity=nv-welcome"
 
 
-# Jeff's new model on humanml3d 
+# Jeff's new model on humanml3d
 python tools/test_slurm.py -u jinkunc -cmd "python tools/train_v2.py part_ind=0 num_parts=2 trial_ind=0 global/task=mv2d/save_text2motion_feats exp=unimfm/gen_wtext_grep_reg_mx exp_name_var='humanml3d' +test_checkpoint=s200000 ++pipeline.args.test_motion_len=196 text_feats_dir=text_feats_196 logger.entity=nv-welcome"
 python tools/test_slurm.py -u jinkunc -cmd "python tools/train_v2.py part_ind=1 num_parts=2 trial_ind=0 global/task=mv2d/save_text2motion_feats exp=unimfm/gen_wtext_grep_reg_mx exp_name_var='humanml3d' +test_checkpoint=s200000 ++pipeline.args.test_motion_len=196 text_feats_dir=text_feats_196 logger.entity=nv-welcome"
 python tools/test_slurm.py -u jinkunc -cmd "python tools/train_v2.py part_ind=0 num_parts=2 trial_ind=1 global/task=mv2d/save_text2motion_feats exp=unimfm/gen_wtext_grep_reg_mx exp_name_var='humanml3d' +test_checkpoint=s200000 ++pipeline.args.test_motion_len=196 text_feats_dir=text_feats_196 logger.entity=nv-welcome"

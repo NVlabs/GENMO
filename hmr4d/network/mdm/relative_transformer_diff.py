@@ -2,13 +2,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import einsum, rearrange, repeat
-from hmr4d.configs import MainStore, builds
+from timm.models.vision_transformer import Mlp
 
+from hmr4d.configs import MainStore, builds
 from hmr4d.network.base_arch.transformer.encoder_rope import EncoderRoPEBlock
 from hmr4d.network.base_arch.transformer.layer import zero_module
-
 from hmr4d.utils.net_utils import length_to_mask
-from timm.models.vision_transformer import Mlp
 from motiondiff.models.mdm.modules import PositionalEncoding
 
 
@@ -86,27 +85,47 @@ class NetworkEncoderRoPE(nn.Module):
         # Transformer
         self.blocks = nn.ModuleList(
             [
-                EncoderRoPEBlock(self.latent_dim, self.num_heads, mlp_ratio=mlp_ratio, dropout=dropout)
+                EncoderRoPEBlock(
+                    self.latent_dim,
+                    self.num_heads,
+                    mlp_ratio=mlp_ratio,
+                    dropout=dropout,
+                )
                 for _ in range(self.num_layers)
             ]
         )
         self.sequence_pos_encoder = PositionalEncoding(self.latent_dim, dropout=0)
-        self.embed_timestep = TimestepEmbedder(self.latent_dim, self.sequence_pos_encoder)
-        
+        self.embed_timestep = TimestepEmbedder(
+            self.latent_dim, self.sequence_pos_encoder
+        )
+
         # Output heads
         self.final_layer = Mlp(self.latent_dim, out_features=self.output_dim)
         self.static_conf_head = Mlp(self.latent_dim, out_features=static_conf_dim)
-        if 'pred_cam' in self.args.out_attr:
+        if "pred_cam" in self.args.out_attr:
             pred_cam_dim = self.args.out_attr.pred_cam
             self.pred_cam_head = Mlp(self.latent_dim, out_features=pred_cam_dim)
-            self.register_buffer("pred_cam_mean", torch.tensor([1.0606, -0.0027, 0.2702]), False)
-            self.register_buffer("pred_cam_std", torch.tensor([0.1784, 0.0956, 0.0764]), False)
+            self.register_buffer(
+                "pred_cam_mean", torch.tensor([1.0606, -0.0027, 0.2702]), False
+            )
+            self.register_buffer(
+                "pred_cam_std", torch.tensor([0.1784, 0.0956, 0.0764]), False
+            )
 
         self.add_cond_linear = nn.Linear(157 + self.latent_dim, self.latent_dim)
 
         self.avgbeta = avgbeta
 
-    def forward(self, xt, timesteps, y=None, motion_mask=None, observed_motion=None, clip_cam=True, **kwargs):
+    def forward(
+        self,
+        xt,
+        timesteps,
+        y=None,
+        motion_mask=None,
+        observed_motion=None,
+        clip_cam=True,
+        **kwargs,
+    ):
         """
         Args:
             x: None we do not use it
@@ -117,14 +136,14 @@ class NetworkEncoderRoPE(nn.Module):
             f_noisyobs: (B, L, C), nosiy pose observation
             f_cam_angvel: (B, L, 6), Camera angular velocity
         """
-        x = y['f_cond']
-        length = y['length']
+        x = y["f_cond"]
+        length = y["length"]
         L = xt.size(1)
         B = xt.size(0)
-        
+
         emb = self.embed_timestep(timesteps)  # [1, bs, d]
         x = x + emb
-        xt = xt[:, :, self.s_pred_ind:]
+        xt = xt[:, :, self.s_pred_ind :]
         x = self.add_cond_linear(torch.cat([x, xt], dim=-1))
 
         # Setup length and make padding mask
@@ -151,20 +170,26 @@ class NetworkEncoderRoPE(nn.Module):
         assert self.avgbeta
         if self.avgbeta:
             s_ind = self.s_pred_ind + 6
-            betas = (sample[..., s_ind + 126:s_ind + 136] * (~pmask[..., None])).sum(1) / length[:, None]  # (B, C)
+            betas = (sample[..., s_ind + 126 : s_ind + 136] * (~pmask[..., None])).sum(
+                1
+            ) / length[:, None]  # (B, C)
             betas = repeat(betas, "b c -> b l c", l=L)
-            sample = torch.cat([sample[..., :s_ind + 126], betas, sample[..., s_ind + 136:]], dim=-1)
+            sample = torch.cat(
+                [sample[..., : s_ind + 126], betas, sample[..., s_ind + 136 :]], dim=-1
+            )
 
         static_conf_logits = self.static_conf_head(x)
-        sample[..., self.s_pred_ind + 3 :self.s_pred_ind + 3 + 6] = static_conf_logits
+        sample[..., self.s_pred_ind + 3 : self.s_pred_ind + 3 + 6] = static_conf_logits
 
         output = {"pred_x_start": sample}
         # predict camera
-        if 'pred_cam' in self.args.out_attr:
+        if "pred_cam" in self.args.out_attr:
             pred_cam = self.pred_cam_head(x)
             pred_cam = pred_cam * self.pred_cam_std + self.pred_cam_mean
             if clip_cam:
-                torch.clamp_min_(pred_cam[..., 0], 0.25)  # min_clamp s to 0.25 (prevent negative prediction)
+                torch.clamp_min_(
+                    pred_cam[..., 0], 0.25
+                )  # min_clamp s to 0.25 (prevent negative prediction)
             output["pred_cam"] = pred_cam
         return output
 

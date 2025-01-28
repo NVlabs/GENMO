@@ -1,11 +1,13 @@
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from pathlib import Path
-from hmr4d.utils.pylogger import Log
+from einops import rearrange, repeat
 from pytorch_lightning.utilities.memory import recursive_detach
-from einops import repeat, rearrange
 from scipy.ndimage._filters import _gaussian_kernel1d
+
+from hmr4d.utils.pylogger import Log
 
 
 def load_pretrained_model(model, ckpt_path):
@@ -99,7 +101,9 @@ def length_to_mask(lengths, max_len):
     """
     Returns: (B, max_len)
     """
-    mask = torch.arange(max_len, device=lengths.device).expand(len(lengths), max_len) < lengths.unsqueeze(1)
+    mask = torch.arange(max_len, device=lengths.device).expand(
+        len(lengths), max_len
+    ) < lengths.unsqueeze(1)
     return mask
 
 
@@ -137,7 +141,9 @@ class Transpose(nn.Module):
 class GaussianSmooth(nn.Module):
     def __init__(self, sigma=3, dim=-1):
         super(GaussianSmooth, self).__init__()
-        kernel_smooth = _gaussian_kernel1d(sigma=sigma, order=0, radius=int(4 * sigma + 0.5))
+        kernel_smooth = _gaussian_kernel1d(
+            sigma=sigma, order=0, radius=int(4 * sigma + 0.5)
+        )
         kernel_smooth = torch.from_numpy(kernel_smooth).float()[None, None]  # (1, 1, K)
         self.register_buffer("kernel_smooth", kernel_smooth, persistent=False)
         self.dim = dim
@@ -157,8 +163,12 @@ class GaussianSmooth(nn.Module):
 
 
 def gaussian_smooth(x, sigma=3, dim=-1):
-    kernel_smooth = _gaussian_kernel1d(sigma=sigma, order=0, radius=int(4 * sigma + 0.5))
-    kernel_smooth = torch.from_numpy(kernel_smooth).float()[None, None].to(x)  # (1, 1, K)
+    kernel_smooth = _gaussian_kernel1d(
+        sigma=sigma, order=0, radius=int(4 * sigma + 0.5)
+    )
+    kernel_smooth = (
+        torch.from_numpy(kernel_smooth).float()[None, None].to(x)
+    )  # (1, 1, K)
     rad = kernel_smooth.size(-1) // 2
 
     x = x.transpose(dim, -1)

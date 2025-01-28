@@ -1,12 +1,11 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import copy
+import math
 from typing import List, Optional
 
 import numpy as np
-
-import math
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 
 def identity_mat(x=None, device="cpu", is_numpy=False):
@@ -413,9 +412,13 @@ def get_relative_position_to(pos, mat):
         raise ValueError
     mat_inv = normalized_matrix(mat_inv)
     if isinstance(mat, torch.Tensor):
-        rot_pos = torch.matmul(mat_inv[..., :-1, :-1], pos.transpose(-1, -2)).transpose(-1, -2)
+        rot_pos = torch.matmul(mat_inv[..., :-1, :-1], pos.transpose(-1, -2)).transpose(
+            -1, -2
+        )
     elif isinstance(mat, np.ndarray):
-        rot_pos = np.matmul(mat_inv[..., :-1, :-1], pos.swapaxes(-1, -2)).swapaxes(-1, -2)
+        rot_pos = np.matmul(mat_inv[..., :-1, :-1], pos.swapaxes(-1, -2)).swapaxes(
+            -1, -2
+        )
     world_pos = rot_pos + mat_inv[..., None, :-1, 3]
     return world_pos
 
@@ -481,7 +484,9 @@ def get_position_from(pos, mat):
         _type_: _description_
     """
     if isinstance(mat, torch.Tensor):
-        rot_pos = torch.matmul(mat[..., :-1, :-1], pos.transpose(-1, -2)).transpose(-1, -2)
+        rot_pos = torch.matmul(mat[..., :-1, :-1], pos.transpose(-1, -2)).transpose(
+            -1, -2
+        )
     elif isinstance(mat, np.ndarray):
         rot_pos = np.matmul(mat[..., :-1, :-1], pos.swapaxes(-1, -2)).swapaxes(-1, -2)
     else:
@@ -626,7 +631,9 @@ def normalized_matrix(mat):
         rot_mat_norm = rot_mat / (rot_mat.norm(2, dim=-2, keepdim=True) + 1e-9)
         norm_mat = torch.zeros_like(mat)
     elif isinstance(mat, np.ndarray):
-        rot_mat_norm = rot_mat / (np.linalg.norm(rot_mat, ord=2, axis=-2, keepdims=True) + 1e-9)
+        rot_mat_norm = rot_mat / (
+            np.linalg.norm(rot_mat, ord=2, axis=-2, keepdims=True) + 1e-9
+        )
         norm_mat = np.zeros_like(mat)
     else:
         raise ValueError
@@ -796,7 +803,9 @@ def get_forward_from_pos(pos):
 
     pos_y_vec = torch.tensor([0, 1, 0], dtype=torch.float32).to(pos.device)
     face_joint_indx = [2, 1, 17, 16]
-    r_hip, l_hip, r_sdr, l_sdr = face_joint_indx  # use hip and shoulder to get the cross vector
+    r_hip, l_hip, r_sdr, l_sdr = (
+        face_joint_indx  # use hip and shoulder to get the cross vector
+    )
     cross_hip = pos[..., 0, r_hip, :] - pos[..., 0, l_hip, :]
     cross_sdr = pos[..., 0, r_sdr, :] - pos[..., 0, l_sdr, :]
     cross_vec = cross_hip + cross_sdr  # (3, )
@@ -954,8 +963,8 @@ def quat_norm_check(x):
     """
     verify that a quaternion has norm 1
     """
-    assert bool((abs(x.norm(p=2, dim=-1) - 1) < 1e-3).all()), "the quaternion is has non-1 norm: {}".format(
-        abs(x.norm(p=2, dim=-1) - 1)
+    assert bool((abs(x.norm(p=2, dim=-1) - 1) < 1e-3).all()), (
+        "the quaternion is has non-1 norm: {}".format(abs(x.norm(p=2, dim=-1) - 1))
     )
     assert bool((x[..., 3] >= 0).all()), "the quaternion has negative real part"
 
@@ -1121,7 +1130,9 @@ def quat_yaw_rotation(x, z_up: bool = True):
     return quat_normalize(q)
 
 
-def transform_from_rotation_translation(r: Optional[torch.Tensor] = None, t: Optional[torch.Tensor] = None):
+def transform_from_rotation_translation(
+    r: Optional[torch.Tensor] = None, t: Optional[torch.Tensor] = None
+):
     """
     Construct a transform from a quaternion and 3D translation. Only one of them can be None.
     """
@@ -1158,7 +1169,9 @@ def transform_inverse(x):
     Inverse transformation
     """
     inv_so3 = quat_inverse(transform_rotation(x))
-    return transform_from_rotation_translation(r=inv_so3, t=quat_rotate(inv_so3, -transform_translation(x)))
+    return transform_from_rotation_translation(
+        r=inv_so3, t=quat_rotate(inv_so3, -transform_translation(x))
+    )
 
 
 def transform_identity_like(x):
@@ -1174,7 +1187,8 @@ def transform_mul(x, y):
     """
     z = transform_from_rotation_translation(
         r=quat_mul_norm(transform_rotation(x), transform_rotation(y)),
-        t=quat_rotate(transform_rotation(x), transform_translation(y)) + transform_translation(x),
+        t=quat_rotate(transform_rotation(x), transform_translation(y))
+        + transform_translation(x),
     )
     return z
 
@@ -1278,7 +1292,9 @@ def euclidean_to_transform(transformation_matrix):
     Construct a transform from a Euclidean transformation matrix
     """
     return transform_from_rotation_translation(
-        r=quat_from_rotation_matrix(m=euclidean_to_rotation_matrix(transformation_matrix)),
+        r=quat_from_rotation_matrix(
+            m=euclidean_to_rotation_matrix(transformation_matrix)
+        ),
         t=euclidean_translation(transformation_matrix),
     )
 
@@ -1329,7 +1345,11 @@ def quat_rotate(q, v):
     q_vec = q[:, :3]
     a = v * (2.0 * q_w**2 - 1.0).unsqueeze(-1)
     b = torch.cross(q_vec, v, dim=-1) * q_w.unsqueeze(-1) * 2.0
-    c = q_vec * torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1) * 2.0
+    c = (
+        q_vec
+        * torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1)
+        * 2.0
+    )
     return a + b + c
 
 
@@ -1339,7 +1359,11 @@ def quat_rotate_inverse(q, v):
     q_vec = q[:, :3]
     a = v * (2.0 * q_w**2 - 1.0).unsqueeze(-1)
     b = torch.cross(q_vec, v, dim=-1) * q_w.unsqueeze(-1) * 2.0
-    c = q_vec * torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1) * 2.0
+    c = (
+        q_vec
+        * torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1)
+        * 2.0
+    )
     return a - b + c
 
 
@@ -1405,16 +1429,28 @@ def get_euler_xyz(q):
     qx, qy, qz, qw = 0, 1, 2, 3
     # roll (x-axis rotation)
     sinr_cosp = 2.0 * (q[:, qw] * q[:, qx] + q[:, qy] * q[:, qz])
-    cosr_cosp = q[:, qw] * q[:, qw] - q[:, qx] * q[:, qx] - q[:, qy] * q[:, qy] + q[:, qz] * q[:, qz]
+    cosr_cosp = (
+        q[:, qw] * q[:, qw]
+        - q[:, qx] * q[:, qx]
+        - q[:, qy] * q[:, qy]
+        + q[:, qz] * q[:, qz]
+    )
     roll = torch.atan2(sinr_cosp, cosr_cosp)
 
     # pitch (y-axis rotation)
     sinp = 2.0 * (q[:, qw] * q[:, qy] - q[:, qz] * q[:, qx])
-    pitch = torch.where(torch.abs(sinp) >= 1, copysign(np.pi / 2.0, sinp), torch.asin(sinp))
+    pitch = torch.where(
+        torch.abs(sinp) >= 1, copysign(np.pi / 2.0, sinp), torch.asin(sinp)
+    )
 
     # yaw (z-axis rotation)
     siny_cosp = 2.0 * (q[:, qw] * q[:, qz] + q[:, qx] * q[:, qy])
-    cosy_cosp = q[:, qw] * q[:, qw] + q[:, qx] * q[:, qx] - q[:, qy] * q[:, qy] - q[:, qz] * q[:, qz]
+    cosy_cosp = (
+        q[:, qw] * q[:, qw]
+        + q[:, qx] * q[:, qx]
+        - q[:, qy] * q[:, qy]
+        - q[:, qz] * q[:, qz]
+    )
     yaw = torch.atan2(siny_cosp, cosy_cosp)
 
     return roll % (2 * np.pi), pitch % (2 * np.pi), yaw % (2 * np.pi)
@@ -1657,7 +1693,9 @@ def forward_kinematics(mat, parent):
         if parent[i] != -1:
             if isinstance(mat, torch.Tensor):
                 # this way make gradient flow
-                new_mat = get_mat_BfromA(rotations[..., parent[i], :, :], mat[..., i, :, :])
+                new_mat = get_mat_BfromA(
+                    rotations[..., parent[i], :, :], mat[..., i, :, :]
+                )
                 rotations = torch.cat(
                     (
                         rotations[..., :i, :, :],
@@ -1667,11 +1705,15 @@ def forward_kinematics(mat, parent):
                     dim=-3,
                 )
             else:
-                rotations[..., i, :, :] = get_mat_BfromA(rotations[..., parent[i], :, :], mat[..., i, :, :])
+                rotations[..., i, :, :] = get_mat_BfromA(
+                    rotations[..., parent[i], :, :], mat[..., i, :, :]
+                )
         else:
             if isinstance(mat, torch.Tensor):
                 # this way make gradient flow
-                rotations = torch.cat((mat[..., : i + 1, :, :], rotations[..., i + 1 :, :, :]), dim=-3)
+                rotations = torch.cat(
+                    (mat[..., : i + 1, :, :], rotations[..., i + 1 :, :, :]), dim=-3
+                )
             else:
                 rotations[..., i, :, :] = mat[..., i, :, :]
     return rotations

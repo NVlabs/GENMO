@@ -1,5 +1,5 @@
-import torch
 import numpy as np
+import torch
 
 # def get_frame_id_list_from_mask(mask):
 #     """
@@ -37,7 +37,11 @@ def get_frame_id_list_from_mask(mask):
     """
     # Find the indices where the mask changes from False to True and vice versa
     padded_mask = torch.cat(
-        [torch.tensor([False], device=mask.device), mask, torch.tensor([False], device=mask.device)]
+        [
+            torch.tensor([False], device=mask.device),
+            mask,
+            torch.tensor([False], device=mask.device),
+        ]
     )
     diffs = torch.diff(padded_mask.int())
     starts = (diffs == 1).nonzero(as_tuple=False).squeeze()
@@ -87,7 +91,8 @@ def get_batch_frame_id_lists_from_mask_BLC(masks):
             batch_end = ends[0][(ends[0] == b) & (ends[2] == c)]
             # 确保start和end都是1维张量
             batch_frame_id_lists[b][c] = [
-                torch.arange(start.item(), end.item()) for start, end in zip(batch_start, batch_end)
+                torch.arange(start.item(), end.item())
+                for start, end in zip(batch_start, batch_end)
             ]
 
     return batch_frame_id_lists
@@ -141,7 +146,9 @@ def linear_interpolate_frame_ids(data, frame_id_list):
             prev = data[invalid_frame_ids[0] - 1]
             next = data[invalid_frame_ids[-1] + 1]
             data[invalid_frame_ids] = (
-                torch.linspace(0, 1, len(invalid_frame_ids) + 2)[1:-1][:, None] * (next - prev)[None] + prev[None]
+                torch.linspace(0, 1, len(invalid_frame_ids) + 2)[1:-1][:, None]
+                * (next - prev)[None]
+                + prev[None]
             )
     return data
 
@@ -155,8 +162,13 @@ def linear_interpolate(data, N_middle_frames):
     """
     prev = data[0]
     next = data[1]
-    middle = torch.linspace(0, 1, N_middle_frames + 2)[1:-1][:, None] * (next - prev)[None] + prev[None]  # (N, C)
-    data_interpolated = torch.cat([data[0][None], middle, data[1][None]], dim=0)  # (1+N+1, C)
+    middle = (
+        torch.linspace(0, 1, N_middle_frames + 2)[1:-1][:, None] * (next - prev)[None]
+        + prev[None]
+    )  # (N, C)
+    data_interpolated = torch.cat(
+        [data[0][None], middle, data[1][None]], dim=0
+    )  # (1+N+1, C)
     return data_interpolated
 
 

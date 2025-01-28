@@ -1,13 +1,16 @@
 import os
-from tqdm import tqdm
+
 import torch
+from tqdm import tqdm
 
 from motiondiff.utils.vis_scenepic import ScenepicVisualizer
 
 motion_files = torch.load("inputs/MotionXpp/hmr4d_support/motionxpp_smplxposev3.pth")
 
-device = torch.device('cuda')
-sp_visualizer = ScenepicVisualizer("/home/jiefengl/git/physdiff_megm/data/smpl_data", device=device)
+device = torch.device("cuda")
+sp_visualizer = ScenepicVisualizer(
+    "/home/jiefengl/git/physdiff_megm/data/smpl_data", device=device
+)
 smpl_dict = sp_visualizer.smpl_dict
 
 aligned_motion_files = {}
@@ -15,14 +18,14 @@ aligned_motion_files = {}
 tot_len = 0
 for idx, vid in tqdm(enumerate(motion_files)):
     motion_data = motion_files[vid]
-    smpl_layer = smpl_dict['neutral']
-    
+    smpl_layer = smpl_dict["neutral"]
+
     body_pose = motion_data["pose"].reshape(-1, 21, 3)
-    global_orient = motion_data['global_orient'].reshape(-1, 1, 3)
-    beta = motion_data['beta']
-    trans = motion_data['trans']
-    R_w2c = motion_data['cam_R']
-    t_w2c = motion_data['cam_T']
+    global_orient = motion_data["global_orient"].reshape(-1, 1, 3)
+    beta = motion_data["beta"]
+    trans = motion_data["trans"]
+    R_w2c = motion_data["cam_R"]
+    t_w2c = motion_data["cam_T"]
     T_w2c = torch.eye(4)[None].repeat(len(R_w2c), 1, 1)
     T_w2c[:, :3, :3] = R_w2c
     T_w2c[:, :3, 3] = t_w2c
@@ -30,7 +33,9 @@ for idx, vid in tqdm(enumerate(motion_files)):
     T_c2w = torch.linalg.inv(T_w2c)
     t_c2w = T_c2w[:, :3, 3]
     if body_pose.shape[0] < 3:
-        import ipdb; ipdb.set_trace()
+        import ipdb
+
+        ipdb.set_trace()
     if body_pose.shape[0] < 30:
         continue
     tot_len += body_pose.shape[0]
@@ -57,9 +62,9 @@ for idx, vid in tqdm(enumerate(motion_files)):
     R_w2c = T_w2c[:, :3, :3]
     t_w2c = T_w2c[:, :3, 3]
 
-    motion_data['cam_R'] = R_w2c
-    motion_data['cam_T'] = t_w2c
-    motion_data['trans'] = trans
+    motion_data["cam_R"] = R_w2c
+    motion_data["cam_T"] = t_w2c
+    motion_data["trans"] = trans
     aligned_motion_files[vid] = motion_data
 
     # smpl_output = smpl_layer(

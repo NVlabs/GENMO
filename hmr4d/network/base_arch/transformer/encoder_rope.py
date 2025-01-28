@@ -1,10 +1,12 @@
+import math
+from typing import Optional, Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
-from timm.models.vision_transformer import Mlp
-from typing import Optional, Tuple
 from einops import einsum, rearrange, repeat
+from timm.models.vision_transformer import Mlp
+
 from hmr4d.network.base_arch.embeddings.rotary_embedding import ROPE
 
 
@@ -44,12 +46,18 @@ class RoPEAttention(nn.Module):
         xq = self.rope.rotate_queries_or_keys(xq)  # B, N, L, C
         xk = self.rope.rotate_queries_or_keys(xk)  # B, N, L_ctx, C
 
-        attn_score = einsum(xq, xk, "b n i c, b n j c -> b n i j") / math.sqrt(self.head_dim)
+        attn_score = einsum(xq, xk, "b n i c, b n j c -> b n i j") / math.sqrt(
+            self.head_dim
+        )
         if attn_mask is not None:
-            attn_mask = attn_mask.reshape(1, 1, L, L_ctx).expand(B, self.num_heads, -1, -1)
+            attn_mask = attn_mask.reshape(1, 1, L, L_ctx).expand(
+                B, self.num_heads, -1, -1
+            )
             attn_score = attn_score.masked_fill(attn_mask, float("-inf"))
         if key_padding_mask is not None:
-            key_padding_mask = key_padding_mask.reshape(B, 1, 1, L_ctx).expand(-1, self.num_heads, L, -1)
+            key_padding_mask = key_padding_mask.reshape(B, 1, 1, L_ctx).expand(
+                -1, self.num_heads, L, -1
+            )
             attn_score = attn_score.masked_fill(key_padding_mask, float("-inf"))
 
         attn_score = torch.softmax(attn_score, dim=-1)
@@ -61,14 +69,21 @@ class RoPEAttention(nn.Module):
 
 
 class EncoderRoPEBlock(nn.Module):
-    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, dropout=0.1, **block_kwargs):
+    def __init__(
+        self, hidden_size, num_heads, mlp_ratio=4.0, dropout=0.1, **block_kwargs
+    ):
         super().__init__()
         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6)
         self.attn = RoPEAttention(hidden_size, num_heads, dropout)
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6)
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
         approx_gelu = lambda: nn.GELU(approximate="tanh")
-        self.mlp = Mlp(in_features=hidden_size, hidden_features=mlp_hidden_dim, act_layer=approx_gelu, drop=dropout)
+        self.mlp = Mlp(
+            in_features=hidden_size,
+            hidden_features=mlp_hidden_dim,
+            act_layer=approx_gelu,
+            drop=dropout,
+        )
 
         self.gate_msa = nn.Parameter(torch.zeros(1, 1, hidden_size))
         self.gate_mlp = nn.Parameter(torch.zeros(1, 1, hidden_size))
@@ -91,7 +106,16 @@ class EncoderRoPEBlock(nn.Module):
 
 
 class DecoderRoPEBlock(nn.Module):
-    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, dropout=0.1, use_self_attn=True, cross_attn_type='rope', **block_kwargs):
+    def __init__(
+        self,
+        hidden_size,
+        num_heads,
+        mlp_ratio=4.0,
+        dropout=0.1,
+        use_self_attn=True,
+        cross_attn_type="rope",
+        **block_kwargs,
+    ):
         super().__init__()
         self.use_self_attn = use_self_attn
         if self.use_self_attn:
@@ -101,14 +125,21 @@ class DecoderRoPEBlock(nn.Module):
             nn.init.constant_(self.gate_msa, 0)
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6)
         self.cross_attn_type = cross_attn_type
-        if cross_attn_type == 'rope':
+        if cross_attn_type == "rope":
             self.cross_attn = RoPEAttention(hidden_size, num_heads, dropout)
-        elif cross_attn_type == 'mha':
-            self.cross_attn = nn.MultiheadAttention(hidden_size, num_heads, dropout=dropout, batch_first=True)
+        elif cross_attn_type == "mha":
+            self.cross_attn = nn.MultiheadAttention(
+                hidden_size, num_heads, dropout=dropout, batch_first=True
+            )
         self.norm3 = nn.LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6)
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
         approx_gelu = lambda: nn.GELU(approximate="tanh")
-        self.mlp = Mlp(in_features=hidden_size, hidden_features=mlp_hidden_dim, act_layer=approx_gelu, drop=dropout)
+        self.mlp = Mlp(
+            in_features=hidden_size,
+            hidden_features=mlp_hidden_dim,
+            act_layer=approx_gelu,
+            drop=dropout,
+        )
 
         self.gate_cross_attn = nn.Parameter(torch.zeros(1, 1, hidden_size))
         self.gate_mlp = nn.Parameter(torch.zeros(1, 1, hidden_size))
@@ -117,13 +148,26 @@ class DecoderRoPEBlock(nn.Module):
         nn.init.constant_(self.gate_cross_attn, 0)
         nn.init.constant_(self.gate_mlp, 0)
 
-    def forward(self, x, context, attn_mask=None, tgt_key_padding_mask=None, memory_key_padding_mask=None, multi_text_data=None):
+    def forward(
+        self,
+        x,
+        context,
+        attn_mask=None,
+        tgt_key_padding_mask=None,
+        memory_key_padding_mask=None,
+        multi_text_data=None,
+    ):
         if self.use_self_attn:
             x = x + self.gate_msa * self._sa_block(
-                self.norm1(x), attn_mask=attn_mask, key_padding_mask=tgt_key_padding_mask
+                self.norm1(x),
+                attn_mask=attn_mask,
+                key_padding_mask=tgt_key_padding_mask,
             )
         x = x + self.gate_cross_attn * self._ca_block(
-            self.norm2(x), context=context, key_padding_mask=memory_key_padding_mask, multi_text_data=multi_text_data
+            self.norm2(x),
+            context=context,
+            key_padding_mask=memory_key_padding_mask,
+            multi_text_data=multi_text_data,
         )
         x = x + self.gate_mlp * self.mlp(self.norm3(x))
         return x
@@ -135,23 +179,35 @@ class DecoderRoPEBlock(nn.Module):
 
     def _ca_block(self, x, context, key_padding_mask=None, multi_text_data=None):
         # x: (B, L, C)
-        if self.cross_attn_type == 'rope':
+        if self.cross_attn_type == "rope":
             x = self.cross_attn(x, context=context, key_padding_mask=key_padding_mask)
-        elif self.cross_attn_type == 'mha':
+        elif self.cross_attn_type == "mha":
             if multi_text_data is not None:
                 out = []
-                window_start = (multi_text_data['window_start'] * x.size(1)).round().long()
-                window_end = (multi_text_data['window_end'] * x.size(1)).round().long()
-                for i in range(len(multi_text_data['text_embed_feats'])):
-                    text_embed_i = multi_text_data['text_embed_feats'][i].unsqueeze(0)
-                    attn_mask = torch.ones(x.size(1), text_embed_i.size(1)).to(x.device).bool()
-                    attn_mask[window_start[i]:window_end[i], :] = 0
-                    out_i = self.cross_attn(x, text_embed_i, text_embed_i, attn_mask=attn_mask, key_padding_mask=key_padding_mask)[0]
+                window_start = (
+                    (multi_text_data["window_start"] * x.size(1)).round().long()
+                )
+                window_end = (multi_text_data["window_end"] * x.size(1)).round().long()
+                for i in range(len(multi_text_data["text_embed_feats"])):
+                    text_embed_i = multi_text_data["text_embed_feats"][i].unsqueeze(0)
+                    attn_mask = (
+                        torch.ones(x.size(1), text_embed_i.size(1)).to(x.device).bool()
+                    )
+                    attn_mask[window_start[i] : window_end[i], :] = 0
+                    out_i = self.cross_attn(
+                        x,
+                        text_embed_i,
+                        text_embed_i,
+                        attn_mask=attn_mask,
+                        key_padding_mask=key_padding_mask,
+                    )[0]
                     out_i[out_i.isnan()] = 0
                     out.append(out_i)
                 x = torch.sum(torch.stack(out), dim=0)
             else:
-                x = self.cross_attn(x, context, context, key_padding_mask=key_padding_mask)[0]
+                x = self.cross_attn(
+                    x, context, context, key_padding_mask=key_padding_mask
+                )[0]
         else:
             raise ValueError(f"Invalid cross_attn_type: {self.cross_attn_type}")
         return x

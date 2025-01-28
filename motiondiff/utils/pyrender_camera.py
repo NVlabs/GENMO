@@ -3,13 +3,15 @@ https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#reference-cam
 
 Author: Matthew Matl
 """
+
 import abc
-import numpy as np
-import six
 import sys
 
-DEFAULT_Z_NEAR = 0.05     # Near clipping plane, in meters
-DEFAULT_Z_FAR = 100.0     # Far clipping plane, in meters
+import numpy as np
+import six
+
+DEFAULT_Z_NEAR = 0.05  # Near clipping plane, in meters
+DEFAULT_Z_FAR = 100.0  # Far clipping plane, in meters
 
 
 @six.add_metaclass(abc.ABCMeta)
@@ -33,18 +35,14 @@ class Camera(object):
         The user-defined name of this object.
     """
 
-    def __init__(self,
-                 znear=DEFAULT_Z_NEAR,
-                 zfar=DEFAULT_Z_FAR,
-                 name=None):
+    def __init__(self, znear=DEFAULT_Z_NEAR, zfar=DEFAULT_Z_FAR, name=None):
         self.name = name
         self.znear = znear
         self.zfar = zfar
 
     @property
     def name(self):
-        """str : The user-defined name of this object.
-        """
+        """str : The user-defined name of this object."""
         return self._name
 
     @name.setter
@@ -55,28 +53,26 @@ class Camera(object):
 
     @property
     def znear(self):
-        """float : The distance to the near clipping plane.
-        """
+        """float : The distance to the near clipping plane."""
         return self._znear
 
     @znear.setter
     def znear(self, value):
         value = float(value)
         if value < 0:
-            raise ValueError('z-near must be >= 0.0')
+            raise ValueError("z-near must be >= 0.0")
         self._znear = value
 
     @property
     def zfar(self):
-        """float : The distance to the far clipping plane.
-        """
+        """float : The distance to the far clipping plane."""
         return self._zfar
 
     @zfar.setter
     def zfar(self, value):
         value = float(value)
         if value <= 0 or value <= self.znear:
-            raise ValueError('zfar must be >0 and >znear')
+            raise ValueError("zfar must be >0 and >znear")
         self._zfar = value
 
     @abc.abstractmethod
@@ -94,7 +90,6 @@ class Camera(object):
 
 
 class PerspectiveCamera(Camera):
-
     """A perspective camera for perspective projection.
 
     Parameters
@@ -115,12 +110,9 @@ class PerspectiveCamera(Camera):
         The user-defined name of this object.
     """
 
-    def __init__(self,
-                 yfov,
-                 znear=DEFAULT_Z_NEAR,
-                 zfar=None,
-                 aspectRatio=None,
-                 name=None):
+    def __init__(
+        self, yfov, znear=DEFAULT_Z_NEAR, zfar=None, aspectRatio=None, name=None
+    ):
         super(PerspectiveCamera, self).__init__(
             znear=znear,
             zfar=zfar,
@@ -132,21 +124,19 @@ class PerspectiveCamera(Camera):
 
     @property
     def yfov(self):
-        """float : The vertical field of view in radians.
-        """
+        """float : The vertical field of view in radians."""
         return self._yfov
 
     @yfov.setter
     def yfov(self, value):
         value = float(value)
         if value <= 0.0:
-            raise ValueError('Field of view must be positive')
+            raise ValueError("Field of view must be positive")
         self._yfov = value
 
     @property
     def zfar(self):
-        """float : The distance to the far clipping plane.
-        """
+        """float : The distance to the far clipping plane."""
         return self._zfar
 
     @zfar.setter
@@ -154,13 +144,12 @@ class PerspectiveCamera(Camera):
         if value is not None:
             value = float(value)
             if value <= 0 or value <= self.znear:
-                raise ValueError('zfar must be >0 and >znear')
+                raise ValueError("zfar must be >0 and >znear")
         self._zfar = value
 
     @property
     def aspectRatio(self):
-        """float : The ratio of the width to the height of the field of view.
-        """
+        """float : The ratio of the width to the height of the field of view."""
         return self._aspectRatio
 
     @aspectRatio.setter
@@ -168,7 +157,7 @@ class PerspectiveCamera(Camera):
         if value is not None:
             value = float(value)
             if value <= 0.0:
-                raise ValueError('Aspect ratio must be positive')
+                raise ValueError("Aspect ratio must be positive")
         self._aspectRatio = value
 
     def get_projection_matrix(self, width=None, height=None):
@@ -184,7 +173,7 @@ class PerspectiveCamera(Camera):
         aspect_ratio = self.aspectRatio
         if aspect_ratio is None:
             if width is None or height is None:
-                raise ValueError('Aspect ratio of camera must be defined')
+                raise ValueError("Aspect ratio of camera must be defined")
             aspect_ratio = float(width) / float(height)
 
         a = aspect_ratio
@@ -192,7 +181,7 @@ class PerspectiveCamera(Camera):
         n = self.znear
         f = self.zfar
 
-        P = np.zeros((4,4))
+        P = np.zeros((4, 4))
         P[0][0] = 1.0 / (a * t)
         P[1][1] = 1.0 / t
         P[3][2] = -1.0
@@ -227,12 +216,7 @@ class OrthographicCamera(Camera):
         The user-defined name of this object.
     """
 
-    def __init__(self,
-                 xmag,
-                 ymag,
-                 znear=DEFAULT_Z_NEAR,
-                 zfar=DEFAULT_Z_FAR,
-                 name=None):
+    def __init__(self, xmag, ymag, znear=DEFAULT_Z_NEAR, zfar=DEFAULT_Z_FAR, name=None):
         super(OrthographicCamera, self).__init__(
             znear=znear,
             zfar=zfar,
@@ -244,41 +228,38 @@ class OrthographicCamera(Camera):
 
     @property
     def xmag(self):
-        """float : The horizontal magnification of the view.
-        """
+        """float : The horizontal magnification of the view."""
         return self._xmag
 
     @xmag.setter
     def xmag(self, value):
         value = float(value)
         if value <= 0.0:
-            raise ValueError('X magnification must be positive')
+            raise ValueError("X magnification must be positive")
         self._xmag = value
 
     @property
     def ymag(self):
-        """float : The vertical magnification of the view.
-        """
+        """float : The vertical magnification of the view."""
         return self._ymag
 
     @ymag.setter
     def ymag(self, value):
         value = float(value)
         if value <= 0.0:
-            raise ValueError('Y magnification must be positive')
+            raise ValueError("Y magnification must be positive")
         self._ymag = value
 
     @property
     def znear(self):
-        """float : The distance to the near clipping plane.
-        """
+        """float : The distance to the near clipping plane."""
         return self._znear
 
     @znear.setter
     def znear(self, value):
         value = float(value)
         if value <= 0:
-            raise ValueError('z-near must be > 0.0')
+            raise ValueError("z-near must be > 0.0")
         self._znear = value
 
     def get_projection_matrix(self, width=None, height=None):
@@ -302,7 +283,7 @@ class OrthographicCamera(Camera):
 
         n = self.znear
         f = self.zfar
-        P = np.zeros((4,4))
+        P = np.zeros((4, 4))
         P[0][0] = 1.0 / xmag
         P[1][1] = 1.0 / ymag
         P[2][2] = 2.0 / (n - f)
@@ -335,14 +316,9 @@ class IntrinsicsCamera(Camera):
         The user-defined name of this object.
     """
 
-    def __init__(self,
-                 fx,
-                 fy,
-                 cx,
-                 cy,
-                 znear=DEFAULT_Z_NEAR,
-                 zfar=DEFAULT_Z_FAR,
-                 name=None):
+    def __init__(
+        self, fx, fy, cx, cy, znear=DEFAULT_Z_NEAR, zfar=DEFAULT_Z_FAR, name=None
+    ):
         super(IntrinsicsCamera, self).__init__(
             znear=znear,
             zfar=zfar,
@@ -356,8 +332,7 @@ class IntrinsicsCamera(Camera):
 
     @property
     def fx(self):
-        """float : X-axis focal length in meters.
-        """
+        """float : X-axis focal length in meters."""
         return self._fx
 
     @fx.setter
@@ -366,8 +341,7 @@ class IntrinsicsCamera(Camera):
 
     @property
     def fy(self):
-        """float : Y-axis focal length in meters.
-        """
+        """float : Y-axis focal length in meters."""
         return self._fy
 
     @fy.setter
@@ -376,8 +350,7 @@ class IntrinsicsCamera(Camera):
 
     @property
     def cx(self):
-        """float : X-axis optical center in pixels.
-        """
+        """float : X-axis optical center in pixels."""
         return self._cx
 
     @cx.setter
@@ -386,8 +359,7 @@ class IntrinsicsCamera(Camera):
 
     @property
     def cy(self):
-        """float : Y-axis optical center in pixels.
-        """
+        """float : Y-axis optical center in pixels."""
         return self._cy
 
     @cy.setter
@@ -409,13 +381,13 @@ class IntrinsicsCamera(Camera):
 
         cx, cy = self.cx, self.cy
         fx, fy = self.fx, self.fy
-        if sys.platform == 'darwin':
+        if sys.platform == "darwin":
             cx = self.cx * 2.0
             cy = self.cy * 2.0
             fx = self.fx * 2.0
             fy = self.fy * 2.0
 
-        P = np.zeros((4,4))
+        P = np.zeros((4, 4))
         P[0][0] = 2.0 * fx / width
         P[1][1] = 2.0 * fy / height
         P[0][2] = 1.0 - 2.0 * cx / width
@@ -432,4 +404,3 @@ class IntrinsicsCamera(Camera):
             P[2][3] = (2 * f * n) / (n - f)
 
         return P
-

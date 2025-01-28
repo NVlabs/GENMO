@@ -3,6 +3,8 @@ import os
 
 os.environ["PYOPENGL_PLATFORM"] = "egl"
 
+import json
+
 import cv2
 import numpy as np
 import pyrender
@@ -23,7 +25,6 @@ from pytorch3d.renderer import (
 from pytorch3d.structures import Meshes
 from pytorch3d.utils import cameras_from_opencv_projection
 from tqdm import tqdm
-import json
 
 from hmr4d.utils.smplx_utils import make_smplx
 
@@ -119,13 +120,14 @@ def render_mesh(img, mesh, face, cam_param, img_white_bg=None, deg=0):
 
 
 def render_mesh_to_image(smpl_vertices, smpl_faces, cameras, image, camera_params):
-
-    raster_settings = RasterizationSettings(image_size=[image.shape[0], image.shape[1]],
-                                            blur_radius=0,
-                                            faces_per_pixel=1,
-                                            bin_size=0,
-                                            max_faces_per_bin=1000,
-                                            perspective_correct=True)
+    raster_settings = RasterizationSettings(
+        image_size=[image.shape[0], image.shape[1]],
+        blur_radius=0,
+        faces_per_pixel=1,
+        bin_size=0,
+        max_faces_per_bin=1000,
+        perspective_correct=True,
+    )
     smpl_vertices = smpl_vertices.detach().cpu().numpy()
 
     verts = torch.tensor([smpl_vertices], dtype=torch.float32, device=device)
@@ -134,19 +136,25 @@ def render_mesh_to_image(smpl_vertices, smpl_faces, cameras, image, camera_param
     verts_rgb = torch.ones_like(verts)
     verts_rgb[:, :, 2] = verts_rgb[:, :, 2] * 0
     textures = TexturesVertex(verts_features=verts_rgb.to(device))
-    renderer = MeshRenderer(rasterizer=MeshRasterizer(cameras=cameras,
-                                                      raster_settings=raster_settings),
-                            shader=HardPhongShader(device=device, cameras=cameras))
+    renderer = MeshRenderer(
+        rasterizer=MeshRasterizer(cameras=cameras, raster_settings=raster_settings),
+        shader=HardPhongShader(device=device, cameras=cameras),
+    )
     images = renderer(
-        meshes_world=Meshes(verts=verts.to(device), faces=faces.to(device), textures=textures))
+        meshes_world=Meshes(
+            verts=verts.to(device), faces=faces.to(device), textures=textures
+        )
+    )
 
     images = images.cpu().numpy().squeeze() * 255
     images_rgb = images[:, :, :3].astype(np.uint8)
-    mask = images_rgb.max(axis=2) < 255  
+    mask = images_rgb.max(axis=2) < 255
     images_rgb_resized = cv2.resize(images_rgb, (image.shape[1], image.shape[0]))
-    mask_resized = cv2.resize(mask.astype(np.uint8), (image.shape[1], image.shape[0])) > 0
+    mask_resized = (
+        cv2.resize(mask.astype(np.uint8), (image.shape[1], image.shape[0])) > 0
+    )
     image[mask_resized] = images_rgb_resized[mask_resized]
-    # render with color vertex 
+    # render with color vertex
     # camera_matrix = np.array(camera_params['matrix'])
     # camera_matrix = torch.tensor([camera_matrix], dtype=torch.float32, device=device)
     # rvec = camera_params['R']
@@ -175,8 +183,12 @@ if __name__ == "__main__":
         # video_file = f"/mnt/disk3/motion-x++/video/{subset}/{file_name}.mp4"
         local_motion_file = f"/mnt/disk3/motion-x++/motion/mesh_recovery/local_motion/{subset}/{file_name}.json"
         global_motion_file = f"/mnt/disk3/motion-x++/motion/mesh_recovery/global_motion/{subset}/{file_name}.json"
-        keypoint_file = f"/mnt/disk3/motion-x++/motion/keypoints/{subset}/{file_name}.json"
-        semmantic_text_file = f"/mnt/disk3/motion-x++/text/semantic_label/{subset}/{file_name}.txt"
+        keypoint_file = (
+            f"/mnt/disk3/motion-x++/motion/keypoints/{subset}/{file_name}.json"
+        )
+        semmantic_text_file = (
+            f"/mnt/disk3/motion-x++/text/semantic_label/{subset}/{file_name}.txt"
+        )
         whole_desc_file = f"/mnt/disk3/motion-x++/text/wholebody_pose_description/{subset}/{file_name}.json"
         assert os.path.exists(local_motion_file), (local_motion_file, video_file)
         assert os.path.exists(video_file), (video_file, video_file)
@@ -199,7 +211,7 @@ if __name__ == "__main__":
 
         output_path = f"out/vis_motionxpp/{subset}/{file_name}.mp4"
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         out = cv2.VideoWriter(output_path, fourcc, fps, (width * 2, height))
 
         with torch.no_grad():
@@ -214,30 +226,64 @@ if __name__ == "__main__":
                 R_vec = cv2.Rodrigues(R)[0]
                 if (R_vec == 0).all():
                     continue
-                root_pose = torch.FloatTensor(np.array(ann["smplx_params"]['root_pose'])).unsqueeze(0).to(device)
-                body_pose = torch.FloatTensor(np.array(ann["smplx_params"]['body_pose'])).unsqueeze(0).to(device)
-                lhand_pose = torch.FloatTensor(np.array(ann["smplx_params"]['lhand_pose'])).unsqueeze(0).to(device)
-                rhand_pose = torch.FloatTensor(np.array(ann["smplx_params"]['rhand_pose'])).unsqueeze(0).to(device)
-                jaw_pose = torch.FloatTensor(np.array(ann["smplx_params"]['jaw_pose'])).unsqueeze(0).to(device)
-                shape = torch.FloatTensor(np.array(ann["smplx_params"]['shape'])).unsqueeze(0).to(device)
-                expr = torch.FloatTensor(np.array(ann["smplx_params"]['expr'])).unsqueeze(0).to(device)
-                cam_trans = torch.FloatTensor(np.array(ann["smplx_params"]['trans'])).unsqueeze(0).to(device)
+                root_pose = (
+                    torch.FloatTensor(np.array(ann["smplx_params"]["root_pose"]))
+                    .unsqueeze(0)
+                    .to(device)
+                )
+                body_pose = (
+                    torch.FloatTensor(np.array(ann["smplx_params"]["body_pose"]))
+                    .unsqueeze(0)
+                    .to(device)
+                )
+                lhand_pose = (
+                    torch.FloatTensor(np.array(ann["smplx_params"]["lhand_pose"]))
+                    .unsqueeze(0)
+                    .to(device)
+                )
+                rhand_pose = (
+                    torch.FloatTensor(np.array(ann["smplx_params"]["rhand_pose"]))
+                    .unsqueeze(0)
+                    .to(device)
+                )
+                jaw_pose = (
+                    torch.FloatTensor(np.array(ann["smplx_params"]["jaw_pose"]))
+                    .unsqueeze(0)
+                    .to(device)
+                )
+                shape = (
+                    torch.FloatTensor(np.array(ann["smplx_params"]["shape"]))
+                    .unsqueeze(0)
+                    .to(device)
+                )
+                expr = (
+                    torch.FloatTensor(np.array(ann["smplx_params"]["expr"]))
+                    .unsqueeze(0)
+                    .to(device)
+                )
+                cam_trans = (
+                    torch.FloatTensor(np.array(ann["smplx_params"]["trans"]))
+                    .unsqueeze(0)
+                    .to(device)
+                )
 
-                output = smplx_layer(betas=shape, 
-                                    body_pose=body_pose, 
-                                    global_orient=root_pose, 
-                                    right_hand_pose=rhand_pose,
-                                    left_hand_pose=lhand_pose, 
-                                    transl=cam_trans,
-                                    jaw_pose=torch.zeros([1, 3]).to(device),
-                                    leye_pose=torch.zeros([1, 3]).to(device),
-                                    reye_pose=torch.zeros([1, 3]).to(device), 
-                                    expression=expr)
+                output = smplx_layer(
+                    betas=shape,
+                    body_pose=body_pose,
+                    global_orient=root_pose,
+                    right_hand_pose=rhand_pose,
+                    left_hand_pose=lhand_pose,
+                    transl=cam_trans,
+                    jaw_pose=torch.zeros([1, 3]).to(device),
+                    leye_pose=torch.zeros([1, 3]).to(device),
+                    reye_pose=torch.zeros([1, 3]).to(device),
+                    expression=expr,
+                )
                 joints = output.joints
 
                 vertices = output.vertices
                 # mesh_cam = vertices + cam_trans[:, None, :] #(bs 10475 3)
-                mesh_cam = vertices #(bs 10475 3)
+                mesh_cam = vertices  # (bs 10475 3)
                 bbox = ann["bbox"]
 
                 input_body_shape = (256, 192)
@@ -256,8 +302,14 @@ if __name__ == "__main__":
                 cameras_vis = np.array(
                     [[focal[0], 0, princpt[0]], [0, focal[1], princpt[1]], [0, 0, 1]]
                 )
-                cameras_vis = torch.from_numpy(cameras_vis)[None, :, :].to(device).float()
-                camera_params_vis = {"matrix": cameras_vis, "R": cv2.Rodrigues(np.eye(3))[0], "T": np.zeros(3)}
+                cameras_vis = (
+                    torch.from_numpy(cameras_vis)[None, :, :].to(device).float()
+                )
+                camera_params_vis = {
+                    "matrix": cameras_vis,
+                    "R": cv2.Rodrigues(np.eye(3))[0],
+                    "T": np.zeros(3),
+                }
                 cameras_vis = cameras_from_opencv_projection(
                     R=torch.eye(3)[None, :, :].to(device).float(),
                     tvec=torch.zeros([1, 3]).to(device).float(),
@@ -273,8 +325,16 @@ if __name__ == "__main__":
                 processed_frame = draw_keypoints(
                     frame.copy(), ann_keypoint["body_kpts"]
                 )
-                intrins_global = ann_global["cam_params"]["intrins"] # [1500.0, 1500.0, 960.0, 540.0]
-                camera_matrix_global = np.array([[intrins_global[0], 0, intrins_global[2]],[0, intrins_global[1], intrins_global[3]],[0,0,1]])
+                intrins_global = ann_global["cam_params"][
+                    "intrins"
+                ]  # [1500.0, 1500.0, 960.0, 540.0]
+                camera_matrix_global = np.array(
+                    [
+                        [intrins_global[0], 0, intrins_global[2]],
+                        [0, intrins_global[1], intrins_global[3]],
+                        [0, 0, 1],
+                    ]
+                )
 
                 R = np.array(ann_global["cam_params"]["cam_R"])
                 T = np.array(ann_global["cam_params"]["cam_T"])
@@ -283,17 +343,37 @@ if __name__ == "__main__":
                     continue
                 T_vec = np.array(ann_global["cam_params"]["cam_T"])
 
-                camera_params_global = {"matrix": camera_matrix_global, "R": R_vec, "T": T_vec}
-                R = torch.from_numpy(R).to(device=device, dtype=torch.float32)[None, :, :]
+                camera_params_global = {
+                    "matrix": camera_matrix_global,
+                    "R": R_vec,
+                    "T": T_vec,
+                }
+                R = torch.from_numpy(R).to(device=device, dtype=torch.float32)[
+                    None, :, :
+                ]
                 T = torch.from_numpy(T).to(device=device, dtype=torch.float32)[None, :]
-                camera_matrix_global = torch.from_numpy(camera_matrix_global).to(device=device, dtype=torch.float32)[None, :, :]
-                image_size = torch.tensor([frame.shape[0], frame.shape[1]], device=device).unsqueeze(0)
-                cameras_global = cameras_from_opencv_projection(R, T, camera_matrix_global, image_size)
+                camera_matrix_global = torch.from_numpy(camera_matrix_global).to(
+                    device=device, dtype=torch.float32
+                )[None, :, :]
+                image_size = torch.tensor(
+                    [frame.shape[0], frame.shape[1]], device=device
+                ).unsqueeze(0)
+                cameras_global = cameras_from_opencv_projection(
+                    R, T, camera_matrix_global, image_size
+                )
 
                 global_orient_w = np.array(ann_global["smplx_params"]["root_orient"])
                 transl_w = np.array(ann_global["smplx_params"]["trans"])
-                global_orient_w = torch.from_numpy(global_orient_w).to(device=device, dtype=torch.float32).unsqueeze(0)
-                transl_w = torch.from_numpy(transl_w).to(device=device, dtype=torch.float32).unsqueeze(0)
+                global_orient_w = (
+                    torch.from_numpy(global_orient_w)
+                    .to(device=device, dtype=torch.float32)
+                    .unsqueeze(0)
+                )
+                transl_w = (
+                    torch.from_numpy(transl_w)
+                    .to(device=device, dtype=torch.float32)
+                    .unsqueeze(0)
+                )
 
                 output_w = smplx_layer(
                     betas=torch.zeros_like(shape),
@@ -310,8 +390,14 @@ if __name__ == "__main__":
                 joints_w = output_w.joints
 
                 vertices = output_w.vertices
-                mesh_cam_w = vertices #(bs 10475 3)
-                processed_frame_w = render_mesh_to_image(vertices[0], smplx_layer.faces, cameras_global, frame.copy(), camera_params_global)
+                mesh_cam_w = vertices  # (bs 10475 3)
+                processed_frame_w = render_mesh_to_image(
+                    vertices[0],
+                    smplx_layer.faces,
+                    cameras_global,
+                    frame.copy(),
+                    camera_params_global,
+                )
 
                 img = np.concatenate([processed_frame, processed_frame_w], axis=1)
                 # img = processed_frame.astype(np.uint8)
@@ -319,4 +405,6 @@ if __name__ == "__main__":
 
             cap.release()
             out.release()
-            import ipdb; ipdb.set_trace()
+            import ipdb
+
+            ipdb.set_trace()

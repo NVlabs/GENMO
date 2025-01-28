@@ -1,18 +1,21 @@
-import torch
-import torch
-from motiondiff.utils.vis_scenepic import ScenepicVisualizer
 import os
+
+import torch
+
 from motiondiff.models.mdm.rotation_conversions import (
-    rotation_6d_to_matrix,
-    matrix_to_axis_angle,
     axis_angle_to_matrix,
+    matrix_to_axis_angle,
+    rotation_6d_to_matrix,
 )
+from motiondiff.utils.vis_scenepic import ScenepicVisualizer
 
 # motion_files = torch.load("inputs/HumanML3D_SMPL/hmr4d_support/humanml3d_smplhpose.pth")
 motion_files = torch.load("humanml3d_smplhpose.pth")
 
-device = torch.device('cuda')
-sp_visualizer = ScenepicVisualizer("/home/jiefengl/git/physdiff_megm/data/smpl_data", device=device)
+device = torch.device("cuda")
+sp_visualizer = ScenepicVisualizer(
+    "/home/jiefengl/git/physdiff_megm/data/smpl_data", device=device
+)
 smpl_dict = sp_visualizer.smpl_dict
 
 
@@ -20,7 +23,30 @@ right_chain = [2, 5, 8, 11, 14, 17, 19, 21]
 left_chain = [1, 4, 7, 10, 13, 16, 18, 20]
 left_hand_chain = [22, 23, 24, 34, 35, 36, 25, 26, 27, 31, 32, 33, 28, 29, 30]
 right_hand_chain = [43, 44, 45, 46, 47, 48, 40, 41, 42, 37, 38, 39, 49, 50, 51]
-SMPL_JOINTS_FLIP_PERM = [0, 2, 1, 3, 5, 4, 6, 8, 7, 9, 11, 10, 12, 14, 13, 15, 17, 16, 19, 18, 21, 20]  # , 23, 22]
+SMPL_JOINTS_FLIP_PERM = [
+    0,
+    2,
+    1,
+    3,
+    5,
+    4,
+    6,
+    8,
+    7,
+    9,
+    11,
+    10,
+    12,
+    14,
+    13,
+    15,
+    17,
+    16,
+    19,
+    18,
+    21,
+    20,
+]  # , 23, 22]
 SMPL_JOINTS_FLIP_PERM_BODY = [i - 1 for i in SMPL_JOINTS_FLIP_PERM][1:]
 SMPL_POSE_FLIP_PERM = []
 for i in SMPL_JOINTS_FLIP_PERM:
@@ -30,16 +56,16 @@ for i in SMPL_JOINTS_FLIP_PERM:
 
 
 for idx, vid in enumerate(motion_files):
-    if not vid.startswith('M'):
+    if not vid.startswith("M"):
         continue
     motion_data = motion_files[vid]
-    smpl_layer = smpl_dict['neutral']
-    
+    smpl_layer = smpl_dict["neutral"]
+
     pose = motion_data["pose"].reshape(-1, 22, 3)
     global_orient = pose[:, :1, :]
     body_pose = pose[:, 1:, :]
-    beta = motion_data['beta'][None].repeat(pose.shape[0], 1)
-    trans = motion_data['trans']
+    beta = motion_data["beta"][None].repeat(pose.shape[0], 1)
+    trans = motion_data["trans"]
 
     pose_pad = torch.cat([body_pose, torch.zeros_like(body_pose[:, :2])], dim=1)
     smpl_output = smpl_layer(
@@ -53,7 +79,7 @@ for idx, vid in enumerate(motion_files):
     j3d = smpl_output.joints.detach()
 
     smpl_seq = {
-        "text": '',
+        "text": "",
         "joints_pos": j3d,
         # "joints_pos": torch.from_numpy(data_jts[:, :24]).float(),
     }
@@ -76,7 +102,9 @@ for idx, vid in enumerate(motion_files):
     trans_flip[:, 0] = -trans_flip[:, 0]
 
     body_pose_flip[:, :] = body_pose_flip[:, SMPL_JOINTS_FLIP_PERM_BODY].clone()
-    pose_pad_flip = torch.cat([body_pose_flip, torch.zeros_like(body_pose_flip[:, :2])], dim=1)
+    pose_pad_flip = torch.cat(
+        [body_pose_flip, torch.zeros_like(body_pose_flip[:, :2])], dim=1
+    )
     smpl_output_flip = smpl_layer(
         betas=beta.to(device),
         global_orient=global_orient_flip.to(device),

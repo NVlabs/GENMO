@@ -2,13 +2,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import einsum, rearrange, repeat
-from hmr4d.configs import MainStore, builds
-
-from hmr4d.network.base_arch.transformer.encoder_rope import EncoderRoPEBlock, DecoderRoPEBlock
-from hmr4d.network.base_arch.transformer.layer import zero_module
-
-from hmr4d.utils.net_utils import length_to_mask
 from timm.models.vision_transformer import Mlp
+
+from hmr4d.configs import MainStore, builds
+from hmr4d.network.base_arch.transformer.encoder_rope import (
+    DecoderRoPEBlock,
+    EncoderRoPEBlock,
+)
+from hmr4d.network.base_arch.transformer.layer import zero_module
+from hmr4d.utils.net_utils import length_to_mask
 from motiondiff.models.mdm.modules import PositionalEncoding
 
 
@@ -34,7 +36,7 @@ class NetworkEncoderRoPE(nn.Module):
         self,
         # x
         output_dim=151,
-        xt_dim = 157,
+        xt_dim=157,
         max_len=120,
         # condition
         cliffcam_dim=3,
@@ -93,7 +95,10 @@ class NetworkEncoderRoPE(nn.Module):
         self.learned_pos_linear = nn.Linear(2, 32)
         self.learned_pos_params = nn.Parameter(torch.randn(17, 32), requires_grad=True)
         self.embed_noisyobs = Mlp(
-            17 * 32, hidden_features=self.latent_dim * 2, out_features=self.latent_dim, drop=dropout
+            17 * 32,
+            hidden_features=self.latent_dim * 2,
+            out_features=self.latent_dim,
+            drop=dropout,
         )
 
         self._build_condition_embedder()
@@ -101,12 +106,19 @@ class NetworkEncoderRoPE(nn.Module):
         # Transformer
         self.blocks = nn.ModuleList(
             [
-                EncoderRoPEBlock(self.latent_dim, self.num_heads, mlp_ratio=mlp_ratio, dropout=dropout)
+                EncoderRoPEBlock(
+                    self.latent_dim,
+                    self.num_heads,
+                    mlp_ratio=mlp_ratio,
+                    dropout=dropout,
+                )
                 for _ in range(self.num_layers)
             ]
         )
         self.sequence_pos_encoder = PositionalEncoding(self.latent_dim, dropout=0)
-        self.embed_timestep = TimestepEmbedder(self.latent_dim, self.sequence_pos_encoder)
+        self.embed_timestep = TimestepEmbedder(
+            self.latent_dim, self.sequence_pos_encoder
+        )
         self.embed_text = nn.Linear(self.encoded_text_dim, self.latent_dim)
         self.text_encoder_cfg = text_encoder_cfg
         text_encode_mode = text_encoder_cfg.get("mode", "first")
@@ -115,7 +127,9 @@ class NetworkEncoderRoPE(nn.Module):
         elif text_encode_mode == "all":
             self.text_encode_layer_idx = list(range(num_layers))
         elif text_encode_mode.startswith("every_"):
-            self.text_encode_layer_idx = list(range(0, num_layers, int(text_encode_mode.split("_")[1])))
+            self.text_encode_layer_idx = list(
+                range(0, num_layers, int(text_encode_mode.split("_")[1]))
+            )
         else:
             raise ValueError(f"Invalid text_encode_mode {text_encode_mode}")
         use_self_attn = text_encoder_cfg.get("use_self_attn", False)
@@ -125,24 +139,35 @@ class NetworkEncoderRoPE(nn.Module):
         for idx in self.text_encode_layer_idx:
             if net_type == "rope_decoder":
                 text_block = DecoderRoPEBlock(
-                    self.latent_dim, self.num_heads, use_self_attn=use_self_attn, mlp_ratio=mlp_ratio, dropout=dropout, cross_attn_type=cross_attn_type
+                    self.latent_dim,
+                    self.num_heads,
+                    use_self_attn=use_self_attn,
+                    mlp_ratio=mlp_ratio,
+                    dropout=dropout,
+                    cross_attn_type=cross_attn_type,
                 )
             else:
                 raise ValueError(f"Invalid net_type {net_type}")
-            self.text_encoder_layers[f'{idx}'] = text_block
-        
+            self.text_encoder_layers[f"{idx}"] = text_block
+
         # Output heads
         self.final_layer = Mlp(self.latent_dim, out_features=self.output_dim)
-        self.pred_cam_head = pred_cam_dim > 0  # keep extra_output for easy-loading old ckpt
+        self.pred_cam_head = (
+            pred_cam_dim > 0
+        )  # keep extra_output for easy-loading old ckpt
         if self.pred_cam_head:
             self.pred_cam_head = Mlp(self.latent_dim, out_features=pred_cam_dim)
-            self.register_buffer("pred_cam_mean", torch.tensor([1.0606, -0.0027, 0.2702]), False)
-            self.register_buffer("pred_cam_std", torch.tensor([0.1784, 0.0956, 0.0764]), False)
+            self.register_buffer(
+                "pred_cam_mean", torch.tensor([1.0606, -0.0027, 0.2702]), False
+            )
+            self.register_buffer(
+                "pred_cam_std", torch.tensor([0.1784, 0.0956, 0.0764]), False
+            )
 
         self.static_conf_head = static_conf_dim > 0
         if self.static_conf_head:
             self.static_conf_head = Mlp(self.latent_dim, out_features=static_conf_dim)
-            
+
         self.add_cond_linear = nn.Linear(xt_dim + self.latent_dim, self.latent_dim)
 
         self.avgbeta = avgbeta
@@ -180,38 +205,41 @@ class NetworkEncoderRoPE(nn.Module):
             f_noisyobs: (B, L, C), nosiy pose observation
             f_cam_angvel: (B, L, 6), Camera angular velocity
         """
-        x = y['f_cond']
-        length = y['length']
-        multi_text_data = y.get('multi_text_data', None)
+        x = y["f_cond"]
+        length = y["length"]
+        multi_text_data = y.get("multi_text_data", None)
         L = xt.size(1)
         B = xt.size(0)
-        
+
         if self.input_remove_condition:
             x = torch.zeros_like(x)
-        
+
         if self.input_remove_static_conf:
             xt[..., :6] = 0
         if self.input_remove_global:
             xt[..., -15:] = 0
-            
-        
+
         emb = self.embed_timestep(timesteps)  # [1, bs, d]
         x = x + emb
-        
+
         x = self.add_cond_linear(torch.cat([x, xt], dim=-1))
-        
-        enc_text = y['encoded_text'].clone()
+
+        enc_text = y["encoded_text"].clone()
         if self.training and self.text_mask_prob > 0:
             mask = torch.rand((B,), device=x.device) < self.text_mask_prob
             enc_text = enc_text * (1 - mask[:, None, None].float())
         emb_text = self.embed_text(enc_text)
         if self.use_text_pos_enc:
             emb_text = self.sequence_pos_encoder(emb_text, batch_first=True)
-        
+
         if multi_text_data is not None:
-            multi_text_data['text_embed_feats'] = self.embed_text(multi_text_data['text_embed'])
+            multi_text_data["text_embed_feats"] = self.embed_text(
+                multi_text_data["text_embed"]
+            )
             if self.use_text_pos_enc:
-                multi_text_data['text_embed_feats'] = self.sequence_pos_encoder(multi_text_data['text_embed_feats'], batch_first=True)
+                multi_text_data["text_embed_feats"] = self.sequence_pos_encoder(
+                    multi_text_data["text_embed_feats"], batch_first=True
+                )
 
         # Setup length and make padding mask
         assert B == length.size(0)
@@ -231,14 +259,22 @@ class NetworkEncoderRoPE(nn.Module):
         # Transformer
         for i, block in enumerate(self.blocks):
             if i in self.text_encode_layer_idx:
-                text_block = self.text_encoder_layers[f'{i}']
-                x = text_block(x, emb_text, attn_mask=attnmask, tgt_key_padding_mask=pmask, multi_text_data=multi_text_data)
+                text_block = self.text_encoder_layers[f"{i}"]
+                x = text_block(
+                    x,
+                    emb_text,
+                    attn_mask=attnmask,
+                    tgt_key_padding_mask=pmask,
+                    multi_text_data=multi_text_data,
+                )
             x = block(x, attn_mask=attnmask, tgt_key_padding_mask=pmask)
 
         # Output
         sample = self.final_layer(x)  # (B, L, C)
         if self.avgbeta:
-            betas = (sample[..., 126:136] * (~pmask[..., None])).sum(1) / length[:, None]  # (B, C)
+            betas = (sample[..., 126:136] * (~pmask[..., None])).sum(1) / length[
+                :, None
+            ]  # (B, C)
             betas = repeat(betas, "b c -> b l c", l=L)
             sample = torch.cat([sample[..., :126], betas, sample[..., 136:]], dim=-1)
 
@@ -247,7 +283,9 @@ class NetworkEncoderRoPE(nn.Module):
         if self.pred_cam_head:
             pred_cam = self.pred_cam_head(x)
             pred_cam = pred_cam * self.pred_cam_std + self.pred_cam_mean
-            torch.clamp_min_(pred_cam[..., 0], 0.25)  # min_clamp s to 0.25 (prevent negative prediction)
+            torch.clamp_min_(
+                pred_cam[..., 0], 0.25
+            )  # min_clamp s to 0.25 (prevent negative prediction)
 
         static_conf_logits = None
         if self.static_conf_head:

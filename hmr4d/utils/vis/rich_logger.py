@@ -1,8 +1,9 @@
-from pytorch_lightning.utilities import rank_zero_only
-from omegaconf import DictConfig, OmegaConf
 import rich
-import rich.tree
 import rich.syntax
+import rich.tree
+from omegaconf import DictConfig, OmegaConf
+from pytorch_lightning.utilities import rank_zero_only
+
 from hmr4d.utils.pylogger import Log
 
 
@@ -17,7 +18,9 @@ def print_cfg(cfg: DictConfig, use_rich: bool = False):
         # add all the other fields to queue (not specified in `print_order`)
         queue = []
         for field in print_order:
-            queue.append(field) if field in cfg else Log.warn(f"Field '{field}' not found in config. Skipping.")
+            queue.append(field) if field in cfg else Log.warn(
+                f"Field '{field}' not found in config. Skipping."
+            )
         for field in cfg:
             if field not in queue:
                 queue.append(field)

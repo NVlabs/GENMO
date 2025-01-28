@@ -115,6 +115,6 @@ class TopdownHeatmapBaseHead(nn.Module):
             padding = 0
             output_padding = 0
         else:
-            raise ValueError(f'Not supported num_kernels ({deconv_kernel}).')
+            raise ValueError(f"Not supported num_kernels ({deconv_kernel}).")
 
         return deconv_kernel, padding, output_padding

@@ -1,17 +1,18 @@
+import numpy as np
 import torch
 import torch.nn.functional as F
-import numpy as np
-from .vitpose_pytorch import build_model
-from .vitfeat_extractor import get_batch
 from tqdm import tqdm
 
-from hmr4d.utils.kpts.kp2d_utils import keypoints_from_heatmaps
-from hmr4d.utils.geo_transform import cvt_p2d_from_pm1_to_i
 from hmr4d.utils.geo.flip_utils import flip_heatmap_coco17
+from hmr4d.utils.geo_transform import cvt_p2d_from_pm1_to_i
+from hmr4d.utils.kpts.kp2d_utils import keypoints_from_heatmaps
+
+from .vitfeat_extractor import get_batch
+from .vitpose_pytorch import build_model
 
 
 class VitPoseExtractor:
-    def __init__(self, device='cuda:0', tqdm_leave=True):
+    def __init__(self, device="cuda:0", tqdm_leave=True):
         ckpt_path = "inputs/checkpoints/vitpose/vitpose-h-multi-coco.pth"
         self.pose = build_model("ViTPose_huge_coco_256x192", ckpt_path)
         self.pose.to(device).eval()
@@ -21,10 +22,14 @@ class VitPoseExtractor:
         self.tqdm_leave = tqdm_leave
 
     @torch.no_grad()
-    def extract(self, video_path, bbx_xys, img_ds=0.5, batch_size=16, path_type="video"):
+    def extract(
+        self, video_path, bbx_xys, img_ds=0.5, batch_size=16, path_type="video"
+    ):
         # Get the batch
         if isinstance(video_path, str) or isinstance(video_path, list):
-            imgs, bbx_xys = get_batch(video_path, bbx_xys, img_ds=img_ds, path_type=path_type)
+            imgs, bbx_xys = get_batch(
+                video_path, bbx_xys, img_ds=img_ds, path_type=path_type
+            )
         else:
             assert isinstance(video_path, torch.Tensor)
             imgs = video_path
@@ -41,7 +46,9 @@ class VitPoseExtractor:
             # Heat map
             imgs_batch = imgs[j : j + batch_size, :, :, 32:224].to(self.device)
             if self.flip_test:
-                heatmap, heatmap_flipped = self.pose(torch.cat([imgs_batch, imgs_batch.flip(3)], dim=0)).chunk(2)
+                heatmap, heatmap_flipped = self.pose(
+                    torch.cat([imgs_batch, imgs_batch.flip(3)], dim=0)
+                ).chunk(2)
                 heatmap_flipped = flip_heatmap_coco17(heatmap_flipped)
                 heatmap = (heatmap + heatmap_flipped) * 0.5
                 del heatmap_flipped
@@ -66,8 +73,15 @@ class VitPoseExtractor:
                 bbx_xys_batch = bbx_xys[j : j + batch_size]
                 heatmap = heatmap.clone().cpu().numpy()
                 center = bbx_xys_batch[:, :2].numpy()
-                scale = (torch.cat((bbx_xys_batch[:, [2]] * 24 / 32, bbx_xys_batch[:, [2]]), dim=1) / 200).numpy()
-                preds, maxvals = keypoints_from_heatmaps(heatmaps=heatmap, center=center, scale=scale, use_udp=True)
+                scale = (
+                    torch.cat(
+                        (bbx_xys_batch[:, [2]] * 24 / 32, bbx_xys_batch[:, [2]]), dim=1
+                    )
+                    / 200
+                ).numpy()
+                preds, maxvals = keypoints_from_heatmaps(
+                    heatmaps=heatmap, center=center, scale=scale, use_udp=True
+                )
                 kp2d = np.concatenate((preds, maxvals), axis=-1)
                 kp2d = torch.from_numpy(kp2d)
 
@@ -107,9 +121,17 @@ def get_heatmap_preds(heatmap, normalize_keypoints=True, thr=0.0, soft=False):
         for b in range(B):
             for j in range(17):
                 x, y = preds[b, j].int()
-                if x >= patch_half and x <= W - patch_half and y >= patch_half and y <= H - patch_half:
+                if (
+                    x >= patch_half
+                    and x <= W - patch_half
+                    and y >= patch_half
+                    and y <= H - patch_half
+                ):
                     patches[b, j] = heatmap[
-                        b, j, y - patch_half : y + patch_half + 1, x - patch_half : x + patch_half + 1
+                        b,
+                        j,
+                        y - patch_half : y + patch_half + 1,
+                        x - patch_half : x + patch_half + 1,
                     ]
                 else:
                     patches[b, j] = default_patch
@@ -133,7 +155,9 @@ def soft_patch_dx_dy(p):
     score = F.softmax(p.view(-1, patch_size**2) * temperature, dim=-1)
 
     # get a offset_grid (BN, P, P, 2) for dx, dy
-    offset_grid = torch.meshgrid(torch.arange(patch_size), torch.arange(patch_size))[::-1]
+    offset_grid = torch.meshgrid(torch.arange(patch_size), torch.arange(patch_size))[
+        ::-1
+    ]
     offset_grid = torch.stack(offset_grid, dim=-1).float() - (patch_size - 1) / 2
     offset_grid = offset_grid.view(1, 1, patch_size, patch_size, 2).to(p.device)
 

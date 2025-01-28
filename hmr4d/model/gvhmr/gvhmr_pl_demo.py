@@ -1,10 +1,10 @@
-import torch
 import pytorch_lightning as pl
+import torch
 from hydra.utils import instantiate
-from hmr4d.utils.pylogger import Log
-from hmr4d.configs import MainStore, builds
 
+from hmr4d.configs import MainStore, builds
 from hmr4d.utils.geo.hmr_cam import normalize_kp2d
+from hmr4d.utils.pylogger import Log
 
 
 class DemoPL(pl.LightningModule):
@@ -38,15 +38,23 @@ class DemoPL(pl.LightningModule):
         }
         batch = {k: v.cuda() for k, v in batch.items()}
         if "vimo_smpl_params" in data:
-            batch["vimo_smpl_params"] = {k: v[None].cuda() for k, v in data["vimo_smpl_params"].items()}
+            batch["vimo_smpl_params"] = {
+                k: v[None].cuda() for k, v in data["vimo_smpl_params"].items()
+            }
             batch["scales"] = data["scales"][None].cuda()
             batch["mean_scale"] = torch.tensor(data["mean_scale"])[None].cuda()
-        batch['meta'] = None
-        outputs = self.pipeline.forward(batch, train=False, postproc=False, static_cam=static_cam)
+        batch["meta"] = None
+        outputs = self.pipeline.forward(
+            batch, train=False, postproc=False, static_cam=static_cam
+        )
 
         pred = {
-            "smpl_params_global": {k: v[0] for k, v in outputs["pred_smpl_params_global"].items()},
-            "smpl_params_incam": {k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()},
+            "smpl_params_global": {
+                k: v[0] for k, v in outputs["pred_smpl_params_global"].items()
+            },
+            "smpl_params_incam": {
+                k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()
+            },
             "K_fullimg": data["K_fullimg"],
             "net_outputs": outputs,  # intermediate outputs
         }
@@ -64,4 +72,8 @@ class DemoPL(pl.LightningModule):
             Log.warn(f"Unexpected keys: {unexpected}")
 
 
-MainStore.store(name="gvhmr_pl_demo", node=builds(DemoPL, pipeline="${pipeline}"), group="model/gvhmr")
+MainStore.store(
+    name="gvhmr_pl_demo",
+    node=builds(DemoPL, pipeline="${pipeline}"),
+    group="model/gvhmr",
+)

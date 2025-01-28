@@ -1,4 +1,5 @@
 import os
+
 import cv2
 import numpy as np
 import torch
@@ -54,7 +55,9 @@ def transform_pyrender(T_c2w):
         ],
         device=T_c2w.device,
     )
-    return torch.einsum("...ij,jk->...ik", torch.einsum("ij,...jk->...ik", T_vis, T_c2w), T_vis)
+    return torch.einsum(
+        "...ij,jk->...ik", torch.einsum("ij,...jk->...ik", T_vis, T_c2w), T_vis
+    )
 
 
 def smpl_to_geometry(verts, faces, vis_mask=None, track_ids=None):
@@ -70,7 +73,11 @@ def smpl_to_geometry(verts, faces, vis_mask=None, track_ids=None):
     device = verts.device
 
     # (B, 3)
-    colors = track_to_colors(track_ids) if track_ids is not None else torch.ones(B, 3, device) * 0.5
+    colors = (
+        track_to_colors(track_ids)
+        if track_ids is not None
+        else torch.ones(B, 3, device) * 0.5
+    )
 
     # list T (B, V, 3), T (B, 3), T (F, 3)
     return filter_visible_meshes(verts, colors, faces, vis_mask)
@@ -104,7 +111,10 @@ def filter_visible_meshes(verts, colors, faces, vis_mask=None, vis_opacity=False
     else:
         alpha = (vis_mask[..., None] >= 0).float()
     vert_list = [verts[vis_mask[:, t], t] for t in range(T)]
-    colors = [torch.cat([colors[vis_mask[:, t]], alpha[vis_mask[:, t], t]], dim=-1) for t in range(T)]
+    colors = [
+        torch.cat([colors[vis_mask[:, t]], alpha[vis_mask[:, t], t]], dim=-1)
+        for t in range(T)
+    ]
     bounds = get_bboxes(verts, vis_mask)
     return vert_list, colors, faces, bounds
 
@@ -192,7 +202,9 @@ def checkerboard_geometry(
                 cur_verts[:, 0] += c1
                 cur_verts[:, 1] += c2
 
-            cur_faces = np.array([[0, 1, 3], [1, 2, 3], [0, 3, 1], [1, 3, 2]], dtype=np.int64)
+            cur_faces = np.array(
+                [[0, 1, 3], [1, 2, 3], [0, 3, 1], [1, 3, 2]], dtype=np.int64
+            )
             cur_faces += 4 * (i * num_cols + j)  # the number of previously added verts
             use_color0 = (i % 2 == 0 and j % 2 == 0) or (i % 2 == 1 and j % 2 == 1)
             cur_color = color0 if use_color0 else color1
@@ -324,8 +336,12 @@ def vis_keypoints(
             [4, 6],
         ]
 
-        pose_link_color = palette[[0, 0, 0, 0, 7, 7, 7, 9, 9, 9, 9, 9, 16, 16, 16, 16, 16, 16, 16]]
-        pose_kpt_color = palette[[16, 16, 16, 16, 16, 9, 9, 9, 9, 9, 9, 0, 0, 0, 0, 0, 0]]
+        pose_link_color = palette[
+            [0, 0, 0, 0, 7, 7, 7, 9, 9, 9, 9, 9, 16, 16, 16, 16, 16, 16, 16]
+        ]
+        pose_kpt_color = palette[
+            [16, 16, 16, 16, 16, 9, 9, 9, 9, 9, 9, 0, 0, 0, 0, 0, 0]
+        ]
 
     elif dataset == "TopDownCocoWholeBodyDataset":
         # show the results
@@ -404,7 +420,9 @@ def vis_keypoints(
             + [0, 0, 0, 0, 4, 4, 4, 4, 8, 8, 8, 8, 12, 12, 12, 12, 16, 16, 16, 16]
         ]
         pose_kpt_color = palette[
-            [16, 16, 16, 16, 16, 9, 9, 9, 9, 9, 9, 0, 0, 0, 0, 0, 0] + [0, 0, 0, 0, 0, 0] + [19] * (68 + 42)
+            [16, 16, 16, 16, 16, 9, 9, 9, 9, 9, 9, 0, 0, 0, 0, 0, 0]
+            + [0, 0, 0, 0, 0, 0]
+            + [19] * (68 + 42)
         ]
 
     elif dataset == "TopDownAicDataset":
@@ -508,8 +526,12 @@ def vis_keypoints(
             [19, 20],
         ]
 
-        pose_link_color = palette[[0, 0, 0, 0, 4, 4, 4, 4, 8, 8, 8, 8, 12, 12, 12, 12, 16, 16, 16, 16]]
-        pose_kpt_color = palette[[0, 0, 0, 0, 0, 4, 4, 4, 4, 8, 8, 8, 8, 12, 12, 12, 12, 16, 16, 16, 16]]
+        pose_link_color = palette[
+            [0, 0, 0, 0, 4, 4, 4, 4, 8, 8, 8, 8, 12, 12, 12, 12, 16, 16, 16, 16]
+        ]
+        pose_kpt_color = palette[
+            [0, 0, 0, 0, 0, 4, 4, 4, 4, 8, 8, 8, 8, 12, 12, 12, 12, 16, 16, 16, 16]
+        ]
 
     elif dataset == "InterHand2DDataset":
         skeleton = [
@@ -535,8 +557,12 @@ def vis_keypoints(
             [19, 20],
         ]
 
-        pose_link_color = palette[[0, 0, 0, 4, 4, 4, 8, 8, 8, 12, 12, 12, 16, 16, 16, 0, 4, 8, 12, 16]]
-        pose_kpt_color = palette[[0, 0, 0, 0, 4, 4, 4, 4, 8, 8, 8, 8, 12, 12, 12, 12, 16, 16, 16, 16, 0]]
+        pose_link_color = palette[
+            [0, 0, 0, 4, 4, 4, 8, 8, 8, 12, 12, 12, 16, 16, 16, 0, 4, 8, 12, 16]
+        ]
+        pose_kpt_color = palette[
+            [0, 0, 0, 0, 4, 4, 4, 4, 8, 8, 8, 8, 12, 12, 12, 12, 16, 16, 16, 16, 0]
+        ]
 
     elif dataset == "Face300WDataset":
         # show the results
@@ -593,7 +619,9 @@ def vis_keypoints(
         ]
 
         pose_link_color = palette[[4] * 10 + [6] * 2 + [6] * 2 + [7] * 2 + [7] * 2]
-        pose_kpt_color = palette[[4, 4, 6, 6, 6, 6, 6, 6, 4, 4, 4, 4, 4, 7, 7, 7, 4, 4, 7, 7, 7, 4]]
+        pose_kpt_color = palette[
+            [4, 4, 6, 6, 6, 6, 6, 6, 4, 4, 4, 4, 4, 7, 7, 7, 4, 4, 7, 7, 7, 4]
+        ]
 
     elif dataset == "AnimalFlyDataset":
         skeleton = [
@@ -753,9 +781,13 @@ def imshow_keypoints(
                     color = tuple(int(c) for c in pose_kpt_color[kid])
                     if show_keypoint_weight:
                         img_copy = img.copy()
-                        cv2.circle(img_copy, (int(x_coord), int(y_coord)), radius, color, -1)
+                        cv2.circle(
+                            img_copy, (int(x_coord), int(y_coord)), radius, color, -1
+                        )
                         transparency = max(0, min(1, kpt_score))
-                        cv2.addWeighted(img_copy, transparency, img, 1 - transparency, 0, dst=img)
+                        cv2.addWeighted(
+                            img_copy, transparency, img, 1 - transparency, 0, dst=img
+                        )
                     else:
                         cv2.circle(img, (int(x_coord), int(y_coord)), radius, color, -1)
 
@@ -796,8 +828,12 @@ def imshow_keypoints(
                             1,
                         )
                         cv2.fillConvexPoly(img_copy, polygon, color)
-                        transparency = max(0, min(1, 0.5 * (kpts[sk[0], 2] + kpts[sk[1], 2])))
-                        cv2.addWeighted(img_copy, transparency, img, 1 - transparency, 0, dst=img)
+                        transparency = max(
+                            0, min(1, 0.5 * (kpts[sk[0], 2] + kpts[sk[1], 2]))
+                        )
+                        cv2.addWeighted(
+                            img_copy, transparency, img, 1 - transparency, 0, dst=img
+                        )
                     else:
                         cv2.line(img, pos1, pos2, color, thickness=thickness)
 

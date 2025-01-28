@@ -1,10 +1,24 @@
 import numpy as np
 import torch
 
-if __name__ != '__main__':
-    from .konia_transform import quaternion_to_angle_axis, angle_axis_to_quaternion, quaternion_to_rotation_matrix, rotation_matrix_to_quaternion, rotation_matrix_to_angle_axis, angle_axis_to_rotation_matrix
+if __name__ != "__main__":
+    from .konia_transform import (
+        angle_axis_to_quaternion,
+        angle_axis_to_rotation_matrix,
+        quaternion_to_angle_axis,
+        quaternion_to_rotation_matrix,
+        rotation_matrix_to_angle_axis,
+        rotation_matrix_to_quaternion,
+    )
 else:
-    from konia_transform import quaternion_to_angle_axis, angle_axis_to_quaternion, quaternion_to_rotation_matrix, rotation_matrix_to_quaternion, rotation_matrix_to_angle_axis, angle_axis_to_rotation_matrix
+    from konia_transform import (
+        angle_axis_to_quaternion,
+        angle_axis_to_rotation_matrix,
+        quaternion_to_angle_axis,
+        quaternion_to_rotation_matrix,
+        rotation_matrix_to_angle_axis,
+        rotation_matrix_to_quaternion,
+    )
 
 
 def normalize(x, eps: float = 1e-9):
@@ -72,7 +86,9 @@ def torch_safe_atan2(y, x, eps: float = 1e-8):
 
 
 @torch.jit.script
-def ypr_euler_from_quat(q, handle_singularity: bool = False, eps: float = 1e-6, singular_eps: float = 1e-6):
+def ypr_euler_from_quat(
+    q, handle_singularity: bool = False, eps: float = 1e-6, singular_eps: float = 1e-6
+):
     """
     convert quaternion to yaw-pitch-roll euler angles
     """
@@ -81,7 +97,13 @@ def ypr_euler_from_quat(q, handle_singularity: bool = False, eps: float = 1e-6, 
     roll_atany = 2 * (q[..., 0] * q[..., 1] + q[..., 2] * q[..., 3])
     roll_atanx = 1 - 2 * (q[..., 1] * q[..., 1] + q[..., 2] * q[..., 2])
     yaw = torch_safe_atan2(yaw_atany, yaw_atanx, eps)
-    pitch = torch.asin(torch.clamp(2 * (q[..., 0] * q[..., 2] - q[..., 1] * q[..., 3]), min=-1 + eps, max=1 - eps))
+    pitch = torch.asin(
+        torch.clamp(
+            2 * (q[..., 0] * q[..., 2] - q[..., 1] * q[..., 3]),
+            min=-1 + eps,
+            max=1 - eps,
+        )
+    )
     roll = torch_safe_atan2(roll_atany, roll_atanx, eps)
 
     if handle_singularity:
@@ -117,12 +139,19 @@ def quat_from_ypr_euler(angles):
     half_ang = angles * 0.5
     sin = torch.sin(half_ang)
     cos = torch.cos(half_ang)
-    q = torch.stack([
-        cos[..., 0] * cos[..., 1] * cos[..., 2] + sin[..., 0] * sin[..., 1] * sin[..., 2],
-        sin[..., 0] * cos[..., 1] * cos[..., 2] - cos[..., 0] * sin[..., 1] * sin[..., 2],
-        cos[..., 0] * sin[..., 1] * cos[..., 2] + sin[..., 0] * cos[..., 1] * sin[..., 2],
-        cos[..., 0] * cos[..., 1] * sin[..., 2] - sin[..., 0] * sin[..., 1] * cos[..., 2]
-    ], dim=-1)
+    q = torch.stack(
+        [
+            cos[..., 0] * cos[..., 1] * cos[..., 2]
+            + sin[..., 0] * sin[..., 1] * sin[..., 2],
+            sin[..., 0] * cos[..., 1] * cos[..., 2]
+            - cos[..., 0] * sin[..., 1] * sin[..., 2],
+            cos[..., 0] * sin[..., 1] * cos[..., 2]
+            + sin[..., 0] * cos[..., 1] * sin[..., 2],
+            cos[..., 0] * cos[..., 1] * sin[..., 2]
+            - sin[..., 0] * sin[..., 1] * cos[..., 2],
+        ],
+        dim=-1,
+    )
     return q
 
 
@@ -138,20 +167,25 @@ def quat_between_two_vec(v1, v2, eps: float = 1e-6):
     out = torch.cat([(1 + dot).unsqueeze(-1), cross], dim=-1)
     # handle v1 & v2 with same direction
     sind = dot > 1 - eps
-    out[sind] = torch.tensor([1., 0., 0., 0.], device=v1.device)
+    out[sind] = torch.tensor([1.0, 0.0, 0.0, 0.0], device=v1.device)
     # handle v1 & v2 with opposite direction
     nind = dot < -1 + eps
     if torch.any(nind):
-        vx = torch.tensor([1., 0., 0.], device=v1.device)
+        vx = torch.tensor([1.0, 0.0, 0.0], device=v1.device)
         vxdot = (v1 * vx).sum(-1).abs()
         nxind = nind & (vxdot < 1 - eps)
         if torch.any(nxind):
-            out[nxind] = angle_axis_to_quaternion(normalize(torch.cross(vx.expand_as(v1[nxind]), v1[nxind], dim=-1)) * np.pi)
+            out[nxind] = angle_axis_to_quaternion(
+                normalize(torch.cross(vx.expand_as(v1[nxind]), v1[nxind], dim=-1))
+                * np.pi
+            )
         # handle v1 & v2 with opposite direction and they are parallel to x axis
         pind = nind & (vxdot >= 1 - eps)
         if torch.any(pind):
-            vy = torch.tensor([0., 1., 0.], device=v1.device)
-            out[pind] = angle_axis_to_quaternion(normalize(torch.cross(vy.expand_as(v1[pind]), v1[pind], dim=-1)) * np.pi)
+            vy = torch.tensor([0.0, 1.0, 0.0], device=v1.device)
+            out[pind] = angle_axis_to_quaternion(
+                normalize(torch.cross(vy.expand_as(v1[pind]), v1[pind], dim=-1)) * np.pi
+            )
     # normalize and reshape
     out = normalize(out).view(orig_shape[:-1] + (4,))
     return out
@@ -168,7 +202,9 @@ def get_yaw(q, eps: float = 1e-6):
 @torch.jit.script
 def get_yaw_q(q):
     yaw = get_yaw(q)
-    angle_axis = torch.cat([torch.zeros(yaw.shape + (2,), device=q.device), yaw.unsqueeze(-1)], dim=-1)
+    angle_axis = torch.cat(
+        [torch.zeros(yaw.shape + (2,), device=q.device), yaw.unsqueeze(-1)], dim=-1
+    )
     heading_q = angle_axis_to_quaternion(angle_axis)
     return heading_q
 
@@ -211,7 +247,13 @@ def vec_to_heading(h_vec):
 
 @torch.jit.script
 def heading_to_quat(h_theta):
-    angle_axis = torch.cat([torch.zeros(h_theta.shape + (2,), device=h_theta.device), h_theta.unsqueeze(-1)], dim=-1)
+    angle_axis = torch.cat(
+        [
+            torch.zeros(h_theta.shape + (2,), device=h_theta.device),
+            h_theta.unsqueeze(-1),
+        ],
+        dim=-1,
+    )
     heading_q = angle_axis_to_quaternion(angle_axis)
     return heading_q
 
@@ -220,7 +262,7 @@ def deheading_quat(q, heading_q=None):
     if heading_q is None:
         heading_q = get_heading_q(q)
     dq = quat_mul(quat_conjugate(heading_q), q)
-    return dq    
+    return dq
 
 
 @torch.jit.script
@@ -267,10 +309,10 @@ def rot6d_to_quat(rot6d):
 
 
 @torch.jit.script
-def make_transform(rot, trans, rot_type: str = 'rotmat'):
-    if rot_type == 'axis_angle':
+def make_transform(rot, trans, rot_type: str = "rotmat"):
+    if rot_type == "axis_angle":
         rot = angle_axis_to_rotation_matrix(rot)
-    elif rot_type == '6d':
+    elif rot_type == "6d":
         rot = rot6d_to_rotmat(rot)
     transform = torch.eye(4).to(trans.device).repeat(rot.shape[:-2] + (1, 1))
     transform[..., :3, :3] = rot
@@ -301,18 +343,20 @@ def transform_rot(transform_mat, rot):
 def inverse_transform(transform_mat):
     transform_inv = torch.zeros_like(transform_mat)
     transform_inv[..., :3, :3] = transform_mat[..., :3, :3].transpose(-2, -1)
-    transform_inv[..., :3, 3] = -torch.matmul(transform_mat[..., :3, 3].unsqueeze(-2), transform_mat[..., :3, :3]).squeeze(-2)
+    transform_inv[..., :3, 3] = -torch.matmul(
+        transform_mat[..., :3, 3].unsqueeze(-2), transform_mat[..., :3, :3]
+    ).squeeze(-2)
     transform_inv[..., 3, 3] = 1.0
     return transform_inv
 
 
 def batch_compute_similarity_transform_torch(S1, S2):
-    '''
+    """
     Computes a similarity transform (sR, t) that takes
     a set of 3D points S1 (3 x N) closest to a set of 3D points S2,
     where R is an 3x3 rotation matrix, t 3x1 translation, s scale.
     i.e. solves the orthogonal Procrutes problem.
-    '''
+    """
     if len(S1.shape) > 3:
         orig_shape = S1.shape
         S1 = S1.reshape(-1, *S1.shape[-2:])
@@ -322,10 +366,10 @@ def batch_compute_similarity_transform_torch(S1, S2):
 
     transposed = False
     if S1.shape[0] != 3 and S1.shape[0] != 2:
-        S1 = S1.permute(0,2,1)
-        S2 = S2.permute(0,2,1)
+        S1 = S1.permute(0, 2, 1)
+        S2 = S2.permute(0, 2, 1)
         transposed = True
-    assert(S2.shape[1] == S1.shape[1])
+    assert S2.shape[1] == S1.shape[1]
 
     # 1. Remove mean.
     mu1 = S1.mean(axis=-1, keepdims=True)
@@ -338,7 +382,7 @@ def batch_compute_similarity_transform_torch(S1, S2):
     var1 = torch.sum(X1**2, dim=1).sum(dim=1)
 
     # 3. The outer product of X1 and X2.
-    K = X1.bmm(X2.permute(0,2,1))
+    K = X1.bmm(X2.permute(0, 2, 1))
 
     # 4. Solution that Maximizes trace(R'K) is R=U*V', where U, V are
     # singular vectors of K.
@@ -346,11 +390,11 @@ def batch_compute_similarity_transform_torch(S1, S2):
 
     # Construct Z that fixes the orientation of R to get det(R)=1.
     Z = torch.eye(U.shape[1], device=S1.device).unsqueeze(0)
-    Z = Z.repeat(U.shape[0],1,1)
-    Z[:,-1, -1] *= torch.sign(torch.det(U.bmm(V.permute(0,2,1))))
+    Z = Z.repeat(U.shape[0], 1, 1)
+    Z[:, -1, -1] *= torch.sign(torch.det(U.bmm(V.permute(0, 2, 1))))
 
     # Construct R.
-    R = V.bmm(Z.bmm(U.permute(0,2,1)))
+    R = V.bmm(Z.bmm(U.permute(0, 2, 1)))
 
     # 5. Recover scale.
     scale = torch.cat([torch.trace(x).unsqueeze(0) for x in R.bmm(K)]) / var1
@@ -362,10 +406,9 @@ def batch_compute_similarity_transform_torch(S1, S2):
     S1_hat = scale.unsqueeze(-1).unsqueeze(-1) * R.bmm(S1) + t
 
     if transposed:
-        S1_hat = S1_hat.permute(0,2,1)
+        S1_hat = S1_hat.permute(0, 2, 1)
 
     if orig_shape is not None:
-         S1_hat = S1_hat.reshape(orig_shape)
+        S1_hat = S1_hat.reshape(orig_shape)
 
     return S1_hat
-

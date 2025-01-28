@@ -7,11 +7,19 @@ def augment_betas(betas, std=0.1):
     return betas_aug
 
 
-def randomly_modify_hands_legs(j3d, left_hands=[12], right_hands=[13], left_legs=[5, 14, 15, 16], right_legs=[6, 17, 18, 19],
-                               p_switch_hand=0.001, p_switch_leg=0.001,
-                               p_wrong_hand0=0.001, p_wrong_hand1=0.001,
-                               p_wrong_leg0=0.001, p_wrong_leg1=0.001):
-    
+def randomly_modify_hands_legs(
+    j3d,
+    left_hands=[12],
+    right_hands=[13],
+    left_legs=[5, 14, 15, 16],
+    right_legs=[6, 17, 18, 19],
+    p_switch_hand=0.001,
+    p_switch_leg=0.001,
+    p_wrong_hand0=0.001,
+    p_wrong_hand1=0.001,
+    p_wrong_leg0=0.001,
+    p_wrong_leg1=0.001,
+):
     L, J, _ = j3d.shape
     j3d_orig = j3d.clone()
 

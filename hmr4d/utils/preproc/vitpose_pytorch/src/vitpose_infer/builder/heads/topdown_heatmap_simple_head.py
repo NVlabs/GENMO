@@ -1,32 +1,34 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import torch
 import torch.nn as nn
+
 # from mmcv.cnn import (build_conv_layer, build_norm_layer, build_upsample_layer,
 #                       constant_init, normal_init)
-
 # from mmpose.core.evaluation import pose_pck_accuracy
 # from mmpose.core.post_processing import flip_back
 # from mmpose.models.builder import build_loss
 # from mmpose.models.utils.ops import resize
 # from ..builder import HEADS
 import torch.nn.functional as F
+
 from .topdown_heatmap_base_head import TopdownHeatmapBaseHead
+
 
 def build_conv_layer(cfg, *args, **kwargs) -> nn.Module:
     """LICENSE"""
-    
+
     if cfg is None:
-        cfg_ = dict(type='Conv2d')
+        cfg_ = dict(type="Conv2d")
     else:
         if not isinstance(cfg, dict):
-            raise TypeError('cfg must be a dict')
-        if 'type' not in cfg:
+            raise TypeError("cfg must be a dict")
+        if "type" not in cfg:
             raise KeyError('the cfg dict must contain the key "type"')
         cfg_ = cfg.copy()
 
-    layer_type = cfg_.pop('type')
-    if layer_type !='Conv2d':
-        raise KeyError(f'Unrecognized layer type {layer_type}')
+    layer_type = cfg_.pop("type")
+    if layer_type != "Conv2d":
+        raise KeyError(f"Unrecognized layer type {layer_type}")
     else:
         conv_layer = nn.Conv2d
 
@@ -34,25 +36,25 @@ def build_conv_layer(cfg, *args, **kwargs) -> nn.Module:
 
     return layer
 
-def build_upsample_layer(cfg, *args, **kwargs) -> nn.Module:
 
+def build_upsample_layer(cfg, *args, **kwargs) -> nn.Module:
     if not isinstance(cfg, dict):
-        raise TypeError(f'cfg must be a dict, but got {type(cfg)}')
-    if 'type' not in cfg:
-        raise KeyError(
-            f'the cfg dict must contain the key "type", but got {cfg}')
+        raise TypeError(f"cfg must be a dict, but got {type(cfg)}")
+    if "type" not in cfg:
+        raise KeyError(f'the cfg dict must contain the key "type", but got {cfg}')
     cfg_ = cfg.copy()
 
-    layer_type = cfg_.pop('type')
-    if layer_type !='deconv':
-        raise KeyError(f'Unrecognized upsample type {layer_type}')
+    layer_type = cfg_.pop("type")
+    if layer_type != "deconv":
+        raise KeyError(f"Unrecognized upsample type {layer_type}")
     else:
         upsample = nn.ConvTranspose2d
 
     if upsample is nn.Upsample:
-        cfg_['mode'] = layer_type
+        cfg_["mode"] = layer_type
     layer = upsample(*args, **kwargs, **cfg_)
     return layer
+
 
 # @HEADS.register_module()
 class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
@@ -87,20 +89,22 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
         loss_keypoint (dict): Config for keypoint loss. Default: None.
     """
 
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 num_deconv_layers=3,
-                 num_deconv_filters=(256, 256, 256),
-                 num_deconv_kernels=(4, 4, 4),
-                 extra=None,
-                 in_index=0,
-                 input_transform=None,
-                 align_corners=False,
-                 loss_keypoint=None,
-                 train_cfg=None,
-                 test_cfg=None,
-                 upsample=0,):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        num_deconv_layers=3,
+        num_deconv_filters=(256, 256, 256),
+        num_deconv_kernels=(4, 4, 4),
+        extra=None,
+        in_index=0,
+        input_transform=None,
+        align_corners=False,
+        loss_keypoint=None,
+        train_cfg=None,
+        test_cfg=None,
+        upsample=0,
+    ):
         super().__init__()
 
         self.in_channels = in_channels
@@ -109,14 +113,14 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
 
         self.train_cfg = {} if train_cfg is None else train_cfg
         self.test_cfg = {} if test_cfg is None else test_cfg
-        self.target_type = self.test_cfg.get('target_type', 'GaussianHeatmap')
+        self.target_type = self.test_cfg.get("target_type", "GaussianHeatmap")
 
         self._init_inputs(in_channels, in_index, input_transform)
         self.in_index = in_index
         self.align_corners = align_corners
 
         if extra is not None and not isinstance(extra, dict):
-            raise TypeError('extra should be dict or None.')
+            raise TypeError("extra should be dict or None.")
 
         if num_deconv_layers > 0:
             self.deconv_layers = self._make_deconv_layer(
@@ -127,20 +131,19 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
         elif num_deconv_layers == 0:
             self.deconv_layers = nn.Identity()
         else:
-            raise ValueError(
-                f'num_deconv_layers ({num_deconv_layers}) should >= 0.')
+            raise ValueError(f"num_deconv_layers ({num_deconv_layers}) should >= 0.")
 
         identity_final_layer = False
-        if extra is not None and 'final_conv_kernel' in extra:
-            assert extra['final_conv_kernel'] in [0, 1, 3]
-            if extra['final_conv_kernel'] == 3:
+        if extra is not None and "final_conv_kernel" in extra:
+            assert extra["final_conv_kernel"] in [0, 1, 3]
+            if extra["final_conv_kernel"] == 3:
                 padding = 1
-            elif extra['final_conv_kernel'] == 1:
+            elif extra["final_conv_kernel"] == 1:
                 padding = 0
             else:
                 # 0 for Identity mapping.
                 identity_final_layer = True
-            kernel_size = extra['final_conv_kernel']
+            kernel_size = extra["final_conv_kernel"]
         else:
             kernel_size = 1
             padding = 0
@@ -148,37 +151,39 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
         if identity_final_layer:
             self.final_layer = nn.Identity()
         else:
-            conv_channels = num_deconv_filters[
-                -1] if num_deconv_layers > 0 else self.in_channels
+            conv_channels = (
+                num_deconv_filters[-1] if num_deconv_layers > 0 else self.in_channels
+            )
 
             layers = []
             if extra is not None:
-                num_conv_layers = extra.get('num_conv_layers', 0)
-                num_conv_kernels = extra.get('num_conv_kernels',
-                                             [1] * num_conv_layers)
+                num_conv_layers = extra.get("num_conv_layers", 0)
+                num_conv_kernels = extra.get("num_conv_kernels", [1] * num_conv_layers)
 
                 for i in range(num_conv_layers):
                     layers.append(
                         build_conv_layer(
-                            dict(type='Conv2d'),
+                            dict(type="Conv2d"),
                             in_channels=conv_channels,
                             out_channels=conv_channels,
                             kernel_size=num_conv_kernels[i],
                             stride=1,
-                            padding=(num_conv_kernels[i] - 1) // 2))
-                    layers.append(
-                                    nn.BatchNorm2d(conv_channels)
-)
+                            padding=(num_conv_kernels[i] - 1) // 2,
+                        )
+                    )
+                    layers.append(nn.BatchNorm2d(conv_channels))
                     layers.append(nn.ReLU(inplace=True))
 
             layers.append(
                 build_conv_layer(
-                    cfg=dict(type='Conv2d'),
+                    cfg=dict(type="Conv2d"),
                     in_channels=conv_channels,
                     out_channels=out_channels,
                     kernel_size=kernel_size,
                     stride=1,
-                    padding=padding))
+                    padding=padding,
+                )
+            )
 
             if len(layers) > 1:
                 self.final_layer = nn.Sequential(*layers)
@@ -205,7 +210,7 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
 
         assert not isinstance(self.loss, nn.Sequential)
         assert target.dim() == 4 and target_weight.dim() == 3
-        losses['heatmap_loss'] = self.loss(output, target, target_weight)
+        losses["heatmap_loss"] = self.loss(output, target, target_weight)
 
         return losses
 
@@ -227,12 +232,13 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
 
         accuracy = dict()
 
-        if self.target_type == 'GaussianHeatmap':
+        if self.target_type == "GaussianHeatmap":
             _, avg_acc, _ = pose_pck_accuracy(
                 output.detach().cpu().numpy(),
                 target.detach().cpu().numpy(),
-                target_weight.detach().cpu().numpy().squeeze(-1) > 0)
-            accuracy['acc_pose'] = float(avg_acc)
+                target_weight.detach().cpu().numpy().squeeze(-1) > 0,
+            )
+            accuracy["acc_pose"] = float(avg_acc)
 
         return accuracy
 
@@ -258,11 +264,10 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
 
         if flip_pairs is not None:
             output_heatmap = flip_back(
-                output.detach().cpu().numpy(),
-                flip_pairs,
-                target_type=self.target_type)
+                output.detach().cpu().numpy(), flip_pairs, target_type=self.target_type
+            )
             # feature is not aligned, shift flipped heatmap for higher accuracy
-            if self.test_cfg.get('shift_heatmap', False):
+            if self.test_cfg.get("shift_heatmap", False):
                 output_heatmap[:, :, :, 1:] = output_heatmap[:, :, :, :-1]
         else:
             output_heatmap = output.detach().cpu().numpy()
@@ -292,14 +297,14 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
         """
 
         if input_transform is not None:
-            assert input_transform in ['resize_concat', 'multiple_select']
+            assert input_transform in ["resize_concat", "multiple_select"]
         self.input_transform = input_transform
         self.in_index = in_index
         if input_transform is not None:
             assert isinstance(in_channels, (list, tuple))
             assert isinstance(in_index, (list, tuple))
             assert len(in_channels) == len(in_index)
-            if input_transform == 'resize_concat':
+            if input_transform == "resize_concat":
                 self.in_channels = sum(in_channels)
             else:
                 self.in_channels = in_channels
@@ -323,22 +328,24 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
                     inputs = resize(
                         input=F.relu(inputs),
                         scale_factor=self.upsample,
-                        mode='bilinear',
-                        align_corners=self.align_corners
-                        )
+                        mode="bilinear",
+                        align_corners=self.align_corners,
+                    )
             return inputs
 
-        if self.input_transform == 'resize_concat':
+        if self.input_transform == "resize_concat":
             inputs = [inputs[i] for i in self.in_index]
             upsampled_inputs = [
                 resize(
                     input=x,
                     size=inputs[0].shape[2:],
-                    mode='bilinear',
-                    align_corners=self.align_corners) for x in inputs
+                    mode="bilinear",
+                    align_corners=self.align_corners,
+                )
+                for x in inputs
             ]
             inputs = torch.cat(upsampled_inputs, dim=1)
-        elif self.input_transform == 'multiple_select':
+        elif self.input_transform == "multiple_select":
             inputs = [inputs[i] for i in self.in_index]
         else:
             inputs = inputs[self.in_index]
@@ -348,30 +355,33 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
     def _make_deconv_layer(self, num_layers, num_filters, num_kernels):
         """Make deconv layers."""
         if num_layers != len(num_filters):
-            error_msg = f'num_layers({num_layers}) ' \
-                        f'!= length of num_filters({len(num_filters)})'
+            error_msg = (
+                f"num_layers({num_layers}) != length of num_filters({len(num_filters)})"
+            )
             raise ValueError(error_msg)
         if num_layers != len(num_kernels):
-            error_msg = f'num_layers({num_layers}) ' \
-                        f'!= length of num_kernels({len(num_kernels)})'
+            error_msg = (
+                f"num_layers({num_layers}) != length of num_kernels({len(num_kernels)})"
+            )
             raise ValueError(error_msg)
 
         layers = []
         for i in range(num_layers):
-            kernel, padding, output_padding = \
-                self._get_deconv_cfg(num_kernels[i])
+            kernel, padding, output_padding = self._get_deconv_cfg(num_kernels[i])
 
             planes = num_filters[i]
             layers.append(
                 build_upsample_layer(
-                    dict(type='deconv'),
+                    dict(type="deconv"),
                     in_channels=self.in_channels,
                     out_channels=planes,
                     kernel_size=kernel,
                     stride=2,
                     padding=padding,
                     output_padding=output_padding,
-                    bias=False))
+                    bias=False,
+                )
+            )
             layers.append(nn.BatchNorm2d(planes))
             layers.append(nn.ReLU(inplace=True))
             self.in_channels = planes

@@ -1,14 +1,14 @@
+import importlib
+import random
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import importlib
-import numpy as np
-import random
-from hmr4d.utils.net_utils import length_to_mask
+from skimage.util.shape import view_as_windows
+from timm.models.vision_transformer import Mlp
+
 from hmr4d.network.base_arch.transformer.layer import zero_module
-from motiondiff.models.model_util import create_gaussian_diffusion
-from motiondiff.models.common.cfg_sampler import ClassifierFreeSampleModel
-from motiondiff.diffusion.resample import create_named_schedule_sampler
 from hmr4d.utils.geo.hmr_cam import (
     compute_bbox_info_bedlam,
     compute_transl_full_cam,
@@ -16,12 +16,14 @@ from hmr4d.utils.geo.hmr_cam import (
     project_to_bi01,
 )
 from hmr4d.utils.geo.hmr_global import (
-    rollout_local_transl_vel,
     get_static_joint_mask,
     get_tgtcoord_rootparam,
+    rollout_local_transl_vel,
 )
-from skimage.util.shape import view_as_windows
-from timm.models.vision_transformer import Mlp
+from hmr4d.utils.net_utils import length_to_mask
+from motiondiff.diffusion.resample import create_named_schedule_sampler
+from motiondiff.models.common.cfg_sampler import ClassifierFreeSampleModel
+from motiondiff.models.model_util import create_gaussian_diffusion
 
 
 def chunk_dict_batch(dic, chunk):
@@ -30,7 +32,7 @@ def chunk_dict_batch(dic, chunk):
         if isinstance(value, dict):
             new_dict[key] = chunk_dict_batch(value, chunk)
         elif isinstance(value, torch.Tensor):
-            if key == 'length':
+            if key == "length":
                 new_dict[key] = value
             else:
                 new_dict[key] = value[:, chunk]
@@ -69,7 +71,6 @@ def import_type_from_str(s):
     module = importlib.import_module(module_name)
     type_to_import = getattr(module, type_name)
     return type_to_import
-
 
 
 class MDMBase(nn.Module):
@@ -122,11 +123,14 @@ class MDMBase(nn.Module):
         self.zero_unknown_motion = zero_unknown_motion
         self.pred_2dkpt = pred_2dkpt
 
-        assert 'obs' in self.args.in_attr, "obs (kp2d) must be in in_attr"
+        assert "obs" in self.args.in_attr, "obs (kp2d) must be in in_attr"
         self.learned_pos_linear = nn.Linear(2, 32)
         self.learned_pos_params = nn.Parameter(torch.randn(17, 32), requires_grad=True)
         self.embed_noisyobs = Mlp(
-            17 * 32, hidden_features=self.latent_dim * 2, out_features=self.latent_dim, drop=dropout
+            17 * 32,
+            hidden_features=self.latent_dim * 2,
+            out_features=self.latent_dim,
+            drop=dropout,
         )
         latent_dim = self.latent_dim
         dropout = self.dropout
@@ -137,7 +141,9 @@ class MDMBase(nn.Module):
                 nn.Dropout(dropout),
                 zero_module(nn.Linear(latent_dim, latent_dim)),
             )
-            self.learned_cliffcam_params = nn.Parameter(torch.randn(latent_dim), requires_grad=True)
+            self.learned_cliffcam_params = nn.Parameter(
+                torch.randn(latent_dim), requires_grad=True
+            )
 
         if "cam_angvel" in self.args.in_attr:
             self.cam_angvel_embedder = nn.Sequential(
@@ -146,16 +152,20 @@ class MDMBase(nn.Module):
                 nn.Dropout(dropout),
                 zero_module(nn.Linear(latent_dim, latent_dim)),
             )
-            self.learned_cam_angvel_params = nn.Parameter(torch.randn(latent_dim), requires_grad=True)
+            self.learned_cam_angvel_params = nn.Parameter(
+                torch.randn(latent_dim), requires_grad=True
+            )
 
         if "cam_t_vel" in self.args.in_attr:
             self.cam_t_vel_embedder = nn.Sequential(
                 nn.Linear(self.cam_t_vel_dim, latent_dim),
-            nn.SiLU(),
-            nn.Dropout(dropout),
-            zero_module(nn.Linear(latent_dim, latent_dim)),
+                nn.SiLU(),
+                nn.Dropout(dropout),
+                zero_module(nn.Linear(latent_dim, latent_dim)),
             )
-            self.learned_cam_t_vel_params = nn.Parameter(torch.randn(latent_dim), requires_grad=True)
+            self.learned_cam_t_vel_params = nn.Parameter(
+                torch.randn(latent_dim), requires_grad=True
+            )
 
         if "imgfeat" in self.args.in_attr:
             self.imgseq_embedder = nn.Sequential(
@@ -168,35 +178,47 @@ class MDMBase(nn.Module):
         return
 
     def load_pretrain_checkpoint(self):
-        if 'pretrained_checkpoint' in self.model_cfg:
+        if "pretrained_checkpoint" in self.model_cfg:
             cp_cfg = self.model_cfg.pretrained_checkpoint
-            state_dict = torch.load(cp_cfg.path, map_location='cpu')['state_dict']
-            filter_keys = cp_cfg.get('filter_keys', [])
-            try_load = cp_cfg.get('try_load', False)
+            state_dict = torch.load(cp_cfg.path, map_location="cpu")["state_dict"]
+            filter_keys = cp_cfg.get("filter_keys", [])
+            try_load = cp_cfg.get("try_load", False)
             if len(filter_keys) > 0:
-                print(f'Filtering checkpoint keys: {filter_keys}')
-                skipped_keys = [k for k in state_dict.keys() if any(key in k for key in filter_keys)]
-                print(f'Skipped keys: {skipped_keys}')
-                state_dict = {k: v for k, v in state_dict.items() if not any(key in k for key in filter_keys)}
+                print(f"Filtering checkpoint keys: {filter_keys}")
+                skipped_keys = [
+                    k for k in state_dict.keys() if any(key in k for key in filter_keys)
+                ]
+                print(f"Skipped keys: {skipped_keys}")
+                state_dict = {
+                    k: v
+                    for k, v in state_dict.items()
+                    if not any(key in k for key in filter_keys)
+                }
             if try_load:
                 model_state = self.state_dict()
-                state_dict = {k: v for k, v in state_dict.items()
-                            if k in model_state and v.size() == model_state[k].size()}
+                state_dict = {
+                    k: v
+                    for k, v in state_dict.items()
+                    if k in model_state and v.size() == model_state[k].size()
+                }
 
-            missing_keys, unexpected_keys = self.load_state_dict(state_dict, strict=cp_cfg.get('strict', True))
+            missing_keys, unexpected_keys = self.load_state_dict(
+                state_dict, strict=cp_cfg.get("strict", True)
+            )
             # if len(missing_keys) > 0:
             #     print(f'Missing keys: {missing_keys}')
             # if len(unexpected_keys) > 0:
             #     print(f'Unexpected keys: {unexpected_keys}')
 
-
     def load_ext_models(self):
         self.ext_models = {}
-        em_cfg = self.model_cfg.get('ext_models', {})
+        em_cfg = self.model_cfg.get("ext_models", {})
         for name, cfg in em_cfg.items():
             em_cfg = import_type_from_str(cfg.config.type)(**cfg.config.args)
-            em = import_type_from_str(em_cfg.model.type)(em_cfg, is_inference=True, preload_checkpoint=False)
-            checkpoint = torch.load(cfg.checkpoint, map_location='cpu')['state_dict']
+            em = import_type_from_str(em_cfg.model.type)(
+                em_cfg, is_inference=True, preload_checkpoint=False
+            )
+            checkpoint = torch.load(cfg.checkpoint, map_location="cpu")["state_dict"]
             em.load_state_dict(checkpoint)
             em.eval()
             self.ext_models[name] = em
@@ -208,21 +230,25 @@ class MDMBase(nn.Module):
         return
 
     def init_diffusion(self):
-        self.train_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=True)
-        self.test_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=False)
-        self.schedule_sampler = create_named_schedule_sampler(self.model_cfg.diffusion.schedule_sampler_type, self.train_diffusion)
+        self.train_diffusion = create_gaussian_diffusion(
+            self.model_cfg.diffusion, training=True
+        )
+        self.test_diffusion = create_gaussian_diffusion(
+            self.model_cfg.diffusion, training=False
+        )
+        self.schedule_sampler = create_named_schedule_sampler(
+            self.model_cfg.diffusion.schedule_sampler_type, self.train_diffusion
+        )
         # self.guided_denoiser = ClassifierFreeSampleModel(self.denoiser)
         return
 
-    def generate_motion_rep(
-        self, batch, target_x, static_gt
-    ):
+    def generate_motion_rep(self, batch, target_x, static_gt):
         f_condition = batch["f_condition"]
-        f_condition_valid_mask = batch['f_condition_valid_mask']
+        f_condition_valid_mask = batch["f_condition_valid_mask"]
 
         length = batch["length"]
-        assert 'obs' in f_condition
-        if 'obs' in f_condition:
+        assert "obs" in f_condition
+        if "obs" in f_condition:
             obs = f_condition["obs"]
             B, L, J, C = obs.shape
             assert J == 17 and C == 3
@@ -231,42 +257,59 @@ class MDMBase(nn.Module):
             obs = obs.clone()
             visible_mask = obs[..., [2]] > 0.5  # (B, L, J, 1)
 
-            if 'obs' in f_condition_valid_mask:
+            if "obs" in f_condition_valid_mask:
                 valid_mask = f_condition_valid_mask["obs"]  # (B, L)
                 visible_mask[~valid_mask] = False
             obs[~visible_mask[..., 0]] = 0  # set low-conf to all zeros
 
             # f_obs = obs[..., :2]  # (B, L, J, 32)
             f_obs = self.learned_pos_linear(obs[..., :2])  # (B, L, J, 32)
-            f_obs = f_obs * visible_mask + self.learned_pos_params.repeat(B, L, 1, 1) * ~visible_mask  # (B, L, J, 32)
-            f_obs = self.embed_noisyobs(f_obs.view(B, L, -1))  # (B, L, J*32) -> (B, L, C)
+            f_obs = (
+                f_obs * visible_mask
+                + self.learned_pos_params.repeat(B, L, 1, 1) * ~visible_mask
+            )  # (B, L, J, 32)
+            f_obs = self.embed_noisyobs(
+                f_obs.view(B, L, -1)
+            )  # (B, L, J*32) -> (B, L, C)
             f_cond = f_obs
 
-        if 'f_cliffcam' in f_condition:
+        if "f_cliffcam" in f_condition:
             f_cliffcam = f_condition["f_cliffcam"]  # (B, L, 3)
             f_cliffcam = self.cliffcam_embedder(f_cliffcam)
-            if 'f_cliffcam' in f_condition_valid_mask:
+            if "f_cliffcam" in f_condition_valid_mask:
                 valid_mask = f_condition_valid_mask["f_cliffcam"]  # (B, L)
-                f_cliffcam = f_cliffcam * valid_mask[..., None] + self.learned_cliffcam_params.repeat(B, L, 1) * ~valid_mask[..., None]
+                f_cliffcam = (
+                    f_cliffcam * valid_mask[..., None]
+                    + self.learned_cliffcam_params.repeat(B, L, 1)
+                    * ~valid_mask[..., None]
+                )
             f_cond = f_cond + f_cliffcam
         if "f_cam_angvel" in f_condition:
             f_cam_angvel = f_condition["f_cam_angvel"]  # (B, L, 6)
             f_cam_angvel = self.cam_angvel_embedder(f_cam_angvel)
-            if 'f_cam_angvel' in f_condition_valid_mask:
+            if "f_cam_angvel" in f_condition_valid_mask:
                 valid_mask = f_condition_valid_mask["f_cam_angvel"]  # (B, L)
-                f_cam_angvel = f_cam_angvel * valid_mask[..., None] + self.learned_cam_angvel_params.repeat(B, L, 1) * ~valid_mask[..., None]
+                f_cam_angvel = (
+                    f_cam_angvel * valid_mask[..., None]
+                    + self.learned_cam_angvel_params.repeat(B, L, 1)
+                    * ~valid_mask[..., None]
+                )
             f_cond = f_cond + f_cam_angvel
         if "f_cam_t_vel" in f_condition:
             f_cam_t_vel = f_condition["f_cam_t_vel"]  # (B, L, 3)
             f_cam_t_vel = self.cam_t_vel_embedder(f_cam_t_vel)
-            if 'f_cam_t_vel' in f_condition_valid_mask:
+            if "f_cam_t_vel" in f_condition_valid_mask:
                 valid_mask = f_condition_valid_mask["f_cam_t_vel"]  # (B, L)
-                f_cam_t_vel = f_cam_t_vel * valid_mask[..., None] + self.learned_cam_t_vel_params.repeat(B, L, 1) * ~valid_mask[..., None]
+                f_cam_t_vel = (
+                    f_cam_t_vel * valid_mask[..., None]
+                    + self.learned_cam_t_vel_params.repeat(B, L, 1)
+                    * ~valid_mask[..., None]
+                )
             f_cond = f_cond + f_cam_t_vel
-        if 'f_imgseq' in f_condition:
+        if "f_imgseq" in f_condition:
             f_imgseq = f_condition["f_imgseq"]  # (B, L, C)
             f_imgseq = self.imgseq_embedder(f_imgseq)
-            if 'f_imgseq' in f_condition_valid_mask:
+            if "f_imgseq" in f_condition_valid_mask:
                 valid_mask = f_condition_valid_mask["f_imgseq"]  # (B, L)
                 f_imgseq = f_imgseq * valid_mask[..., None]
             f_cond = f_cond + f_imgseq
@@ -325,27 +368,32 @@ class MDMBase(nn.Module):
             "motion_mask": motion_mask,
             "observed_motion": motion,
         }
-        
+
         valid_mask = batch["mask"]["valid"]
-        
-        if mode == 'regression':
+
+        if mode == "regression":
             t = (torch.ones(B) * 999).long().to(motion.device)
             t_weights = torch.ones(B).to(motion.device)
             x_t = motion * motion_mask
-        elif mode == 'diffusion':
+        elif mode == "diffusion":
             t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
-            pred_x_start_regression = batch['regression_outputs']['model_output']['pred_x_start'].detach()
-            if self.args.get('diffusion_all_regression_outputs', False):
+            pred_x_start_regression = batch["regression_outputs"]["model_output"][
+                "pred_x_start"
+            ].detach()
+            if self.args.get("diffusion_all_regression_outputs", False):
                 x_start = pred_x_start_regression
             else:
                 inpaint_mask = torch.ones_like(pred_x_start_regression)
                 inpaint_mask = inpaint_mask * valid_mask[:, :, None]
                 inpaint_mask = inpaint_mask * vis_mask[:, :, None]
-                x_start = clean_motion.clone() * inpaint_mask + pred_x_start_regression * (1 - inpaint_mask)
+                x_start = (
+                    clean_motion.clone() * inpaint_mask
+                    + pred_x_start_regression * (1 - inpaint_mask)
+                )
                 x_start = x_start * valid_mask[:, :, None]
             noise = torch.randn_like(x_start)
             x_t = self.train_diffusion.q_sample(x_start.clone(), t, noise=noise)
-        
+
         denoise_out = self.denoiser(
             x_t, diffusion._scale_timesteps(t), return_aux=False, **denoiser_kwargs
         )
@@ -355,13 +403,15 @@ class MDMBase(nn.Module):
 
         static_conf_logits = pred_x_start[:, :, self.s_pred_ind : self.s_pred_ind + 6]
         assert pred_x_start.shape[-1] == self.s_pred_ind + 6 + 151
-        sample = pred_x_start[:, :, self.s_pred_ind + 6:]
-        
+        sample = pred_x_start[:, :, self.s_pred_ind + 6 :]
+
         valid_loss_mask = torch.ones_like(pred_x_start)
         valid_loss_mask[batch["mask"]["spv_incam_only"], :, -9:] *= 0
-        valid_loss_mask[batch["mask"]["spv_incam_only"], :, self.s_pred_ind :self.s_pred_ind + 6] *= 0
+        valid_loss_mask[
+            batch["mask"]["spv_incam_only"], :, self.s_pred_ind : self.s_pred_ind + 6
+        ] *= 0
         valid_loss_mask = valid_loss_mask * valid_mask[:, :, None]
-        
+
         output = {
             "pred_x_start": pred_x_start,
             "target_x_start": target_x_start,
@@ -372,10 +422,12 @@ class MDMBase(nn.Module):
         }
         for x in self.args.out_attr:
             output[x] = denoise_out[x]
-        
+
         return output
 
-    def forward_train(self, inputs, train=False, postproc=False, static_cam=False, mode=None):
+    def forward_train(
+        self, inputs, train=False, postproc=False, static_cam=False, mode=None
+    ):
         assert self.training, "forward_train should only be called during training"
         outputs = dict()
         length = inputs["length"]  # (B,) effective length of each sample
@@ -385,16 +437,22 @@ class MDMBase(nn.Module):
         # vel_thr = args.static_conf.vel_thr
         # assert vel_thr > 0
         vel_thr = 0.15
-        joint_ids = [7, 10, 8, 11, 20, 21]  # [L_Ankle, L_foot, R_Ankle, R_foot, L_wrist, R_wrist]
+        joint_ids = [
+            7,
+            10,
+            8,
+            11,
+            20,
+            21,
+        ]  # [L_Ankle, L_foot, R_Ankle, R_foot, L_wrist, R_wrist]
         gt_w_j3d = self.endecoder.fk_v2(**inputs["smpl_params_w"])  # (B, L, J=22, 3)
-        static_gt = get_static_joint_mask(gt_w_j3d, vel_thr=vel_thr, repeat_last=True)  # (B, L, J)
+        static_gt = get_static_joint_mask(
+            gt_w_j3d, vel_thr=vel_thr, repeat_last=True
+        )  # (B, L, J)
         static_gt = static_gt[:, :, joint_ids].float()  # (B, L, J')
 
         output = self.get_diffusion_pred_target(
-            batch=inputs,
-            target_x=target_x,
-            static_gt=static_gt,
-            mode=mode
+            batch=inputs, target_x=target_x, static_gt=static_gt, mode=mode
         )
         return output
 
@@ -407,12 +465,10 @@ class MDMBase(nn.Module):
         L = self.max_len
         C = self.motion_rep_dim
         B = length.shape[0]
-        target_x = torch.zeros(B, L, 151).to(inputs['f_condition']['obs'].device)
-        static_gt = torch.zeros(B, L, 6).to(inputs['f_condition']['obs'].device)
+        target_x = torch.zeros(B, L, 151).to(inputs["f_condition"]["obs"].device)
+        static_gt = torch.zeros(B, L, 6).to(inputs["f_condition"]["obs"].device)
 
-        f_cond, motion, _, _ = self.generate_motion_rep(
-            inputs, target_x, static_gt
-        )
+        f_cond, motion, _, _ = self.generate_motion_rep(inputs, target_x, static_gt)
         # Setup length and make padding mask
         vis_mask = length_to_mask(length, L)  # (B, L)
         if self.args.get("vis_masking_f_cond", True):
@@ -427,26 +483,28 @@ class MDMBase(nn.Module):
             }
         }
         # self.denoiser.s_pred_ind = self.s_pred_ind
-        if mode == 'regression':
+        if mode == "regression":
             t = (torch.ones(B) * 999).long().to(motion.device)
             t_weights = torch.ones(B).to(motion.device)
             x_t = torch.rand_like(motion)
-        elif mode == 'diffusion':
+        elif mode == "diffusion":
             t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
-            pred_x_start_regression = inputs['regression_outputs']['2d_model_output']['pred_x_start'].detach()
+            pred_x_start_regression = inputs["regression_outputs"]["2d_model_output"][
+                "pred_x_start"
+            ].detach()
             x_start = pred_x_start_regression
             noise = torch.randn_like(x_start)
             x_t = self.train_diffusion.q_sample(x_start.clone(), t, noise=noise)
-            
+
         denoise_out = self.denoiser(
             x_t, diffusion._scale_timesteps(t), return_aux=False, **denoiser_kwargs
         )
-        
+
         pred_x_start = denoise_out["pred_x_start"]
 
         static_conf_logits = pred_x_start[:, :, self.s_pred_ind : self.s_pred_ind + 6]
         assert pred_x_start.shape[-1] == self.s_pred_ind + 6 + 151
-        sample = pred_x_start[:, :, self.s_pred_ind + 6:]
+        sample = pred_x_start[:, :, self.s_pred_ind + 6 :]
 
         output = {
             "pred_x_start": pred_x_start,
@@ -458,12 +516,20 @@ class MDMBase(nn.Module):
             output[x] = denoise_out[x]
         return output
 
-    def forward_test(self, inputs, train=False, postproc=False, static_cam=False, progress=False, mode=None):
+    def forward_test(
+        self,
+        inputs,
+        train=False,
+        postproc=False,
+        static_cam=False,
+        progress=False,
+        mode=None,
+    ):
         assert not self.training, "forward_test should only be called during inference"
         diffusion = self.test_diffusion
         denoiser = self.denoiser
         length = inputs["length"]  # (B,) effective length of each sample
-        regression_only = self.args.get('regression_only', False)
+        regression_only = self.args.get("regression_only", False)
 
         f_condition = inputs["f_condition"]
         cliff_cam = f_condition["f_cliffcam"]
@@ -498,7 +564,10 @@ class MDMBase(nn.Module):
             x_t = motion * motion_mask
 
             out = self.denoiser(
-                x_t, self.train_diffusion._scale_timesteps(t), return_aux=False, **denoiser_kwargs
+                x_t,
+                self.train_diffusion._scale_timesteps(t),
+                return_aux=False,
+                **denoiser_kwargs,
             )
             if "pred_cam" in self.args.out_attr:
                 pred_cam = out["pred_cam"]
@@ -507,8 +576,8 @@ class MDMBase(nn.Module):
             if "cam_scale" in self.args.out_attr:
                 pred_cam_scale = out["pred_cam_scale"]
             samples = out["pred_x_start"]
-            static_conf_logits = samples[:, :, self.s_pred_ind:self.s_pred_ind + 6]
-            sample = samples[:, :, self.s_pred_ind + 6:]
+            static_conf_logits = samples[:, :, self.s_pred_ind : self.s_pred_ind + 6]
+            sample = samples[:, :, self.s_pred_ind + 6 :]
 
         else:
             cond = {
@@ -561,12 +630,12 @@ class MDMBase(nn.Module):
                 pred_cam = samples_out["pred_cam"]
             if "cam_t_vel" in self.args.out_attr:
                 pred_cam_t_vel = samples_out["pred_cam_t_vel"]
-            if 'cam_scale' in self.args.out_attr:
+            if "cam_scale" in self.args.out_attr:
                 pred_cam_scale = samples_out["pred_cam_scale"]
             samples = samples_out["pred_xstart"]
 
-            static_conf_logits = samples[:, :, self.s_pred_ind:self.s_pred_ind + 6]
-            sample = samples[:, :, self.s_pred_ind + 6:]
+            static_conf_logits = samples[:, :, self.s_pred_ind : self.s_pred_ind + 6]
+            sample = samples[:, :, self.s_pred_ind + 6 :]
 
         output = {
             "pred_x": sample,
@@ -574,13 +643,16 @@ class MDMBase(nn.Module):
         }
 
         if self.args.get("return_mid", False):
-            output['intermediate_pred_x'] = [sample_i['pred_xstart'][:, :, self.s_pred_ind + 6:] for sample_i in samples_out['intermediates']]
+            output["intermediate_pred_x"] = [
+                sample_i["pred_xstart"][:, :, self.s_pred_ind + 6 :]
+                for sample_i in samples_out["intermediates"]
+            ]
 
-        if 'pred_cam' in self.args.out_attr:
+        if "pred_cam" in self.args.out_attr:
             output["pred_cam"] = pred_cam
-        if 'cam_t_vel' in self.args.out_attr:
+        if "cam_t_vel" in self.args.out_attr:
             output["pred_cam_t_vel"] = pred_cam_t_vel
-        if 'cam_scale' in self.args.out_attr:
+        if "cam_scale" in self.args.out_attr:
             output["pred_cam_scale"] = pred_cam_scale
         return output
 

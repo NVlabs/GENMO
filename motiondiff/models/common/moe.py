@@ -1,17 +1,17 @@
 import copy
-from typing import Optional, Any, Union, Callable
+from typing import Any, Callable, Optional, Union
 
 import torch
 from torch import Tensor
 from torch.nn import functional as F
-from torch.nn.modules.module import Module
 from torch.nn.modules.activation import MultiheadAttention
 from torch.nn.modules.dropout import Dropout
 from torch.nn.modules.linear import Linear
+from torch.nn.modules.module import Module
 from torch.nn.modules.normalization import LayerNorm
 from torch.nn.modules.transformer import _get_activation_fn
-from .mixtral import MixtralSparseMoeBlock
 
+from .mixtral import MixtralSparseMoeBlock
 
 
 class MoETransformerEncoderLayer(Module):
@@ -67,21 +67,33 @@ class MoETransformerEncoderLayer(Module):
         returned, and an additional speedup proportional to the fraction of the input that
         is padding can be expected.
     """
-    __constants__ = ['batch_first', 'norm_first']
 
-    def __init__(self, d_model: int, nhead: int, dim_feedforward: int = 2048, dropout: float = 0.1,
-                 activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
-                 layer_norm_eps: float = 1e-5, batch_first: bool = False, norm_first: bool = False,
-                 device=None, dtype=None, moe_cfg=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    __constants__ = ["batch_first", "norm_first"]
+
+    def __init__(
+        self,
+        d_model: int,
+        nhead: int,
+        dim_feedforward: int = 2048,
+        dropout: float = 0.1,
+        activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
+        layer_norm_eps: float = 1e-5,
+        batch_first: bool = False,
+        norm_first: bool = False,
+        device=None,
+        dtype=None,
+        moe_cfg=None,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
         super(MoETransformerEncoderLayer, self).__init__()
-        self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
-                                            **factory_kwargs)
+        self.self_attn = MultiheadAttention(
+            d_model, nhead, dropout=dropout, batch_first=batch_first, **factory_kwargs
+        )
         # Implementation of Feedforward model
         # self.linear1 = Linear(d_model, dim_feedforward, **factory_kwargs)
         # self.dropout = Dropout(dropout)
         # self.linear2 = Linear(dim_feedforward, d_model, **factory_kwargs)
-        
+
         self.moe_cfg = moe_cfg
         self.moe_block = MixtralSparseMoeBlock(moe_cfg)
 
@@ -107,12 +119,15 @@ class MoETransformerEncoderLayer(Module):
 
     def __setstate__(self, state):
         super(MoETransformerEncoderLayer, self).__setstate__(state)
-        if not hasattr(self, 'activation'):
+        if not hasattr(self, "activation"):
             self.activation = F.relu
 
-
-    def forward(self, src: Tensor, src_mask: Optional[Tensor] = None,
-                src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+    def forward(
+        self,
+        src: Tensor,
+        src_mask: Optional[Tensor] = None,
+        src_key_padding_mask: Optional[Tensor] = None,
+    ) -> Tensor:
         r"""Pass the input through the encoder layer.
 
         Args:
@@ -126,10 +141,12 @@ class MoETransformerEncoderLayer(Module):
 
         if src_key_padding_mask is not None:
             _skpm_dtype = src_key_padding_mask.dtype
-            if _skpm_dtype != torch.bool and not torch.is_floating_point(src_key_padding_mask):
+            if _skpm_dtype != torch.bool and not torch.is_floating_point(
+                src_key_padding_mask
+            ):
                 raise AssertionError(
-                    "only bool and floating types of key_padding_mask are supported")
-
+                    "only bool and floating types of key_padding_mask are supported"
+                )
 
         x = src
         if self.norm_first:
@@ -142,21 +159,26 @@ class MoETransformerEncoderLayer(Module):
         return x
 
     # self-attention block
-    def _sa_block(self, x: Tensor,
-                  attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor]) -> Tensor:
-        x = self.self_attn(x, x, x,
-                           attn_mask=attn_mask,
-                           key_padding_mask=key_padding_mask,
-                           need_weights=False)[0]
+    def _sa_block(
+        self, x: Tensor, attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor]
+    ) -> Tensor:
+        x = self.self_attn(
+            x,
+            x,
+            x,
+            attn_mask=attn_mask,
+            key_padding_mask=key_padding_mask,
+            need_weights=False,
+        )[0]
         return self.dropout1(x)
 
     # feed forward block
     def _ff_block(self, x: Tensor) -> Tensor:
         x = self.linear2(self.dropout(self.activation(self.linear1(x))))
         return self.dropout2(x)
-    
+
     def _moe_block(self, x: Tensor) -> Tensor:
         x = self.moe_block(x)[0]
-        if self.moe_cfg.get('dropout', False):
+        if self.moe_cfg.get("dropout", False):
             x = self.dropout2(x)
         return x

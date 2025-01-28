@@ -4,16 +4,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import einsum, rearrange, repeat
 
+import hmr4d.utils.matrix as matrix
+from hmr4d.utils.geo.quaternion import qbetween, qinv, qmul, qrot, qslerp
 from motiondiff.models.mdm.rotation_conversions import (
-    matrix_to_rotation_6d,
-    rotation_6d_to_matrix,
     axis_angle_to_matrix,
     matrix_to_axis_angle,
-    quaternion_to_matrix,
     matrix_to_quaternion,
+    matrix_to_rotation_6d,
+    quaternion_to_matrix,
+    rotation_6d_to_matrix,
 )
-import hmr4d.utils.matrix as matrix
-from hmr4d.utils.geo.quaternion import qbetween, qslerp, qinv, qmul, qrot
 
 
 class CCD_IK:
@@ -62,7 +62,9 @@ class CCD_IK:
         self.rot_weight = rot_weight
 
     def is_converged(self):
-        end_pos = matrix.get_position(self.global_mat)[..., self.target_ind, :]  # (*, OJ, 3)
+        end_pos = matrix.get_position(self.global_mat)[
+            ..., self.target_ind, :
+        ]  # (*, OJ, 3)
         converged_mask = (self.target_pos - end_pos).norm(dim=-1) < self.threshold
         self.converged_mask = converged_mask
         if self.converged_mask.sum() > 0:
@@ -136,7 +138,9 @@ class CCD_IK:
             x_vec_avg = matrix.normalize(x_vec_sum / count)
             y_vec_avg = matrix.normalize(y_vec_sum / count)
             z_vec_avg = torch.cross(x_vec_avg, y_vec_avg, dim=-1)
-            solved_rot = torch.stack([x_vec_avg, y_vec_avg, z_vec_avg], dim=-1)  # column
+            solved_rot = torch.stack(
+                [x_vec_avg, y_vec_avg, z_vec_avg], dim=-1
+            )  # column
 
             parent_rot = matrix.get_rotation(self.global_mat)[..., self.parent[i], :, :]
             solved_local_rot = matrix.get_mat_BtoA(parent_rot, solved_rot)

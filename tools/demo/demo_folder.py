@@ -1,16 +1,19 @@
 import argparse
-from pathlib import Path
-from tqdm import tqdm
-from hmr4d.utils.pylogger import Log
-import subprocess
 import os
+import subprocess
+from pathlib import Path
 
+from tqdm import tqdm
+
+from hmr4d.utils.pylogger import Log
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-f", "--folder", type=str)
     parser.add_argument("-d", "--output_root", type=str, default=None)
-    parser.add_argument("-s", "--static_cam", action="store_true", help="If true, skip DPVO")
+    parser.add_argument(
+        "-s", "--static_cam", action="store_true", help="If true, skip DPVO"
+    )
     args = parser.parse_args()
 
     folder = Path(args.folder)

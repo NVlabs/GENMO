@@ -1,13 +1,14 @@
 import os
+
 import torch
 
 # Define the input and output directories
-input_dir = 'inputs/HumanML3D_SMPL/t5_embeddings_v1'
-output_dir = 'inputs/HumanML3D_SMPL/t5_embeddings_v1_half'
+input_dir = "inputs/HumanML3D_SMPL/t5_embeddings_v1"
+output_dir = "inputs/HumanML3D_SMPL/t5_embeddings_v1_half"
 # input_dir = 'inputs/MotionXpp_ye/t5_embeddings_v1'
 # output_dir = 'inputs/MotionXpp_ye/t5_embeddings_v1_half'
 
-fname = 'test_text_embed.pth'
+fname = "test_text_embed.pth"
 os.makedirs(output_dir, exist_ok=True)
 
 # Load the saved dictionary

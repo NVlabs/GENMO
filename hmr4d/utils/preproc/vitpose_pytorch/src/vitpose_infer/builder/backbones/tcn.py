@@ -4,8 +4,8 @@ import copy
 import torch.nn as nn
 from mmcv.cnn import ConvModule, build_conv_layer, constant_init, kaiming_init
 from mmcv.utils.parrots_wrapper import _BatchNorm
-
 from mmpose.core import WeightNormClipHook
+
 from ..builder import BACKBONES
 from .base_backbone import BaseBackbone
 
@@ -35,18 +35,20 @@ class BasicTemporalBlock(nn.Module):
             Default: dict(type='BN1d').
     """
 
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 mid_channels=1024,
-                 kernel_size=3,
-                 dilation=3,
-                 dropout=0.25,
-                 causal=False,
-                 residual=True,
-                 use_stride_conv=False,
-                 conv_cfg=dict(type='Conv1d'),
-                 norm_cfg=dict(type='BN1d')):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        mid_channels=1024,
+        kernel_size=3,
+        dilation=3,
+        dropout=0.25,
+        causal=False,
+        residual=True,
+        use_stride_conv=False,
+        conv_cfg=dict(type="Conv1d"),
+        norm_cfg=dict(type="BN1d"),
+    ):
         # Protect mutable default arguments
         conv_cfg = copy.deepcopy(conv_cfg)
         norm_cfg = copy.deepcopy(norm_cfg)
@@ -77,21 +79,24 @@ class BasicTemporalBlock(nn.Module):
                 kernel_size=kernel_size,
                 stride=self.stride,
                 dilation=self.dilation,
-                bias='auto',
+                bias="auto",
                 conv_cfg=conv_cfg,
-                norm_cfg=norm_cfg))
+                norm_cfg=norm_cfg,
+            )
+        )
         self.conv2 = nn.Sequential(
             ConvModule(
                 mid_channels,
                 out_channels,
                 kernel_size=1,
-                bias='auto',
+                bias="auto",
                 conv_cfg=conv_cfg,
-                norm_cfg=norm_cfg))
+                norm_cfg=norm_cfg,
+            )
+        )
 
         if residual and in_channels != out_channels:
-            self.short_cut = build_conv_layer(conv_cfg, in_channels,
-                                              out_channels, 1)
+            self.short_cut = build_conv_layer(conv_cfg, in_channels, out_channels, 1)
         else:
             self.short_cut = None
 
@@ -102,8 +107,12 @@ class BasicTemporalBlock(nn.Module):
         if self.use_stride_conv:
             assert self.causal_shift + self.kernel_size // 2 < x.shape[2]
         else:
-            assert 0 <= self.pad + self.causal_shift < x.shape[2] - \
-                self.pad + self.causal_shift <= x.shape[2]
+            assert (
+                0
+                <= self.pad + self.causal_shift
+                < x.shape[2] - self.pad + self.causal_shift
+                <= x.shape[2]
+            )
 
         out = self.conv1(x)
         if self.dropout is not None:
@@ -115,12 +124,17 @@ class BasicTemporalBlock(nn.Module):
 
         if self.residual:
             if self.use_stride_conv:
-                res = x[:, :, self.causal_shift +
-                        self.kernel_size // 2::self.kernel_size]
+                res = x[
+                    :, :, self.causal_shift + self.kernel_size // 2 :: self.kernel_size
+                ]
             else:
-                res = x[:, :,
-                        (self.pad + self.causal_shift):(x.shape[2] - self.pad +
-                                                        self.causal_shift)]
+                res = x[
+                    :,
+                    :,
+                    (self.pad + self.causal_shift) : (
+                        x.shape[2] - self.pad + self.causal_shift
+                    ),
+                ]
 
             if self.short_cut is not None:
                 res = self.short_cut(res)
@@ -176,18 +190,20 @@ class TCN(BaseBackbone):
         (1, 1024, 217)
     """
 
-    def __init__(self,
-                 in_channels,
-                 stem_channels=1024,
-                 num_blocks=2,
-                 kernel_sizes=(3, 3, 3),
-                 dropout=0.25,
-                 causal=False,
-                 residual=True,
-                 use_stride_conv=False,
-                 conv_cfg=dict(type='Conv1d'),
-                 norm_cfg=dict(type='BN1d'),
-                 max_norm=None):
+    def __init__(
+        self,
+        in_channels,
+        stem_channels=1024,
+        num_blocks=2,
+        kernel_sizes=(3, 3, 3),
+        dropout=0.25,
+        causal=False,
+        residual=True,
+        use_stride_conv=False,
+        conv_cfg=dict(type="Conv1d"),
+        norm_cfg=dict(type="BN1d"),
+        max_norm=None,
+    ):
         # Protect mutable default arguments
         conv_cfg = copy.deepcopy(conv_cfg)
         norm_cfg = copy.deepcopy(norm_cfg)
@@ -204,16 +220,17 @@ class TCN(BaseBackbone):
 
         assert num_blocks == len(kernel_sizes) - 1
         for ks in kernel_sizes:
-            assert ks % 2 == 1, 'Only odd filter widths are supported.'
+            assert ks % 2 == 1, "Only odd filter widths are supported."
 
         self.expand_conv = ConvModule(
             in_channels,
             stem_channels,
             kernel_size=kernel_sizes[0],
             stride=kernel_sizes[0] if use_stride_conv else 1,
-            bias='auto',
+            bias="auto",
             conv_cfg=conv_cfg,
-            norm_cfg=norm_cfg)
+            norm_cfg=norm_cfg,
+        )
 
         dilation = kernel_sizes[0]
         self.tcn_blocks = nn.ModuleList()
@@ -230,7 +247,9 @@ class TCN(BaseBackbone):
                     residual=residual,
                     use_stride_conv=use_stride_conv,
                     conv_cfg=conv_cfg,
-                    norm_cfg=norm_cfg))
+                    norm_cfg=norm_cfg,
+                )
+            )
             dilation *= kernel_sizes[i]
 
         if self.max_norm is not None:
@@ -262,6 +281,6 @@ class TCN(BaseBackbone):
         if pretrained is None:
             for m in self.modules():
                 if isinstance(m, nn.modules.conv._ConvNd):
-                    kaiming_init(m, mode='fan_in', nonlinearity='relu')
+                    kaiming_init(m, mode="fan_in", nonlinearity="relu")
                 elif isinstance(m, _BatchNorm):
                     constant_init(m, 1)

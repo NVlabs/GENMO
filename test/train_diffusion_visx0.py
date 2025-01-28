@@ -1,17 +1,18 @@
-import torch
-import torch.nn as nn
-import numpy as np
-from torch.utils.data import Dataset, DataLoader
-from pytorch_lightning.loggers import WandbLogger
-from hmr4d.network.mdm.mdm_denoiser_rope import PositionalEncoding, TimestepEmbedder
-from motiondiff.diffusion import gaussian_diffusion as gd
-from motiondiff.diffusion.respace import SpacedDiffusion, space_timesteps
-from motiondiff.diffusion.resample import create_named_schedule_sampler
-
-import random
-from tqdm import tqdm
 import math
 import os
+import random
+
+import numpy as np
+import torch
+import torch.nn as nn
+from pytorch_lightning.loggers import WandbLogger
+from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
+
+from hmr4d.network.mdm.mdm_denoiser_rope import PositionalEncoding, TimestepEmbedder
+from motiondiff.diffusion import gaussian_diffusion as gd
+from motiondiff.diffusion.resample import create_named_schedule_sampler
+from motiondiff.diffusion.respace import SpacedDiffusion, space_timesteps
 
 
 class MLPModel(nn.Module):
@@ -30,7 +31,7 @@ class MLPModel(nn.Module):
         )
         sequence_time_encoder = PositionalEncoding(128, dropout=0.1)
         self.embed_timestep = TimestepEmbedder(128, sequence_time_encoder)
-    
+
     def forward(self, x, t, cond):
         emb = self.embed_timestep(t.long()).permute(1, 0, 2).squeeze(1)
         x = torch.cat([x, cond], dim=-1)
@@ -47,9 +48,8 @@ class RfDataset(Dataset):
 
     def __len__(self):
         return self.length
-    
-    def __getitem__(self, idx):
 
+    def __getitem__(self, idx):
         z0 = torch.randn(2)
         # if self.train:
         #     cond = torch.rand(2)
@@ -73,7 +73,8 @@ class RfDataset(Dataset):
         #     z1[0] = z1[0] - 5
         #     z1[1] = z1[1] + 5
 
-        return {'z0': z0, 'cond': cond, 'z1': z1}
+        return {"z0": z0, "cond": cond, "z1": z1}
+
 
 def _extract_into_tensor(arr, timesteps, broadcast_shape):
     """
@@ -138,7 +139,7 @@ if __name__ == "__main__":
     random.seed(42)
     np.random.seed(42)
     pred_mode = "z1"  # 'drift'
-    pred_mode = 'z1_abs'
+    pred_mode = "z1_abs"
     pred_mode = "drift"
     schedule_sampler_type = "uniform"
 
@@ -152,19 +153,17 @@ if __name__ == "__main__":
 
     z1 = torch.randn(10000, 2)
     z1[:, :1] = train_cond * 5  # the first dimension is the condition * 5
-    torch.save(train_cond, 'rf_base_train_cond.pth')
-    torch.save(z1, 'rf_base_train_z1.pth')
+    torch.save(train_cond, "rf_base_train_cond.pth")
+    torch.save(z1, "rf_base_train_z1.pth")
 
     model = MLPModel()
     diffusion = create_gaussian_diffusion(training=True)
-    schedule_sampler = create_named_schedule_sampler(
-        schedule_sampler_type, diffusion
-    )
+    schedule_sampler = create_named_schedule_sampler(schedule_sampler_type, diffusion)
     test_diffusion = create_gaussian_diffusion(training=False)
     dataset = RfDataset(10000, cond=train_cond, z1=z1)
     dataloader = DataLoader(dataset, batch_size=256, shuffle=True)
 
-    device = 'cuda'
+    device = "cuda"
     num_epochs = 100
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -176,10 +175,18 @@ if __name__ == "__main__":
 
     # Training
     epoch = 0
-    pbar = tqdm(total=num_epochs * len(dataset), desc=f"Epoch {epoch}/{num_epochs}", dynamic_ncols=True)
+    pbar = tqdm(
+        total=num_epochs * len(dataset),
+        desc=f"Epoch {epoch}/{num_epochs}",
+        dynamic_ncols=True,
+    )
     for epoch in range(num_epochs):
         for batch in dataloader:
-            gt_z0, cond, z1 = batch['z0'].to(device), batch['cond'].to(device), batch['z1'].to(device)
+            gt_z0, cond, z1 = (
+                batch["z0"].to(device),
+                batch["cond"].to(device),
+                batch["z1"].to(device),
+            )
             z0 = torch.randn_like(gt_z0).to(device)
             t = (torch.rand(z0.shape[0], device=z0.device) * 1000).long()
             t_expand = t.view(-1, 1).repeat(1, z0.shape[1])
@@ -195,7 +202,7 @@ if __name__ == "__main__":
 
             pbar.set_description(f"Epoch {epoch}/{num_epochs} - Loss: {loss.item()}")
             pbar.update(z1.shape[0])
-    
+
     # Sampling
     # sample_N = 100
     model.eval()
@@ -211,11 +218,12 @@ if __name__ == "__main__":
         intermediate_z_x0 = []
         intermediate_var = []
         for k, i in enumerate(indices):
-
             t = torch.tensor([i] * z0.shape[0], device=device)
 
             alpha_bar = _extract_into_tensor(test_diffusion.alphas_cumprod, t, z0.shape)
-            alpha_bar_prev = _extract_into_tensor(test_diffusion.alphas_cumprod_prev, t, z0.shape)
+            alpha_bar_prev = _extract_into_tensor(
+                test_diffusion.alphas_cumprod_prev, t, z0.shape
+            )
 
             out_orig = test_diffusion.p_mean_variance(
                 model,
@@ -223,11 +231,14 @@ if __name__ == "__main__":
                 t,
                 clip_denoised=False,
                 denoised_fn=None,
-                model_kwargs={'cond': cond.clone()},
-                model_output=None
+                model_kwargs={"cond": cond.clone()},
+                model_output=None,
             )
             pred_xstart = out_orig["pred_xstart"]
-            x_var = (pred_xstart[:z0.shape[0] // 2].var(dim=0).sum().item() + pred_xstart[z0.shape[0] // 2:].var(dim=0).sum().item()) / 2
+            x_var = (
+                pred_xstart[: z0.shape[0] // 2].var(dim=0).sum().item()
+                + pred_xstart[z0.shape[0] // 2 :].var(dim=0).sum().item()
+            ) / 2
             intermediate_var.append(x_var)
             intermediate_z_x0.append(pred_xstart.cpu().numpy())
             eps = test_diffusion._predict_eps_from_xstart(x, t, pred_xstart)
@@ -241,7 +252,7 @@ if __name__ == "__main__":
             noise = torch.randn_like(x)
             mean_pred = (
                 out_orig["pred_xstart"] * torch.sqrt(alpha_bar_prev)
-                + torch.sqrt(1 - alpha_bar_prev - sigma ** 2) * eps
+                + torch.sqrt(1 - alpha_bar_prev - sigma**2) * eps
             )
             nonzero_mask = (
                 (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
@@ -251,26 +262,54 @@ if __name__ == "__main__":
 
         z0 = z0.cpu().numpy()
         z1 = x.cpu().numpy()
-        intermediate_z = np.stack(intermediate_z).transpose(1, 0, 2)    # [T, N, 2] -> [N, T, 2]
+        intermediate_z = np.stack(intermediate_z).transpose(
+            1, 0, 2
+        )  # [T, N, 2] -> [N, T, 2]
         intermediate_z_x0 = np.stack(intermediate_z_x0)
         intermediate_var = np.array(intermediate_var)
     # Visualization
     import matplotlib.pyplot as plt
-    os.makedirs('vis/dm_x0', exist_ok=True)
+
+    os.makedirs("vis/dm_x0", exist_ok=True)
 
     plt.plot(indices, intermediate_var)
-    plt.savefig('vis/dm_x0/var.png')
+    plt.savefig("vis/dm_x0/var.png")
     plt.close()
 
     for bid in range(0, len(intermediate_z), 10):
-        plt.plot(intermediate_z[bid][:, 0], intermediate_z[bid][:, 1], color='black', alpha=0.5)
+        plt.plot(
+            intermediate_z[bid][:, 0],
+            intermediate_z[bid][:, 1],
+            color="black",
+            alpha=0.5,
+        )
 
-    plt.scatter(z0[z0.shape[0] // 2:, 0][::10], z0[z0.shape[0] // 2:, 1][::10], label='cond2_xT', color='gray')
-    plt.scatter(z0[:z0.shape[0] // 2, 0][::10], z0[:z0.shape[0] // 2, 1][::10], label='cond1_xT', color='gray')
-    plt.scatter(z1[z1.shape[0] // 2:, 0][::10], z1[z1.shape[0] // 2:, 1][::10], label='cond2_x0', color='red')
-    plt.scatter(z1[:z1.shape[0] // 2, 0][::10], z1[:z1.shape[0] // 2, 1][::10], label='cond1_x0', color='blue')
+    plt.scatter(
+        z0[z0.shape[0] // 2 :, 0][::10],
+        z0[z0.shape[0] // 2 :, 1][::10],
+        label="cond2_xT",
+        color="gray",
+    )
+    plt.scatter(
+        z0[: z0.shape[0] // 2, 0][::10],
+        z0[: z0.shape[0] // 2, 1][::10],
+        label="cond1_xT",
+        color="gray",
+    )
+    plt.scatter(
+        z1[z1.shape[0] // 2 :, 0][::10],
+        z1[z1.shape[0] // 2 :, 1][::10],
+        label="cond2_x0",
+        color="red",
+    )
+    plt.scatter(
+        z1[: z1.shape[0] // 2, 0][::10],
+        z1[: z1.shape[0] // 2, 1][::10],
+        label="cond1_x0",
+        color="blue",
+    )
     plt.legend()
-    plt.savefig('dm.png')
+    plt.savefig("dm.png")
     plt.close()
 
     for k, i in enumerate(indices):
@@ -282,22 +321,43 @@ if __name__ == "__main__":
         # plt.plot(intermediate_z_x0[k][:, 0], intermediate_z_x0[k][:, 1], color='black', alpha=0.5)
         traj = np.stack([start, end], axis=0).transpose(1, 0, 2)
         for bid in range(0, traj.shape[0], 10):
-            plt.plot(traj[bid][:, 0], traj[bid][:, 1], color='black', alpha=0.5)
+            plt.plot(traj[bid][:, 0], traj[bid][:, 1], color="black", alpha=0.5)
 
-        plt.title(f'Timestep {i}')
-        plt.scatter(z0[z0.shape[0] // 2:, 0][::10], z0[z0.shape[0] // 2:, 1][::10], label='cond2_xT', color='gray')
-        plt.scatter(z0[:z0.shape[0] // 2, 0][::10], z0[:z0.shape[0] // 2, 1][::10], label='cond1_xT', color='gray')
-        plt.scatter(z1[z1.shape[0] // 2:, 0][::10], z1[z1.shape[0] // 2:, 1][::10], label='cond2_x0', color='red')
-        plt.scatter(z1[:z1.shape[0] // 2, 0][::10], z1[:z1.shape[0] // 2, 1][::10], label='cond1_x1', color='blue')
+        plt.title(f"Timestep {i}")
+        plt.scatter(
+            z0[z0.shape[0] // 2 :, 0][::10],
+            z0[z0.shape[0] // 2 :, 1][::10],
+            label="cond2_xT",
+            color="gray",
+        )
+        plt.scatter(
+            z0[: z0.shape[0] // 2, 0][::10],
+            z0[: z0.shape[0] // 2, 1][::10],
+            label="cond1_xT",
+            color="gray",
+        )
+        plt.scatter(
+            z1[z1.shape[0] // 2 :, 0][::10],
+            z1[z1.shape[0] // 2 :, 1][::10],
+            label="cond2_x0",
+            color="red",
+        )
+        plt.scatter(
+            z1[: z1.shape[0] // 2, 0][::10],
+            z1[: z1.shape[0] // 2, 1][::10],
+            label="cond1_x1",
+            color="blue",
+        )
 
         plt.legend()
-        plt.savefig(f'vis/dm_x0/dm_x0_{k}.png')
+        plt.savefig(f"vis/dm_x0/dm_x0_{k}.png")
         plt.close()
-    
+
     # save video
     import imageio
+
     images = []
     for k in range(len(indices)):
         frame = imageio.imread(f"vis/dm_x0/dm_x0_{k}.png")[:, :, :3]
         images.append(frame)
-    imageio.mimsave('vis/dm_x0/dm_x0.mp4', images, fps=10, codec='libx264')
+    imageio.mimsave("vis/dm_x0/dm_x0.mp4", images, fps=10, codec="libx264")

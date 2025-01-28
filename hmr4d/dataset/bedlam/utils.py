@@ -1,6 +1,7 @@
-import torch
-import numpy as np
 from pathlib import Path
+
+import numpy as np
+import torch
 
 resource_dir = Path(__file__).parent / "resource"
 

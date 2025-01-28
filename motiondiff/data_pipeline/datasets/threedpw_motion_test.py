@@ -1,6 +1,7 @@
+from pathlib import Path
+
 import torch
 from torch.utils import data
-from pathlib import Path
 
 # from hmr4d.utils.pylogger import Log
 # from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
@@ -65,7 +66,7 @@ class ThreedpwSmplFullSeqDataset(data.Dataset):
         # Preprocessed:  bbx, kp2d, image as feature
         bbx_xys = self.vid2bbx[vid]["bbx_xys"]  # (F, 3)
         kp2d = self.vid2kp2d[vid]  # (F, 17, 3)
-        cam_angvel = 'None' # compute_cam_angvel(data["T_w2c"][:, :3, :3])  # (L, 6)
+        cam_angvel = "None"  # compute_cam_angvel(data["T_w2c"][:, :3, :3])  # (L, 6)
         data.update({"bbx_xys": bbx_xys, "kp2d": kp2d, "cam_angvel": cam_angvel})
 
         imgfeat_dir = self.threedpw_dir / "imgfeats/3dpw_test"
@@ -78,7 +79,7 @@ class ThreedpwSmplFullSeqDataset(data.Dataset):
         video_path = self.threedpw_dir / f"videos/{vname}.mp4"
         frame_id = torch.where(mask)[0].long()
         ds = 0.5
-        K_render = 'None' # resize_K(K_fullimg, ds)
+        K_render = "None"  # resize_K(K_fullimg, ds)
         bbx_xys_render = bbx_xys * ds
         kp2d_render = kp2d.clone()
         kp2d_render[..., :2] *= ds
@@ -118,7 +119,9 @@ class ThreedpwSmplFullSeqDataset(data.Dataset):
         if self.skip_invalid:  # Drop all invalid frames
             mask = data["mask"].clone()
             data["length"] = sum(mask)
-            data["smpl_params"] = {k: v[mask].clone() for k, v in data["smpl_params"].items()}
+            data["smpl_params"] = {
+                k: v[mask].clone() for k, v in data["smpl_params"].items()
+            }
             data["T_w2c"] = data["T_w2c"][mask].clone()
             data["mask"] = data["mask"][mask].clone()
             data["K_fullimg"] = data["K_fullimg"][mask].clone()
@@ -126,8 +129,10 @@ class ThreedpwSmplFullSeqDataset(data.Dataset):
             data["kp2d"] = data["kp2d"][mask].clone()
             # data["cam_angvel"] = data["cam_angvel"][mask].clone()
             data["f_imgseq"] = data["f_imgseq"][mask].clone()
-            if 'flip_test' in data:
-                data["flip_test"] = {k: v[mask].clone() for k, v in data["flip_test"].items()}
+            if "flip_test" in data:
+                data["flip_test"] = {
+                    k: v[mask].clone() for k, v in data["flip_test"].items()
+                }
 
         return data
 

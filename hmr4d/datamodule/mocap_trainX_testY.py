@@ -1,15 +1,14 @@
-import torch
-import pytorch_lightning as pl
-from pytorch_lightning.utilities.combined_loader import CombinedLoader
-from hydra.utils import instantiate
-from torch.utils.data import DataLoader, ConcatDataset, Subset
-from omegaconf import ListConfig, DictConfig
-from hmr4d.utils.pylogger import Log
-from numpy.random import choice
-from torch.utils.data import default_collate
-
-
 import resource
+
+import pytorch_lightning as pl
+import torch
+from hydra.utils import instantiate
+from numpy.random import choice
+from omegaconf import DictConfig, ListConfig
+from pytorch_lightning.utilities.combined_loader import CombinedLoader
+from torch.utils.data import ConcatDataset, DataLoader, Subset, default_collate
+
+from hmr4d.utils.pylogger import Log
 
 rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (4096, rlimit[1]))
@@ -32,18 +31,34 @@ def collate_fn(batch):
         elif k == "caption":
             return_dict[k] = [d[k] if k in d else "" for d in batch]
         elif k == "text_embed":
-            return_dict[k] = torch.stack([d[k] if k in d else torch.zeros(50, 1024) for d in batch])
-        elif k == 'use_det_kp':
-            return_dict[k] = default_collate([d[k] if k in d else torch.zeros(d["K_fullimg"].shape[0]) for d in batch])
+            return_dict[k] = torch.stack(
+                [d[k] if k in d else torch.zeros(50, 1024) for d in batch]
+            )
+        elif k == "use_det_kp":
+            return_dict[k] = default_collate(
+                [
+                    d[k] if k in d else torch.zeros(d["K_fullimg"].shape[0])
+                    for d in batch
+                ]
+            )
         else:
             return_dict[k] = default_collate([d[k] for d in batch])
     return_dict["B"] = len(batch)
-    return_dict['has_text'] = torch.tensor([text != '' for text in return_dict['caption']])
+    return_dict["has_text"] = torch.tensor(
+        [text != "" for text in return_dict["caption"]]
+    )
     return return_dict
 
 
 class DataModule(pl.LightningDataModule):
-    def __init__(self, dataset_opts: DictConfig, loader_opts: DictConfig, limit_each_trainset=None, train_subset_ratio=None, train_2d_only=False):
+    def __init__(
+        self,
+        dataset_opts: DictConfig,
+        loader_opts: DictConfig,
+        limit_each_trainset=None,
+        train_subset_ratio=None,
+        train_2d_only=False,
+    ):
         """This is a general datamodule that can be used for any dataset.
         Train uses ConcatDataset
         Val and Test use CombinedLoader, sequential, completely consumes ecah iterable sequentially, and returns a triplet (data, idx, iterable_idx)
@@ -63,17 +78,29 @@ class DataModule(pl.LightningDataModule):
         if "train" in dataset_opts:
             assert "train" in self.loader_opts, "train not in loader_opts"
             split_opts = dataset_opts.get("train")
-            assert isinstance(split_opts, DictConfig), "split_opts should be a dict for each dataset"
+            assert isinstance(split_opts, DictConfig), (
+                "split_opts should be a dict for each dataset"
+            )
             dataset = []
             dataset_num = len(split_opts)
             for idx, (k, v) in enumerate(split_opts.items()):
                 dataset_i = instantiate(v)
                 if self.limit_each_trainset:
-                    dataset_i = Subset(dataset_i, choice(len(dataset_i), self.limit_each_trainset))
+                    dataset_i = Subset(
+                        dataset_i, choice(len(dataset_i), self.limit_each_trainset)
+                    )
                 if self.train_subset_ratio is not None:
-                    dataset_i = Subset(dataset_i, choice(len(dataset_i), int(len(dataset_i) * self.train_subset_ratio)))
+                    dataset_i = Subset(
+                        dataset_i,
+                        choice(
+                            len(dataset_i),
+                            int(len(dataset_i) * self.train_subset_ratio),
+                        ),
+                    )
                 dataset.append(dataset_i)
-                Log.info(f"[Train Dataset][{idx+1}/{dataset_num}]: name={k}, size={len(dataset[-1])}, {v._target_}")
+                Log.info(
+                    f"[Train Dataset][{idx + 1}/{dataset_num}]: name={k}, size={len(dataset[-1])}, {v._target_}"
+                )
             dataset = ConcatDataset(dataset)
             self.trainset = dataset
             Log.info(f"[Train Dataset][All]: ConcatDataset size={len(dataset)}")
@@ -85,13 +112,17 @@ class DataModule(pl.LightningDataModule):
                 continue
             assert split in self.loader_opts, f"split={split} not in loader_opts"
             split_opts = dataset_opts.get(split)
-            assert isinstance(split_opts, DictConfig), "split_opts should be a dict for each dataset"
+            assert isinstance(split_opts, DictConfig), (
+                "split_opts should be a dict for each dataset"
+            )
             dataset = []
             dataset_num = len(split_opts)
             for idx, (k, v) in enumerate(split_opts.items()):
                 dataset.append(instantiate(v))
                 dataset_type = "Val Dataset" if split == "val" else "Test Dataset"
-                Log.info(f"[{dataset_type}][{idx+1}/{dataset_num}]: name={k}, size={len(dataset[-1])}, {v._target_}")
+                Log.info(
+                    f"[{dataset_type}][{idx + 1}/{dataset_num}]: name={k}, size={len(dataset[-1])}, {v._target_}"
+                )
             setattr(self, f"{split}sets", dataset)
             Log.info(f"")
 
@@ -118,7 +149,8 @@ class DataModule(pl.LightningDataModule):
                         valset,
                         shuffle=False,
                         num_workers=self.loader_opts.val.num_workers,
-                        persistent_workers=True and self.loader_opts.val.num_workers > 0,
+                        persistent_workers=True
+                        and self.loader_opts.val.num_workers > 0,
                         batch_size=self.loader_opts.val.batch_size,
                         collate_fn=collate_fn,
                     )

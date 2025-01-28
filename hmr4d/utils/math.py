@@ -11,7 +11,6 @@ from typing import Tuple
 
 import torch
 
-
 DEFAULT_ACOS_BOUND: float = 1.0 - 1e-4
 
 

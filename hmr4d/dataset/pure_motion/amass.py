@@ -1,16 +1,21 @@
+from pathlib import Path
+
+import numpy as np
 import torch
 import torch.nn.functional as F
-import numpy as np
-
 from tqdm import tqdm
-from pathlib import Path
-from hmr4d.utils.pylogger import Log
+
 from hmr4d.configs import MainStore, builds
+from hmr4d.utils.geo.hmr_global import get_tgtcoord_rootparam
+from hmr4d.utils.pylogger import Log
+from hmr4d.utils.wis3d_utils import (
+    add_motion_as_lines,
+    convert_motion_as_line_mesh,
+    make_wis3d,
+)
 
 from .base_dataset import BaseDataset
 from .utils import *
-from hmr4d.utils.geo.hmr_global import get_tgtcoord_rootparam
-from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines, convert_motion_as_line_mesh
 
 
 class AmassDataset(BaseDataset):
@@ -37,10 +42,16 @@ class AmassDataset(BaseDataset):
         tic = Log.time()
         if self.random1024:  # Debug, faster loading
             try:
-                Log.info(f"[{self.dataset_name}] Loading 1024 samples for debugging ...")
-                self.motion_files = torch.load(self.root / "smplxpose_v2_random1024.pth")
+                Log.info(
+                    f"[{self.dataset_name}] Loading 1024 samples for debugging ..."
+                )
+                self.motion_files = torch.load(
+                    self.root / "smplxpose_v2_random1024.pth"
+                )
             except:
-                Log.info(f"[{self.dataset_name}] Not found! Saving 1024 samples for debugging ...")
+                Log.info(
+                    f"[{self.dataset_name}] Not found! Saving 1024 samples for debugging ..."
+                )
                 self.motion_files = torch.load(filename)
                 keys = list(self.motion_files.keys())
                 keys = np.random.choice(keys, 1024, replace=False)
@@ -49,7 +60,9 @@ class AmassDataset(BaseDataset):
         else:
             self.motion_files = torch.load(filename)
         self.seqs = list(self.motion_files.keys())
-        Log.info(f"[{self.dataset_name}] {len(self.seqs)} sequences. Elapsed: {Log.time() - tic:.2f}s")
+        Log.info(
+            f"[{self.dataset_name}] {len(self.seqs)} sequences. Elapsed: {Log.time() - tic:.2f}s"
+        )
 
     def _get_idx2meta(self):
         # We expect to see the entire sequence during one epoch,
@@ -71,7 +84,9 @@ class AmassDataset(BaseDataset):
             seq_lengths.append(seq_length)
             self.idx2meta.extend([(vid, start_id)] * num_samples)
         hours = sum(seq_lengths) / 30 / 3600
-        Log.info(f"[{self.dataset_name}] has {hours:.1f} hours motion -> Resampled to {len(self.idx2meta)} samples.")
+        Log.info(
+            f"[{self.dataset_name}] has {hours:.1f} hours motion -> Resampled to {len(self.idx2meta)} samples."
+        )
 
     def _load_data(self, idx):
         """
@@ -92,7 +107,9 @@ class AmassDataset(BaseDataset):
         # Get {tgt_len} frames from data
         # Random select a subset with speed augmentation  [start, end)
         tgt_len = self.motion_frames
-        raw_subset_len = np.random.randint(int(tgt_len / self.l_factor), int(tgt_len * self.l_factor))
+        raw_subset_len = np.random.randint(
+            int(tgt_len / self.l_factor), int(tgt_len * self.l_factor)
+        )
         if raw_subset_len <= raw_len:
             start = np.random.randint(0, raw_len - raw_subset_len + 1)
             end = start + raw_subset_len
@@ -105,10 +122,12 @@ class AmassDataset(BaseDataset):
         data_interpolated = interpolate_smpl_params(data, tgt_len)
 
         # AZ -> AY
-        data_interpolated["global_orient"], data_interpolated["transl"], _ = get_tgtcoord_rootparam(
-            data_interpolated["global_orient"],
-            data_interpolated["transl"],
-            tsf="az->ay",
+        data_interpolated["global_orient"], data_interpolated["transl"], _ = (
+            get_tgtcoord_rootparam(
+                data_interpolated["global_orient"],
+                data_interpolated["transl"],
+                tsf="az->ay",
+            )
         )
 
         data_interpolated["data_name"] = "amass"
@@ -116,4 +135,6 @@ class AmassDataset(BaseDataset):
 
 
 group_name = "train_datasets/pure_motion_amass"
-MainStore.store(name="v11", node=builds(AmassDataset, cam_augmentation="v11"), group=group_name)
+MainStore.store(
+    name="v11", node=builds(AmassDataset, cam_augmentation="v11"), group=group_name
+)

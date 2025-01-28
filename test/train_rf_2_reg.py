@@ -1,13 +1,14 @@
+import math
+import random
+
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
-from torch.utils.data import Dataset, DataLoader
 from pytorch_lightning.loggers import WandbLogger
-from hmr4d.network.mdm.mdm_denoiser_rope import PositionalEncoding, TimestepEmbedder
-
-import random
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-import math
+
+from hmr4d.network.mdm.mdm_denoiser_rope import PositionalEncoding, TimestepEmbedder
 
 
 class RfModel(nn.Module):
@@ -26,7 +27,7 @@ class RfModel(nn.Module):
         )
         sequence_time_encoder = PositionalEncoding(128, dropout=0.1)
         self.embed_timestep = TimestepEmbedder(128, sequence_time_encoder)
-    
+
     def forward(self, x, cond, t):
         emb = self.embed_timestep(t.long()).permute(1, 0, 2).squeeze(1)
         x = torch.cat([x, cond], dim=-1)
@@ -43,9 +44,9 @@ class RfDataset(Dataset):
 
     def __len__(self):
         return self.z1.shape[0]
-    
+
     def __getitem__(self, idx):
-        return {'z0': self.z0[idx], 'z1': self.z1[idx], 'cond': self.cond[idx]}
+        return {"z0": self.z0[idx], "z1": self.z1[idx], "cond": self.cond[idx]}
 
 
 if __name__ == "__main__":
@@ -59,7 +60,7 @@ if __name__ == "__main__":
     # pred_mode = "z1"  # 'drift'
     pred_mode = "z1_abs"
     # pred_mode = "drift"
-    device = 'cuda'
+    device = "cuda"
     num_epochs = 100
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -67,12 +68,12 @@ if __name__ == "__main__":
     sampling_eps = 0.0
     T = 1
 
-    model.load_state_dict(torch.load('rf1.pth', map_location='cpu'))
+    model.load_state_dict(torch.load("rf1.pth", map_location="cpu"))
     model.to(device)
 
     # generate data
 
-    print('Generating data...')
+    print("Generating data...")
     sample_N = 100
     model.eval()
     with torch.no_grad():
@@ -80,7 +81,7 @@ if __name__ == "__main__":
         dt = (1.0 - sampling_eps) / sample_N
 
         x = z0.clone()
-        cond = torch.load('rf_base_train_cond.pth').to(device)
+        cond = torch.load("rf_base_train_cond.pth").to(device)
         # z1 = torch.load('rf_base_train_z1.pth').to(device)
         for i in range(sample_N):
             num_t = i / sample_N * (T - sampling_eps) + sampling_eps
@@ -118,19 +119,30 @@ if __name__ == "__main__":
 
     # Training
     epoch = 0
-    pbar = tqdm(total=num_epochs * len(dataset), desc=f"Epoch {epoch}/{num_epochs}", dynamic_ncols=True)
+    pbar = tqdm(
+        total=num_epochs * len(dataset),
+        desc=f"Epoch {epoch}/{num_epochs}",
+        dynamic_ncols=True,
+    )
     for epoch in range(num_epochs):
         for batch in dataloader:
-            z0, z1, cond = batch['z0'].to(device), batch['z1'].to(device), batch['cond'].to(device)
-            t = torch.rand(z0.shape[0], device=z0.device) * (T - sampling_eps) + sampling_eps
+            z0, z1, cond = (
+                batch["z0"].to(device),
+                batch["z1"].to(device),
+                batch["cond"].to(device),
+            )
+            t = (
+                torch.rand(z0.shape[0], device=z0.device) * (T - sampling_eps)
+                + sampling_eps
+            )
             t_expand = t.view(-1, 1).repeat(1, z0.shape[1])
 
             zt = t_expand * z1 + (1 - t_expand) * z0
             target = z1 - z0
-            if pred_mode == 'drift':
+            if pred_mode == "drift":
                 pred_drift = model(zt, cond, t * 1000)
                 # pred_z1 = zt + pred_drift * (1 - t_expand)
-                loss = (((pred_drift - target)) ** 2).mean()
+                loss = ((pred_drift - target) ** 2).mean()
             elif pred_mode == "z1":
                 pred_drift = model(zt, cond, t * 1000)
                 pred_z1 = zt + pred_drift * (1 - t_expand)
@@ -140,7 +152,7 @@ if __name__ == "__main__":
                 # pred_drift = (pred_z1 - zt) / (1 - t_expand)
 
                 # loss = (((pred_drift - target) * (1 - t_expand)) ** 2).mean()
-                loss = (((pred_z1 - z1)) ** 2).mean()
+                loss = ((pred_z1 - z1) ** 2).mean()
 
             optimizer.zero_grad()
             loss.backward()
@@ -166,7 +178,7 @@ if __name__ == "__main__":
         for i in range(sample_N):
             num_t = i / sample_N * (T - sampling_eps) + sampling_eps
             vec_t = torch.ones(x.shape[0], device=x.device) * num_t
-            if pred_mode == 'drift':
+            if pred_mode == "drift":
                 drift = model(x, cond, vec_t * 1000)
             elif pred_mode == "z1":
                 drift = model(x, cond, vec_t * 1000)
@@ -174,12 +186,19 @@ if __name__ == "__main__":
                 pred_z1 = model(x, cond, vec_t * 1000)
                 drift = (pred_z1 - x) / (1 - vec_t[:, None])
 
-            # convert to diffusion models if sampling.sigma_variance > 0.0 while perserving the marginal probability 
+            # convert to diffusion models if sampling.sigma_variance > 0.0 while perserving the marginal probability
             sigma_t = 0
             noise_scale = 1
-            pred_sigma = drift + (sigma_t**2)/(2*(noise_scale ** 2) * ((1.-num_t)**2)) * (0.5 * num_t * (1.-num_t) * drift - 0.5 * (2.-num_t)*x.detach().clone())
+            pred_sigma = drift + (sigma_t**2) / (
+                2 * (noise_scale**2) * ((1.0 - num_t) ** 2)
+            ) * (
+                0.5 * num_t * (1.0 - num_t) * drift
+                - 0.5 * (2.0 - num_t) * x.detach().clone()
+            )
 
-            x = x.detach().clone() + drift * dt #+ sigma_t * math.sqrt(dt) * torch.randn_like(pred_sigma).to(x.device)
+            x = (
+                x.detach().clone() + drift * dt
+            )  # + sigma_t * math.sqrt(dt) * torch.randn_like(pred_sigma).to(x.device)
             intermediate_z.append(x.cpu().numpy())
         z1 = x.cpu().numpy()
         z0 = z0.cpu().numpy()
@@ -195,7 +214,9 @@ if __name__ == "__main__":
         # cond2 = torch.ones(noise.shape[0] // 2, 1).to(device) * -1
 
         # cond = torch.cat([cond1, cond2], dim=0)
-        cond = torch.arange(-1, 1, 1.0 / (noise.shape[0] // 2)).to(device).reshape(-1, 1)
+        cond = (
+            torch.arange(-1, 1, 1.0 / (noise.shape[0] // 2)).to(device).reshape(-1, 1)
+        )
         for i in range(sample_N):
             num_t = i / sample_N * (T - sampling_eps) + sampling_eps
             vec_t = torch.ones(x.shape[0], device=x.device) * num_t
@@ -205,25 +226,58 @@ if __name__ == "__main__":
                 pred_z1 = model(x, cond, vec_t * 1000)
                 drift = (pred_z1 - x) / (1 - vec_t[:, None])
 
-            # convert to diffusion models if sampling.sigma_variance > 0.0 while perserving the marginal probability 
+            # convert to diffusion models if sampling.sigma_variance > 0.0 while perserving the marginal probability
             sigma_t = 0
             noise_scale = 1
-            pred_sigma = drift + (sigma_t**2)/(2*(noise_scale ** 2) * ((1.-num_t)**2)) * (0.5 * num_t * (1.-num_t) * drift - 0.5 * (2.-num_t)*x.detach().clone())
+            pred_sigma = drift + (sigma_t**2) / (
+                2 * (noise_scale**2) * ((1.0 - num_t) ** 2)
+            ) * (
+                0.5 * num_t * (1.0 - num_t) * drift
+                - 0.5 * (2.0 - num_t) * x.detach().clone()
+            )
 
-            x = x.detach().clone() + drift * dt #+ sigma_t * math.sqrt(dt) * torch.randn_like(pred_sigma).to(x.device)
+            x = (
+                x.detach().clone() + drift * dt
+            )  # + sigma_t * math.sqrt(dt) * torch.randn_like(pred_sigma).to(x.device)
         pred = x.cpu().numpy()
-        err = ((pred[:, :1] -  5 * cond.cpu().numpy()) ** 2).mean() * 1000
-        print(f'Error RF2: {err}')
+        err = ((pred[:, :1] - 5 * cond.cpu().numpy()) ** 2).mean() * 1000
+        print(f"Error RF2: {err}")
 
     # Visualization
     import matplotlib.pyplot as plt
-    for bid in range(0, len(intermediate_z), 10):
-        plt.plot(intermediate_z[bid][:, 0], intermediate_z[bid][:, 1], color='black', alpha=0.5)
 
-    plt.scatter(z0[z0.shape[0] // 2:, 0][::10], z0[z0.shape[0] // 2:, 1][::10], label='cond2_z0', color='red')
-    plt.scatter(z0[:z0.shape[0] // 2, 0][::10], z0[:z0.shape[0] // 2, 1][::10], label='cond1_z0', color='blue')
-    plt.scatter(z1[z1.shape[0] // 2:, 0][::10], z1[z1.shape[0] // 2:, 1][::10], label='cond2_z1', color='red')
-    plt.scatter(z1[:z1.shape[0] // 2, 0][::10], z1[:z1.shape[0] // 2, 1][::10], label='cond1_z1', color='blue')
+    for bid in range(0, len(intermediate_z), 10):
+        plt.plot(
+            intermediate_z[bid][:, 0],
+            intermediate_z[bid][:, 1],
+            color="black",
+            alpha=0.5,
+        )
+
+    plt.scatter(
+        z0[z0.shape[0] // 2 :, 0][::10],
+        z0[z0.shape[0] // 2 :, 1][::10],
+        label="cond2_z0",
+        color="red",
+    )
+    plt.scatter(
+        z0[: z0.shape[0] // 2, 0][::10],
+        z0[: z0.shape[0] // 2, 1][::10],
+        label="cond1_z0",
+        color="blue",
+    )
+    plt.scatter(
+        z1[z1.shape[0] // 2 :, 0][::10],
+        z1[z1.shape[0] // 2 :, 1][::10],
+        label="cond2_z1",
+        color="red",
+    )
+    plt.scatter(
+        z1[: z1.shape[0] // 2, 0][::10],
+        z1[: z1.shape[0] // 2, 1][::10],
+        label="cond1_z1",
+        color="blue",
+    )
     plt.legend()
-    plt.savefig('rf2_reg.png')
-    torch.save(model.state_dict(), 'rf2_reg.pth')
+    plt.savefig("rf2_reg.png")
+    torch.save(model.state_dict(), "rf2_reg.pth")

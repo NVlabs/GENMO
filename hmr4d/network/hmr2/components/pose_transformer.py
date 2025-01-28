@@ -11,6 +11,7 @@ from .t_cond_mlp import (
     FrequencyEmbedder,
     normalization_layer,
 )
+
 # from .vit import Attention, FeedForward
 
 
@@ -25,7 +26,9 @@ def default(val, d):
 
 
 class PreNorm(nn.Module):
-    def __init__(self, dim: int, fn: Callable, norm: str = "layer", norm_cond_dim: int = -1):
+    def __init__(
+        self, dim: int, fn: Callable, norm: str = "layer", norm_cond_dim: int = -1
+    ):
         super().__init__()
         self.norm = normalization_layer(norm, dim, norm_cond_dim)
         self.fn = fn
@@ -112,7 +115,9 @@ class CrossAttention(nn.Module):
         context = default(context, x)
         k, v = self.to_kv(context).chunk(2, dim=-1)
         q = self.to_q(x)
-        q, k, v = map(lambda t: rearrange(t, "b n (h d) -> b h n d", h=self.heads), [q, k, v])
+        q, k, v = map(
+            lambda t: rearrange(t, "b n (h d) -> b h n d", h=self.heads), [q, k, v]
+        )
 
         dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
 
@@ -175,7 +180,11 @@ class TransformerCrossAttn(nn.Module):
         for _ in range(depth):
             sa = Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)
             ca = CrossAttention(
-                dim, context_dim=context_dim, heads=heads, dim_head=dim_head, dropout=dropout
+                dim,
+                context_dim=context_dim,
+                heads=heads,
+                dim_head=dim_head,
+                dropout=dropout,
             )
             ff = FeedForward(dim, mlp_dim, dropout=dropout)
             self.layers.append(
@@ -192,7 +201,9 @@ class TransformerCrossAttn(nn.Module):
         if context_list is None:
             context_list = [context] * len(self.layers)
         if len(context_list) != len(self.layers):
-            raise ValueError(f"len(context_list) != len(self.layers) ({len(context_list)} != {len(self.layers)})")
+            raise ValueError(
+                f"len(context_list) != len(self.layers) ({len(context_list)} != {len(self.layers)})"
+            )
 
         for i, (self_attn, cross_attn, ff) in enumerate(self.layers):
             x = self_attn(x, *args) + x
@@ -206,7 +217,7 @@ class DropTokenDropout(nn.Module):
         super().__init__()
         if p < 0 or p > 1:
             raise ValueError(
-                "dropout probability has to be between 0 and 1, " "but got {}".format(p)
+                "dropout probability has to be between 0 and 1, but got {}".format(p)
             )
         self.p = p
 
@@ -225,7 +236,7 @@ class ZeroTokenDropout(nn.Module):
         super().__init__()
         if p < 0 or p > 1:
             raise ValueError(
-                "dropout probability has to be between 0 and 1, " "but got {}".format(p)
+                "dropout probability has to be between 0 and 1, but got {}".format(p)
             )
         self.p = p
 
@@ -277,7 +288,14 @@ class TransformerEncoder(nn.Module):
         self.emb_dropout_loc = emb_dropout_loc
 
         self.transformer = Transformer(
-            dim, depth, heads, dim_head, mlp_dim, dropout, norm=norm, norm_cond_dim=norm_cond_dim
+            dim,
+            depth,
+            heads,
+            dim_head,
+            mlp_dim,
+            dropout,
+            norm=norm,
+            norm_cond_dim=norm_cond_dim,
         )
 
     def forward(self, inp: torch.Tensor, *args, **kwargs):
@@ -310,7 +328,7 @@ class TransformerDecoder(nn.Module):
         dim_head: int = 64,
         dropout: float = 0.0,
         emb_dropout: float = 0.0,
-        emb_dropout_type: str = 'drop',
+        emb_dropout_type: str = "drop",
         norm: str = "layer",
         norm_cond_dim: int = -1,
         context_dim: Optional[int] = None,
@@ -355,4 +373,3 @@ class TransformerDecoder(nn.Module):
 
         x = self.transformer(x, *args, context=context, context_list=context_list)
         return x
-

@@ -5,8 +5,8 @@
 # LICENSE file in the root directory of this source tree.
 #
 
-import torch
 import numpy as np
+import torch
 
 _EPS4 = np.finfo(float).eps * 4.0
 
@@ -190,9 +190,18 @@ def euler2quat(e, order, deg=True):
     y = e[:, 1]
     z = e[:, 2]
 
-    rx = torch.stack((torch.cos(x / 2), torch.sin(x / 2), torch.zeros_like(x), torch.zeros_like(x)), dim=1)
-    ry = torch.stack((torch.cos(y / 2), torch.zeros_like(y), torch.sin(y / 2), torch.zeros_like(y)), dim=1)
-    rz = torch.stack((torch.cos(z / 2), torch.zeros_like(z), torch.zeros_like(z), torch.sin(z / 2)), dim=1)
+    rx = torch.stack(
+        (torch.cos(x / 2), torch.sin(x / 2), torch.zeros_like(x), torch.zeros_like(x)),
+        dim=1,
+    )
+    ry = torch.stack(
+        (torch.cos(y / 2), torch.zeros_like(y), torch.sin(y / 2), torch.zeros_like(y)),
+        dim=1,
+    )
+    rz = torch.stack(
+        (torch.cos(z / 2), torch.zeros_like(z), torch.zeros_like(z), torch.sin(z / 2)),
+        dim=1,
+    )
 
     result = None
     for coord in order:
@@ -250,9 +259,15 @@ def euler_to_quaternion(e, order):
     y = e[:, 1]
     z = e[:, 2]
 
-    rx = np.stack((np.cos(x / 2), np.sin(x / 2), np.zeros_like(x), np.zeros_like(x)), axis=1)
-    ry = np.stack((np.cos(y / 2), np.zeros_like(y), np.sin(y / 2), np.zeros_like(y)), axis=1)
-    rz = np.stack((np.cos(z / 2), np.zeros_like(z), np.zeros_like(z), np.sin(z / 2)), axis=1)
+    rx = np.stack(
+        (np.cos(x / 2), np.sin(x / 2), np.zeros_like(x), np.zeros_like(x)), axis=1
+    )
+    ry = np.stack(
+        (np.cos(y / 2), np.zeros_like(y), np.sin(y / 2), np.zeros_like(y)), axis=1
+    )
+    rz = np.stack(
+        (np.cos(z / 2), np.zeros_like(z), np.zeros_like(z), np.sin(z / 2)), axis=1
+    )
 
     result = None
     for coord in order:
@@ -399,9 +414,9 @@ def qbetween(v0, v1):
 
     v = torch.cross(v0, v1, dim=-1)
 
-    w = torch.sqrt((v0**2).sum(dim=-1, keepdim=True) * (v1**2).sum(dim=-1, keepdim=True)) + (v0 * v1).sum(
-        dim=-1, keepdim=True
-    )
+    w = torch.sqrt(
+        (v0**2).sum(dim=-1, keepdim=True) * (v1**2).sum(dim=-1, keepdim=True)
+    ) + (v0 * v1).sum(dim=-1, keepdim=True)
     y_vec = torch.zeros_like(v)
     y_vec[..., 1] = 1.0
     # if v0 is (0, 0, -1), v1 is (0, 0, 1), v will be 0 and w will also be 0 -> this makes below situation comes v=1 w = 2

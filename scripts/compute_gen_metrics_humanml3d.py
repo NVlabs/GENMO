@@ -1,107 +1,196 @@
-import numpy as np
-from scipy import linalg
-import torch 
+import os
+import sys
 from collections import OrderedDict
 
-import sys 
-import os 
+import numpy as np
+import torch
+from scipy import linalg
 from tqdm import tqdm
-parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-from motiondiff.utils.mdm_modules import MovementConvEncoder, TextEncoderBiGRUCo, MotionEncoderBiGRUCo
-import clip
 import pickle
 from os.path import join as pjoin
+
+import clip
 from transformers import AutoTokenizer, CLIPTextModelWithProjection
 
-
 from hmr4d.model.gvhmr.utils.endecoder import EnDecoder
-encoder = EnDecoder(stats_name='DEFAULT_01', encode_type='humanml3d').cuda()
+from motiondiff.utils.mdm_modules import (
+    MotionEncoderBiGRUCo,
+    MovementConvEncoder,
+    TextEncoderBiGRUCo,
+)
 
-dataset_name = 'humanml'
+encoder = EnDecoder(stats_name="DEFAULT_01", encode_type="humanml3d").cuda()
+
+dataset_name = "humanml"
 POS_enumerator = {
-    'VERB': 0,
-    'NOUN': 1,
-    'DET': 2,
-    'ADP': 3,
-    'NUM': 4,
-    'AUX': 5,
-    'PRON': 6,
-    'ADJ': 7,
-    'ADV': 8,
-    'Loc_VIP': 9,
-    'Body_VIP': 10,
-    'Obj_VIP': 11,
-    'Act_VIP': 12,
-    'Desc_VIP': 13,
-    'OTHER': 14,
+    "VERB": 0,
+    "NOUN": 1,
+    "DET": 2,
+    "ADP": 3,
+    "NUM": 4,
+    "AUX": 5,
+    "PRON": 6,
+    "ADJ": 7,
+    "ADV": 8,
+    "Loc_VIP": 9,
+    "Body_VIP": 10,
+    "Obj_VIP": 11,
+    "Act_VIP": 12,
+    "Desc_VIP": 13,
+    "OTHER": 14,
 }
 opt = {
-    'dataset_name': dataset_name,
-    'device': 'cuda',
-    'dim_word': 300,
-    'max_motion_length': 196,
-    'dim_pos_ohot': len(POS_enumerator),
-    'dim_motion_hidden': 1024,
-    'max_text_len': 20,
-    'dim_text_hidden': 512,
-    'dim_coemb_hidden': 512,
-    'dim_pose': 263 if dataset_name == 'humanml' else 251,
-    'dim_movement_enc_hidden': 512,
-    'dim_movement_latent': 512,
-    'checkpoints_dir': '.',
-    'unit_length': 4,
+    "dataset_name": dataset_name,
+    "device": "cuda",
+    "dim_word": 300,
+    "max_motion_length": 196,
+    "dim_pos_ohot": len(POS_enumerator),
+    "dim_motion_hidden": 1024,
+    "max_text_len": 20,
+    "dim_text_hidden": 512,
+    "dim_coemb_hidden": 512,
+    "dim_pose": 263 if dataset_name == "humanml" else 251,
+    "dim_movement_enc_hidden": 512,
+    "dim_movement_latent": 512,
+    "checkpoints_dir": ".",
+    "unit_length": 4,
 }
 
 
 POS_enumerator = {
-    'VERB': 0,
-    'NOUN': 1,
-    'DET': 2,
-    'ADP': 3,
-    'NUM': 4,
-    'AUX': 5,
-    'PRON': 6,
-    'ADJ': 7,
-    'ADV': 8,
-    'Loc_VIP': 9,
-    'Body_VIP': 10,
-    'Obj_VIP': 11,
-    'Act_VIP': 12,
-    'Desc_VIP': 13,
-    'OTHER': 14,
+    "VERB": 0,
+    "NOUN": 1,
+    "DET": 2,
+    "ADP": 3,
+    "NUM": 4,
+    "AUX": 5,
+    "PRON": 6,
+    "ADJ": 7,
+    "ADV": 8,
+    "Loc_VIP": 9,
+    "Body_VIP": 10,
+    "Obj_VIP": 11,
+    "Act_VIP": 12,
+    "Desc_VIP": 13,
+    "OTHER": 14,
 }
 
-Loc_list = ('left', 'right', 'clockwise', 'counterclockwise', 'anticlockwise', 'forward', 'back', 'backward',
-            'up', 'down', 'straight', 'curve')
+Loc_list = (
+    "left",
+    "right",
+    "clockwise",
+    "counterclockwise",
+    "anticlockwise",
+    "forward",
+    "back",
+    "backward",
+    "up",
+    "down",
+    "straight",
+    "curve",
+)
 
-Body_list = ('arm', 'chin', 'foot', 'feet', 'face', 'hand', 'mouth', 'leg', 'waist', 'eye', 'knee', 'shoulder', 'thigh')
+Body_list = (
+    "arm",
+    "chin",
+    "foot",
+    "feet",
+    "face",
+    "hand",
+    "mouth",
+    "leg",
+    "waist",
+    "eye",
+    "knee",
+    "shoulder",
+    "thigh",
+)
 
-Obj_List = ('stair', 'dumbbell', 'chair', 'window', 'floor', 'car', 'ball', 'handrail', 'baseball', 'basketball')
+Obj_List = (
+    "stair",
+    "dumbbell",
+    "chair",
+    "window",
+    "floor",
+    "car",
+    "ball",
+    "handrail",
+    "baseball",
+    "basketball",
+)
 
-Act_list = ('walk', 'run', 'swing', 'pick', 'bring', 'kick', 'put', 'squat', 'throw', 'hop', 'dance', 'jump', 'turn',
-            'stumble', 'dance', 'stop', 'sit', 'lift', 'lower', 'raise', 'wash', 'stand', 'kneel', 'stroll',
-            'rub', 'bend', 'balance', 'flap', 'jog', 'shuffle', 'lean', 'rotate', 'spin', 'spread', 'climb')
+Act_list = (
+    "walk",
+    "run",
+    "swing",
+    "pick",
+    "bring",
+    "kick",
+    "put",
+    "squat",
+    "throw",
+    "hop",
+    "dance",
+    "jump",
+    "turn",
+    "stumble",
+    "dance",
+    "stop",
+    "sit",
+    "lift",
+    "lower",
+    "raise",
+    "wash",
+    "stand",
+    "kneel",
+    "stroll",
+    "rub",
+    "bend",
+    "balance",
+    "flap",
+    "jog",
+    "shuffle",
+    "lean",
+    "rotate",
+    "spin",
+    "spread",
+    "climb",
+)
 
-Desc_list = ('slowly', 'carefully', 'fast', 'careful', 'slow', 'quickly', 'happy', 'angry', 'sad', 'happily',
-             'angrily', 'sadly')
+Desc_list = (
+    "slowly",
+    "carefully",
+    "fast",
+    "careful",
+    "slow",
+    "quickly",
+    "happy",
+    "angry",
+    "sad",
+    "happily",
+    "angrily",
+    "sadly",
+)
 
 VIP_dict = {
-    'Loc_VIP': Loc_list,
-    'Body_VIP': Body_list,
-    'Obj_VIP': Obj_List,
-    'Act_VIP': Act_list,
-    'Desc_VIP': Desc_list,
+    "Loc_VIP": Loc_list,
+    "Body_VIP": Body_list,
+    "Obj_VIP": Obj_List,
+    "Act_VIP": Act_list,
+    "Desc_VIP": Desc_list,
 }
 
 
 class WordVectorizer(object):
     def __init__(self, meta_root, prefix):
-        vectors = np.load(pjoin(meta_root, '%s_data.npy'%prefix))
-        words = pickle.load(open(pjoin(meta_root, '%s_words.pkl'%prefix), 'rb'))
-        word2idx = pickle.load(open(pjoin(meta_root, '%s_idx.pkl'%prefix), 'rb'))
+        vectors = np.load(pjoin(meta_root, "%s_data.npy" % prefix))
+        words = pickle.load(open(pjoin(meta_root, "%s_words.pkl" % prefix), "rb"))
+        word2idx = pickle.load(open(pjoin(meta_root, "%s_idx.pkl" % prefix), "rb"))
         self.word2vec = {w: vectors[word2idx[w]] for w in words}
 
     def _get_pos_ohot(self, pos):
@@ -109,14 +198,14 @@ class WordVectorizer(object):
         if pos in POS_enumerator:
             pos_vec[POS_enumerator[pos]] = 1
         else:
-            pos_vec[POS_enumerator['OTHER']] = 1
+            pos_vec[POS_enumerator["OTHER"]] = 1
         return pos_vec
 
     def __len__(self):
         return len(self.word2vec)
 
     def __getitem__(self, item):
-        word, pos = item.split('/')
+        word, pos = item.split("/")
         if word in self.word2vec:
             word_vec = self.word2vec[word]
             vip_pos = None
@@ -129,63 +218,78 @@ class WordVectorizer(object):
             else:
                 pos_vec = self._get_pos_ohot(pos)
         else:
-            word_vec = self.word2vec['unk']
-            pos_vec = self._get_pos_ohot('OTHER')
+            word_vec = self.word2vec["unk"]
+            pos_vec = self._get_pos_ohot("OTHER")
         return word_vec, pos_vec
+
 
 # mdm version of encoder
 def build_evaluators(opt):
-    movement_enc = MovementConvEncoder(opt['dim_pose']-4, opt['dim_movement_enc_hidden'], opt['dim_movement_latent'])
-    text_enc = TextEncoderBiGRUCo(word_size=opt['dim_word'],
-                                  pos_size=opt['dim_pos_ohot'],
-                                  hidden_size=opt['dim_text_hidden'],
-                                  output_size=opt['dim_coemb_hidden'],
-                                  device=opt['device'])
+    movement_enc = MovementConvEncoder(
+        opt["dim_pose"] - 4, opt["dim_movement_enc_hidden"], opt["dim_movement_latent"]
+    )
+    text_enc = TextEncoderBiGRUCo(
+        word_size=opt["dim_word"],
+        pos_size=opt["dim_pos_ohot"],
+        hidden_size=opt["dim_text_hidden"],
+        output_size=opt["dim_coemb_hidden"],
+        device=opt["device"],
+    )
 
-    motion_enc = MotionEncoderBiGRUCo(input_size=opt['dim_movement_latent'],
-                                      hidden_size=opt['dim_motion_hidden'],
-                                      output_size=opt['dim_coemb_hidden'],
-                                      device=opt['device'])
+    motion_enc = MotionEncoderBiGRUCo(
+        input_size=opt["dim_movement_latent"],
+        hidden_size=opt["dim_motion_hidden"],
+        output_size=opt["dim_coemb_hidden"],
+        device=opt["device"],
+    )
 
-    ckpt_dir = opt['dataset_name']
-    if opt['dataset_name'] == 'humanml':
-        ckpt_dir = './inputs/t2m'
+    ckpt_dir = opt["dataset_name"]
+    if opt["dataset_name"] == "humanml":
+        ckpt_dir = "./inputs/t2m"
 
-    checkpoint = torch.load(pjoin(opt['checkpoints_dir'], ckpt_dir, 'text_mot_match', 'model', 'finest.tar'),
-                            map_location=opt['device'])
-    movement_enc.load_state_dict(checkpoint['movement_encoder'])
-    text_enc.load_state_dict(checkpoint['text_encoder'])
-    motion_enc.load_state_dict(checkpoint['motion_encoder'])
-    print('Loading Evaluation Model Wrapper (Epoch %d) Completed!!' % (checkpoint['epoch']))
+    checkpoint = torch.load(
+        pjoin(
+            opt["checkpoints_dir"], ckpt_dir, "text_mot_match", "model", "finest.tar"
+        ),
+        map_location=opt["device"],
+    )
+    movement_enc.load_state_dict(checkpoint["movement_encoder"])
+    text_enc.load_state_dict(checkpoint["text_encoder"])
+    motion_enc.load_state_dict(checkpoint["motion_encoder"])
+    print(
+        "Loading Evaluation Model Wrapper (Epoch %d) Completed!!"
+        % (checkpoint["epoch"])
+    )
     return text_enc, motion_enc, movement_enc
 
 
 # (X - X_train)*(X - X_train) = -2X*X_train + X*X + X_train*X_train
 def euclidean_distance_matrix(matrix1, matrix2):
     """
-        Params:
-        -- matrix1: N1 x D
-        -- matrix2: N2 x D
-        Returns:
-        -- dist: N1 x N2
-        dist[i, j] == distance(matrix1[i], matrix2[j])
+    Params:
+    -- matrix1: N1 x D
+    -- matrix2: N2 x D
+    Returns:
+    -- dist: N1 x N2
+    dist[i, j] == distance(matrix1[i], matrix2[j])
     """
     assert matrix1.shape[1] == matrix2.shape[1]
-    d1 = -2 * np.dot(matrix1, matrix2.T)    # shape (num_test, num_train)
-    d2 = np.sum(np.square(matrix1), axis=1, keepdims=True)    # shape (num_test, 1)
-    d3 = np.sum(np.square(matrix2), axis=1)     # shape (num_train, )
+    d1 = -2 * np.dot(matrix1, matrix2.T)  # shape (num_test, num_train)
+    d2 = np.sum(np.square(matrix1), axis=1, keepdims=True)  # shape (num_test, 1)
+    d3 = np.sum(np.square(matrix2), axis=1)  # shape (num_train, )
     dists = np.sqrt(d1 + d2 + d3)  # broadcasting
     return dists
+
 
 def calculate_top_k(mat, top_k):
     size = mat.shape[0]
     gt_mat = np.expand_dims(np.arange(size), 1).repeat(size, 1)
-    bool_mat = (mat == gt_mat)
+    bool_mat = mat == gt_mat
     correct_vec = False
     top_k_list = []
     for i in range(top_k):
-#         print(correct_vec, bool_mat[:, i])
-        correct_vec = (correct_vec | bool_mat[:, i])
+        #         print(correct_vec, bool_mat[:, i])
+        correct_vec = correct_vec | bool_mat[:, i]
         # print(correct_vec)
         top_k_list.append(correct_vec[:, None])
     top_k_mat = np.concatenate(top_k_list, axis=1)
@@ -201,7 +305,9 @@ def calculate_R_precision(embedding1, embedding2, top_k, sum_all=False):
     else:
         return top_k_mat
 
+
 # from action2motion
+
 
 def evaluate_matching_score(text_embeddings_all, motion_embeddings_all):
     # match_score_dict = OrderedDict({})
@@ -218,8 +324,10 @@ def evaluate_matching_score(text_embeddings_all, motion_embeddings_all):
     batch_num = len(text_embeddings_all) // batch_size
     with torch.no_grad():
         for i in tqdm(range(batch_num)):
-            text_embeddings = text_embeddings_all[i*batch_size:(i+1)*batch_size]
-            motion_embeddings = motion_embeddings_all[i*batch_size:(i+1)*batch_size]
+            text_embeddings = text_embeddings_all[i * batch_size : (i + 1) * batch_size]
+            motion_embeddings = motion_embeddings_all[
+                i * batch_size : (i + 1) * batch_size
+            ]
 
             # word_embeddings, pos_one_hots, _, sent_lens, motions, m_lens, _ = batch
             # text_embeddings, motion_embeddings = eval_wrapper.get_co_embeddings(
@@ -229,8 +337,9 @@ def evaluate_matching_score(text_embeddings_all, motion_embeddings_all):
             #     motions=motions,
             #     m_lens=m_lens
             # )
-            dist_mat = euclidean_distance_matrix(text_embeddings.cpu().numpy(),
-                                                    motion_embeddings.cpu().numpy())
+            dist_mat = euclidean_distance_matrix(
+                text_embeddings.cpu().numpy(), motion_embeddings.cpu().numpy()
+            )
             matching_score_sum += dist_mat.trace()
 
             argsmax = np.argsort(dist_mat, axis=1)
@@ -261,8 +370,9 @@ def evaluate_matching_score(text_embeddings_all, motion_embeddings_all):
 
 
 def calculate_fid(statistics_1, statistics_2):
-    return calculate_frechet_distance(statistics_1[0], statistics_1[1],
-                                      statistics_2[0], statistics_2[1])
+    return calculate_frechet_distance(
+        statistics_1[0], statistics_1[1], statistics_2[0], statistics_2[1]
+    )
 
 
 def calculate_activation_statistics(activations):
@@ -276,6 +386,7 @@ def calculate_activation_statistics(activations):
     mu = np.mean(activations, axis=0)
     cov = np.cov(activations, rowvar=False)
     return mu, cov
+
 
 def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
     """Numpy implementation of the Frechet Distance.
@@ -302,18 +413,22 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
     sigma1 = np.atleast_2d(sigma1)
     sigma2 = np.atleast_2d(sigma2)
 
-    assert mu1.shape == mu2.shape, \
-        'Training and test mean vectors have different lengths'
-    assert sigma1.shape == sigma2.shape, \
-        'Training and test covariances have different dimensions'
+    assert mu1.shape == mu2.shape, (
+        "Training and test mean vectors have different lengths"
+    )
+    assert sigma1.shape == sigma2.shape, (
+        "Training and test covariances have different dimensions"
+    )
 
     diff = mu1 - mu2
 
     # Product might be almost singular
     covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
     if not np.isfinite(covmean).all():
-        msg = ('fid calculation produces singular product; '
-               'adding %s to diagonal of cov estimates') % eps
+        msg = (
+            "fid calculation produces singular product; "
+            "adding %s to diagonal of cov estimates"
+        ) % eps
         print(msg)
         offset = np.eye(sigma1.shape[0]) * eps
         covmean = linalg.sqrtm((sigma1 + offset).dot(sigma2 + offset))
@@ -322,12 +437,12 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
     if np.iscomplexobj(covmean):
         if not np.allclose(np.diagonal(covmean).imag, 0, atol=1e-3):
             m = np.max(np.abs(covmean.imag))
-            raise ValueError('Imaginary component {}'.format(m))
+            raise ValueError("Imaginary component {}".format(m))
         covmean = covmean.real
 
     tr_covmean = np.trace(covmean)
 
-    return (diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * tr_covmean)
+    return diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * tr_covmean
 
 
 def calculate_diversity(activation, diversity_times):
@@ -340,6 +455,7 @@ def calculate_diversity(activation, diversity_times):
     dist = linalg.norm(activation[first_indices] - activation[second_indices], axis=1)
     return dist.mean()
 
+
 def evaluate_diversity(feats, diversity_times=300):
     # eval_dict = OrderedDict({})
     # print('========== Evaluating Diversity ==========')
@@ -350,6 +466,7 @@ def evaluate_diversity(feats, diversity_times=300):
     #     print(f'---> [{model_name}] Diversity: {diversity:.4f}', file=file, flush=True)
     diversity = calculate_diversity(feats, diversity_times)
     return diversity
+
 
 def calculate_multimodality(activation, multimodality_times):
     assert len(activation.shape) == 3
@@ -381,9 +498,10 @@ def evaluate_multimodality(feats, mm_num_times=10):
     #     print(f'---> [{model_name}] Multimodality: {multimodality:.4f}')
     #     print(f'---> [{model_name}] Multimodality: {multimodality:.4f}', file=file, flush=True)
     #     eval_dict[model_name] = multimodality
-    mm_motion_embeddings = feats 
+    mm_motion_embeddings = feats
     score = calculate_multimodality(mm_motion_embeddings, mm_num_times)
     return score
+
 
 def compute_fid(feats1, feats2):
     mu1, sigma1 = calculate_activation_statistics(feats1)
@@ -392,14 +510,14 @@ def compute_fid(feats1, feats2):
     return fid
 
 
-t2m_path = 'inputs/t2m'
-kit_path = 'inputs/kit'
+t2m_path = "inputs/t2m"
+kit_path = "inputs/kit"
 
-feats_path = '/lustre/fs12/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jinkunc/gvhmr/mocap_mixed_v1/unimfm/unimfm_est_st_norm_di_lg_g8/version_0/text_feats_ts10_humanml3d'
-feats_file = os.path.join(feats_path, 'feats_seed{}_263d.pkl'.format(0))
-feats = pickle.load(open(feats_file, 'rb'))
-motions = feats['feats']
-texts = feats['text']
+feats_path = "/lustre/fs12/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jinkunc/gvhmr/mocap_mixed_v1/unimfm/unimfm_est_st_norm_di_lg_g8/version_0/text_feats_ts10_humanml3d"
+feats_file = os.path.join(feats_path, "feats_seed{}_263d.pkl".format(0))
+feats = pickle.load(open(feats_file, "rb"))
+motions = feats["feats"]
+texts = feats["text"]
 # breakpoint()
 
 # feats_1_path = os.path.join(feats_path, 'feats_part0_len196_0.pt')
@@ -438,26 +556,27 @@ texts = feats['text']
 
 # breakpoint()
 
-humanml3d_text_embeds = torch.load('inputs/humanml3d_text_clip_embds.pth')
+humanml3d_text_embeds = torch.load("inputs/humanml3d_text_clip_embds.pth")
 
 text_encoder, motion_encoder, movement_encoder = build_evaluators(opt)
 # motion encoders used by MDM for evaluation, we follow this convention.
-motion_encoder = motion_encoder.to('cuda')
-movement_encoder = movement_encoder.to('cuda')
+motion_encoder = motion_encoder.to("cuda")
+movement_encoder = movement_encoder.to("cuda")
 # Choice #2: the vectorizer and text embedding model used by MDM for evaluation, tokens required
-w_vectorizer = WordVectorizer(pjoin('./', 'glove'), 'our_vab')
-text_encoder = text_encoder.to('cuda')
+w_vectorizer = WordVectorizer(pjoin("./", "glove"), "our_vab")
+text_encoder = text_encoder.to("cuda")
+
 
 def encode_tokens(tokens, w_vectorizer):
     if len(tokens) < opt.max_text_len:
         # pad with "unk"
-        tokens = ['sos/OTHER'] + tokens + ['eos/OTHER']
+        tokens = ["sos/OTHER"] + tokens + ["eos/OTHER"]
         sent_len = len(tokens)
-        tokens = tokens + ['unk/OTHER'] * (opt.max_text_len + 2 - sent_len)
+        tokens = tokens + ["unk/OTHER"] * (opt.max_text_len + 2 - sent_len)
     else:
         # crop
-        tokens = tokens[:opt.max_text_len]
-        tokens = ['sos/OTHER'] + tokens + ['eos/OTHER']
+        tokens = tokens[: opt.max_text_len]
+        tokens = ["sos/OTHER"] + tokens + ["eos/OTHER"]
         sent_len = len(tokens)
     pos_one_hots = []
     word_embeddings = []
@@ -469,25 +588,27 @@ def encode_tokens(tokens, w_vectorizer):
     word_embeddings = np.concatenate(word_embeddings, axis=0)
     return word_embeddings, pos_one_hots, sent_len
 
+
 def get_text_embedding(word_embs, pos_ohot, cap_lens):
     with torch.no_grad():
-        word_embs = word_embs.detach().to('cuda').float()
-        pos_ohot = pos_ohot.detach().to('cuda').float()
-        cap_lens = cap_lens.detach().to('cuda').float()
+        word_embs = word_embs.detach().to("cuda").float()
+        pos_ohot = pos_ohot.detach().to("cuda").float()
+        cap_lens = cap_lens.detach().to("cuda").float()
         text_embedding = text_encoder(word_embs, pos_ohot, cap_lens)
     return text_embedding
 
+
 def get_motion_embedding(motions, m_lens):
     with torch.no_grad():
-        motions = motions.detach().to('cuda').float()
+        motions = motions.detach().to("cuda").float()
 
         align_idx = np.argsort(m_lens.data.tolist())[::-1].copy()
         motions = motions[align_idx]
         m_lens = m_lens[align_idx]
 
-        '''Movement Encoding'''
+        """Movement Encoding"""
         movements = movement_encoder(motions[..., :-4]).detach()
-        m_lens = m_lens // opt['unit_length']
+        m_lens = m_lens // opt["unit_length"]
         motion_embedding = motion_encoder(movements, m_lens)
 
     return motion_embedding
@@ -496,8 +617,8 @@ def get_motion_embedding(motions, m_lens):
 # smpl_data = encoder.decode_humanml3d(raw_data)
 m_lens = torch.tensor([motions.shape[1]]).float().cuda().repeat(motions.shape[0])
 
-mean = np.load('outputs/humanml3d_mean.npy')
-std = np.load('outputs/humanml3d_std.npy')
+mean = np.load("outputs/humanml3d_mean.npy")
+std = np.load("outputs/humanml3d_std.npy")
 
 mean = torch.tensor(mean).cuda()
 std = torch.tensor(std).cuda()
@@ -506,7 +627,7 @@ std = torch.tensor(std).cuda()
 
 motion_embs = get_motion_embedding(motions, m_lens)
 
-humanml_gt_motions_path = 'outputs/humanml3d_feats_gt/feats_test.pt'
+humanml_gt_motions_path = "outputs/humanml3d_feats_gt/feats_test.pt"
 # Pred_vectors_path = 'outputs/mocap_mixed_v1/unimfm/unimfm_test_st_g8/version_0/text_feats/feats.pt'
 
 # texts = 'outputs/humanml3d_test_texts.pt'
@@ -522,7 +643,7 @@ humanml_gt_motions_path = 'outputs/humanml3d_feats_gt/feats_test.pt'
 
 # matching_score, R_precision, all_motion_embeddings = evaluate_matching_score(humanml3d_text_embeds, motion_embs)
 
-humanml_text_embs = pickle.load(open('inputs/humanml_text_embs.pkl', 'rb'))
+humanml_text_embs = pickle.load(open("inputs/humanml_text_embs.pkl", "rb"))
 
 batch_size = 64
 batch_num = len(texts) // batch_size
@@ -536,19 +657,19 @@ print("Extrating pre-saved text embeddings")
 for i in tqdm(range(len(texts))):
     text = texts[i]
     saved_embds = humanml_text_embs[text]
-    word_embs = saved_embds['word_embeddings']
-    pos_ohots = saved_embds['pose_one_hots']
-    sent_len = saved_embds['sent_len']
+    word_embs = saved_embds["word_embeddings"]
+    pos_ohots = saved_embds["pose_one_hots"]
+    sent_len = saved_embds["sent_len"]
     all_word_embs.append(word_embs[None])
     all_pos_ohots.append(pos_ohots[None])
     all_sent_lens.append(sent_len)
-    
+
     word_embs = torch.tensor(word_embs).float().cuda()[None]
     pos_ohots = torch.tensor(pos_ohots).float().cuda()[None]
     sent_len = torch.tensor(sent_len).float().cuda()[None]
     text_embedding = get_text_embedding(word_embs, pos_ohots, sent_len)
     all_text_embeddings.append(text_embedding)
-    
+
 # all_word_embs = torch.tensor(np.concatenate(all_word_embs, axis=0))
 # all_pos_ohots = torch.tensor(np.concatenate(all_pos_ohots, axis=0))
 # all_sent_lens = torch.tensor(np.array(all_sent_lens))
@@ -556,13 +677,15 @@ for i in tqdm(range(len(texts))):
 # text_embedding = get_text_embedding(all_word_embs, all_pos_ohots, all_sent_lens)
 all_text_embedding = torch.cat(all_text_embeddings, dim=0)
 
-matching_score, R_precision, all_motion_embeddings = evaluate_matching_score(all_text_embedding, motion_embs)
+matching_score, R_precision, all_motion_embeddings = evaluate_matching_score(
+    all_text_embedding, motion_embs
+)
 
 # GT_feats = (GT_feats - mean) / std
 # Pred_feats = (Pred_feats - mean) / std
 
 
-GT_vectors_path = 'outputs/humanml3d_feats_gt/feats_test_humanml3d_format.pt.npy'
+GT_vectors_path = "outputs/humanml3d_feats_gt/feats_test_humanml3d_format.pt.npy"
 GT_feats = np.load(GT_vectors_path)
 gt_m_lens = torch.tensor([GT_feats.shape[1]]).float().cuda().repeat(GT_feats.shape[0])
 # pred_m_lens = torch.tensor([Pred_feats.shape[1]]).float().cuda().repeat(Pred_feats.shape[0])
@@ -609,7 +732,6 @@ print("Diversity: ", div)
 # Pred_diversity = evaluate_diversity(Pred_feats_flat)
 # print(f'GT_diversity: {GT_diversity}')
 # print(f'Pred_diversity: {Pred_diversity}')
-
 
 
 # FID:

@@ -1,13 +1,12 @@
 import enum
 import math
 import warnings
-from typing import Tuple, List, Optional
+from typing import List, Optional, Tuple
 
 import torch
-from torch import Tensor, tensor
 import torch.nn.functional as F
-
 from numpy import pi
+from torch import Tensor, tensor
 
 __all__ = [
     # functional api
@@ -39,9 +38,9 @@ def KORNIA_CHECK_SHAPE(x, shape: List[str]) -> None:
     # Desired shape here is list and not tuple, because torch.jit
     # does not like variable-length tuples
     KORNIA_CHECK_IS_TENSOR(x)
-    if '*' == shape[0]:
+    if "*" == shape[0]:
         start_idx: int = 1
-        x_shape_to_check = x.shape[-len(shape) - 1:]
+        x_shape_to_check = x.shape[-len(shape) - 1 :]
     else:
         start_idx = 0
         x_shape_to_check = x.shape
@@ -63,8 +62,8 @@ def KORNIA_CHECK_IS_TENSOR(x, msg: Optional[str] = None):
 
 
 class QuaternionCoeffOrder(enum.Enum):
-    XYZW = 'xyzw'
-    WXYZ = 'wxyz'
+    XYZW = "xyzw"
+    WXYZ = "wxyz"
 
 
 def torch_safe_atan2(y, x, eps: float = 1e-6):
@@ -127,14 +126,18 @@ def pol2cart(rho: torch.Tensor, phi: torch.Tensor) -> Tuple[torch.Tensor, torch.
         >>> x, y = pol2cart(rho, phi)
     """
     if not (isinstance(rho, torch.Tensor) & isinstance(phi, torch.Tensor)):
-        raise TypeError("Input type is not a torch.Tensor. Got {}, {}".format(type(rho), type(phi)))
+        raise TypeError(
+            "Input type is not a torch.Tensor. Got {}, {}".format(type(rho), type(phi))
+        )
 
     x = rho * torch.cos(phi)
     y = rho * torch.sin(phi)
     return x, y
 
 
-def cart2pol(x: torch.Tensor, y: torch.Tensor, eps: float = 1.0e-8) -> Tuple[torch.Tensor, torch.Tensor]:
+def cart2pol(
+    x: torch.Tensor, y: torch.Tensor, eps: float = 1.0e-8
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """Function that converts cartesian coordinates to polar coordinates.
 
     Args:
@@ -151,14 +154,18 @@ def cart2pol(x: torch.Tensor, y: torch.Tensor, eps: float = 1.0e-8) -> Tuple[tor
         >>> rho, phi = cart2pol(x, y)
     """
     if not (isinstance(x, torch.Tensor) & isinstance(y, torch.Tensor)):
-        raise TypeError("Input type is not a torch.Tensor. Got {}, {}".format(type(x), type(y)))
+        raise TypeError(
+            "Input type is not a torch.Tensor. Got {}, {}".format(type(x), type(y))
+        )
 
-    rho = torch.sqrt((x ** 2 + y ** 2).clamp_min(eps))
+    rho = torch.sqrt((x**2 + y**2).clamp_min(eps))
     phi = torch_safe_atan2(y, x)
     return rho, phi
 
 
-def convert_points_from_homogeneous(points: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+def convert_points_from_homogeneous(
+    points: torch.Tensor, eps: float = 1e-8
+) -> torch.Tensor:
     r"""Function that converts points from homogeneous to Euclidean space.
 
     Args:
@@ -176,7 +183,9 @@ def convert_points_from_homogeneous(points: torch.Tensor, eps: float = 1e-8) -> 
         raise TypeError("Input type is not a torch.Tensor. Got {}".format(type(points)))
 
     if len(points.shape) < 2:
-        raise ValueError("Input must be at least a 2D tensor. Got {}".format(points.shape))
+        raise ValueError(
+            "Input must be at least a 2D tensor. Got {}".format(points.shape)
+        )
 
     # we check for points at max_val
     z_vec: torch.Tensor = points[..., -1:]
@@ -206,7 +215,9 @@ def convert_points_to_homogeneous(points: torch.Tensor) -> torch.Tensor:
     if not isinstance(points, torch.Tensor):
         raise TypeError("Input type is not a torch.Tensor. Got {}".format(type(points)))
     if len(points.shape) < 2:
-        raise ValueError("Input must be at least a 2D tensor. Got {}".format(points.shape))
+        raise ValueError(
+            "Input must be at least a 2D tensor. Got {}".format(points.shape)
+        )
 
     return torch.nn.functional.pad(points, [0, 1], "constant", 1.0)
 
@@ -275,10 +286,14 @@ def angle_axis_to_rotation_matrix(angle_axis: torch.Tensor) -> torch.Tensor:
         >>> output = angle_axis_to_rotation_matrix(input)  # Nx3x3
     """
     if not isinstance(angle_axis, torch.Tensor):
-        raise TypeError("Input type is not a torch.Tensor. Got {}".format(type(angle_axis)))
+        raise TypeError(
+            "Input type is not a torch.Tensor. Got {}".format(type(angle_axis))
+        )
 
     if not angle_axis.shape[-1] == 3:
-        raise ValueError("Input size must be a (*, 3) tensor. Got {}".format(angle_axis.shape))
+        raise ValueError(
+            "Input size must be a (*, 3) tensor. Got {}".format(angle_axis.shape)
+        )
 
     orig_shape = angle_axis.shape
     angle_axis = angle_axis.reshape(-1, 3)
@@ -303,13 +318,17 @@ def angle_axis_to_rotation_matrix(angle_axis: torch.Tensor) -> torch.Tensor:
         r02 = wy * sin_theta + wx * wz * (k_one - cos_theta)
         r12 = -wx * sin_theta + wy * wz * (k_one - cos_theta)
         r22 = cos_theta + wz * wz * (k_one - cos_theta)
-        rotation_matrix = torch.cat([r00, r01, r02, r10, r11, r12, r20, r21, r22], dim=1)
+        rotation_matrix = torch.cat(
+            [r00, r01, r02, r10, r11, r12, r20, r21, r22], dim=1
+        )
         return rotation_matrix.view(-1, 3, 3)
 
     def _compute_rotation_matrix_taylor(angle_axis):
         rx, ry, rz = torch.chunk(angle_axis, 3, dim=1)
         k_one = torch.ones_like(rx)
-        rotation_matrix = torch.cat([k_one, -rz, ry, rz, k_one, -rx, -ry, rx, k_one], dim=1)
+        rotation_matrix = torch.cat(
+            [k_one, -rz, ry, rz, k_one, -rx, -ry, rx, k_one], dim=1
+        )
         return rotation_matrix.view(-1, 3, 3)
 
     # stolen from ceres/rotation.h
@@ -333,7 +352,9 @@ def angle_axis_to_rotation_matrix(angle_axis: torch.Tensor) -> torch.Tensor:
     rotation_matrix = torch.eye(3).to(angle_axis.device).type_as(angle_axis)
     rotation_matrix = rotation_matrix.view(1, 3, 3).repeat(batch_size, 1, 1)
     # fill output matrix with masked values
-    rotation_matrix[..., :3, :3] = mask_pos * rotation_matrix_normal + mask_neg * rotation_matrix_taylor
+    rotation_matrix[..., :3, :3] = (
+        mask_pos * rotation_matrix_normal + mask_neg * rotation_matrix_taylor
+    )
 
     rotation_matrix = rotation_matrix.view(orig_shape[:-1] + (3, 3))
     return rotation_matrix  # Nx3x3
@@ -357,22 +378,32 @@ def rotation_matrix_to_angle_axis(rotation_matrix: torch.Tensor) -> torch.Tensor
         >>> output = rotation_matrix_to_angle_axis(input)  # Nx3
     """
     if not isinstance(rotation_matrix, torch.Tensor):
-        raise TypeError(f"Input type is not a torch.Tensor. Got {type(rotation_matrix)}")
+        raise TypeError(
+            f"Input type is not a torch.Tensor. Got {type(rotation_matrix)}"
+        )
 
     if not rotation_matrix.shape[-2:] == (3, 3):
-        raise ValueError(f"Input size must be a (*, 3, 3) tensor. Got {rotation_matrix.shape}")
-    quaternion: torch.Tensor = rotation_matrix_to_quaternion(rotation_matrix, order=QuaternionCoeffOrder.WXYZ)
+        raise ValueError(
+            f"Input size must be a (*, 3, 3) tensor. Got {rotation_matrix.shape}"
+        )
+    quaternion: torch.Tensor = rotation_matrix_to_quaternion(
+        rotation_matrix, order=QuaternionCoeffOrder.WXYZ
+    )
     return quaternion_to_angle_axis(quaternion, order=QuaternionCoeffOrder.WXYZ)
 
 
-def safe_zero_division(numerator: torch.Tensor, denominator: torch.Tensor, eps: float = 1.0e-6) -> torch.Tensor:
+def safe_zero_division(
+    numerator: torch.Tensor, denominator: torch.Tensor, eps: float = 1.0e-6
+) -> torch.Tensor:
     denominator = denominator.clone()
     denominator[denominator.abs() < eps] += eps
     return numerator / denominator
 
 
 def rotation_matrix_to_quaternion(
-    rotation_matrix: torch.Tensor, eps: float = 1.0e-6, order: QuaternionCoeffOrder = QuaternionCoeffOrder.WXYZ
+    rotation_matrix: torch.Tensor,
+    eps: float = 1.0e-6,
+    order: QuaternionCoeffOrder = QuaternionCoeffOrder.WXYZ,
 ) -> torch.Tensor:
     r"""Convert 3x3 rotation matrix to 4d quaternion vector.
 
@@ -399,14 +430,20 @@ def rotation_matrix_to_quaternion(
         ...                                        order=QuaternionCoeffOrder.WXYZ)  # Nx4
     """
     if not isinstance(rotation_matrix, torch.Tensor):
-        raise TypeError(f"Input type is not a torch.Tensor. Got {type(rotation_matrix)}")
+        raise TypeError(
+            f"Input type is not a torch.Tensor. Got {type(rotation_matrix)}"
+        )
 
     if not rotation_matrix.shape[-2:] == (3, 3):
-        raise ValueError(f"Input size must be a (*, 3, 3) tensor. Got {rotation_matrix.shape}")
+        raise ValueError(
+            f"Input size must be a (*, 3, 3) tensor. Got {rotation_matrix.shape}"
+        )
 
     if not torch.jit.is_scripting():
         if order.name not in QuaternionCoeffOrder.__members__.keys():
-            raise ValueError(f"order must be one of {QuaternionCoeffOrder.__members__.keys()}")
+            raise ValueError(
+                f"order must be one of {QuaternionCoeffOrder.__members__.keys()}"
+            )
 
     if order == QuaternionCoeffOrder.XYZW:
         warnings.warn(
@@ -415,9 +452,13 @@ def rotation_matrix_to_quaternion(
             "Please use `QuaternionCoeffOrder.WXYZ` instead."
         )
 
-    rotation_matrix_vec: torch.Tensor = rotation_matrix.reshape(*rotation_matrix.shape[:-2], 9)
+    rotation_matrix_vec: torch.Tensor = rotation_matrix.reshape(
+        *rotation_matrix.shape[:-2], 9
+    )
 
-    m00, m01, m02, m10, m11, m12, m20, m21, m22 = torch.chunk(rotation_matrix_vec, chunks=9, dim=-1)
+    m00, m01, m02, m10, m11, m12, m20, m21, m22 = torch.chunk(
+        rotation_matrix_vec, chunks=9, dim=-1
+    )
 
     trace: torch.Tensor = m00 + m11 + m22
 
@@ -468,7 +509,9 @@ def rotation_matrix_to_quaternion(
     return quaternion
 
 
-def normalize_quaternion(quaternion: torch.Tensor, eps: float = 1.0e-12) -> torch.Tensor:
+def normalize_quaternion(
+    quaternion: torch.Tensor, eps: float = 1.0e-12
+) -> torch.Tensor:
     r"""Normalizes a quaternion.
 
     The quaternion should be in (x, y, z, w) format.
@@ -487,10 +530,14 @@ def normalize_quaternion(quaternion: torch.Tensor, eps: float = 1.0e-12) -> torc
         tensor([0.7071, 0.0000, 0.7071, 0.0000])
     """
     if not isinstance(quaternion, torch.Tensor):
-        raise TypeError("Input type is not a torch.Tensor. Got {}".format(type(quaternion)))
+        raise TypeError(
+            "Input type is not a torch.Tensor. Got {}".format(type(quaternion))
+        )
 
     if not quaternion.shape[-1] == 4:
-        raise ValueError("Input must be a tensor of shape (*, 4). Got {}".format(quaternion.shape))
+        raise ValueError(
+            "Input must be a tensor of shape (*, 4). Got {}".format(quaternion.shape)
+        )
     return F.normalize(quaternion, p=2.0, dim=-1, eps=eps)
 
 
@@ -525,11 +572,15 @@ def quaternion_to_rotation_matrix(
         raise TypeError(f"Input type is not a torch.Tensor. Got {type(quaternion)}")
 
     if not quaternion.shape[-1] == 4:
-        raise ValueError(f"Input must be a tensor of shape (*, 4). Got {quaternion.shape}")
+        raise ValueError(
+            f"Input must be a tensor of shape (*, 4). Got {quaternion.shape}"
+        )
 
     if not torch.jit.is_scripting():
         if order.name not in QuaternionCoeffOrder.__members__.keys():
-            raise ValueError(f"order must be one of {QuaternionCoeffOrder.__members__.keys()}")
+            raise ValueError(
+                f"order must be one of {QuaternionCoeffOrder.__members__.keys()}"
+            )
 
     if order == QuaternionCoeffOrder.XYZW:
         warnings.warn(
@@ -583,7 +634,9 @@ def quaternion_to_rotation_matrix(
 
 
 def quaternion_to_angle_axis(
-    quaternion: torch.Tensor, eps: float = 1.0e-6, order: QuaternionCoeffOrder = QuaternionCoeffOrder.WXYZ
+    quaternion: torch.Tensor,
+    eps: float = 1.0e-6,
+    order: QuaternionCoeffOrder = QuaternionCoeffOrder.WXYZ,
 ) -> torch.Tensor:
     """Convert quaternion vector to angle axis of rotation.
 
@@ -608,11 +661,15 @@ def quaternion_to_angle_axis(
     """
 
     if not quaternion.shape[-1] == 4:
-        raise ValueError(f"Input must be a tensor of shape Nx4 or 4. Got {quaternion.shape}")
+        raise ValueError(
+            f"Input must be a tensor of shape Nx4 or 4. Got {quaternion.shape}"
+        )
 
     if not torch.jit.is_scripting():
         if order.name not in QuaternionCoeffOrder.__members__.keys():
-            raise ValueError(f"order must be one of {QuaternionCoeffOrder.__members__.keys()}")
+            raise ValueError(
+                f"order must be one of {QuaternionCoeffOrder.__members__.keys()}"
+            )
 
     if order == QuaternionCoeffOrder.XYZW:
         warnings.warn(
@@ -641,7 +698,9 @@ def quaternion_to_angle_axis(
 
     sin_theta: torch.Tensor = torch.sqrt((sin_squared_theta).clamp_min(eps))
     two_theta: torch.Tensor = 2.0 * torch.where(
-        cos_theta < 0.0, torch_safe_atan2(-sin_theta, -cos_theta), torch_safe_atan2(sin_theta, cos_theta)
+        cos_theta < 0.0,
+        torch_safe_atan2(-sin_theta, -cos_theta),
+        torch_safe_atan2(sin_theta, cos_theta),
     )
 
     k_pos: torch.Tensor = safe_zero_division(two_theta, sin_theta, eps)
@@ -656,7 +715,9 @@ def quaternion_to_angle_axis(
 
 
 def quaternion_log_to_exp(
-    quaternion: torch.Tensor, eps: float = 1.0e-6, order: QuaternionCoeffOrder = QuaternionCoeffOrder.WXYZ
+    quaternion: torch.Tensor,
+    eps: float = 1.0e-6,
+    order: QuaternionCoeffOrder = QuaternionCoeffOrder.WXYZ,
 ) -> torch.Tensor:
     r"""Applies exponential map to log quaternion.
 
@@ -680,11 +741,15 @@ def quaternion_log_to_exp(
         raise TypeError(f"Input type is not a torch.Tensor. Got {type(quaternion)}")
 
     if not quaternion.shape[-1] == 3:
-        raise ValueError(f"Input must be a tensor of shape (*, 3). Got {quaternion.shape}")
+        raise ValueError(
+            f"Input must be a tensor of shape (*, 3). Got {quaternion.shape}"
+        )
 
     if not torch.jit.is_scripting():
         if order.name not in QuaternionCoeffOrder.__members__.keys():
-            raise ValueError(f"order must be one of {QuaternionCoeffOrder.__members__.keys()}")
+            raise ValueError(
+                f"order must be one of {QuaternionCoeffOrder.__members__.keys()}"
+            )
 
     if order == QuaternionCoeffOrder.XYZW:
         warnings.warn(
@@ -694,7 +759,9 @@ def quaternion_log_to_exp(
         )
 
     # compute quaternion norm
-    norm_q: torch.Tensor = torch.norm(quaternion, p=2, dim=-1, keepdim=True).clamp(min=eps)
+    norm_q: torch.Tensor = torch.norm(quaternion, p=2, dim=-1, keepdim=True).clamp(
+        min=eps
+    )
 
     # compute scalar and vector
     quaternion_vector: torch.Tensor = quaternion * torch.sin(norm_q) / norm_q
@@ -711,7 +778,9 @@ def quaternion_log_to_exp(
 
 
 def quaternion_exp_to_log(
-    quaternion: torch.Tensor, eps: float = 1.0e-6, order: QuaternionCoeffOrder = QuaternionCoeffOrder.WXYZ
+    quaternion: torch.Tensor,
+    eps: float = 1.0e-6,
+    order: QuaternionCoeffOrder = QuaternionCoeffOrder.WXYZ,
 ) -> torch.Tensor:
     r"""Applies the log map to a quaternion.
 
@@ -736,11 +805,15 @@ def quaternion_exp_to_log(
         raise TypeError(f"Input type is not a torch.Tensor. Got {type(quaternion)}")
 
     if not quaternion.shape[-1] == 4:
-        raise ValueError(f"Input must be a tensor of shape (*, 4). Got {quaternion.shape}")
+        raise ValueError(
+            f"Input must be a tensor of shape (*, 4). Got {quaternion.shape}"
+        )
 
     if not torch.jit.is_scripting():
         if order.name not in QuaternionCoeffOrder.__members__.keys():
-            raise ValueError(f"order must be one of {QuaternionCoeffOrder.__members__.keys()}")
+            raise ValueError(
+                f"order must be one of {QuaternionCoeffOrder.__members__.keys()}"
+            )
 
     if order == QuaternionCoeffOrder.XYZW:
         warnings.warn(
@@ -761,11 +834,15 @@ def quaternion_exp_to_log(
         quaternion_vector = quaternion[..., 1:4]
 
     # compute quaternion norm
-    norm_q: torch.Tensor = torch.norm(quaternion_vector, p=2, dim=-1, keepdim=True).clamp(min=eps)
+    norm_q: torch.Tensor = torch.norm(
+        quaternion_vector, p=2, dim=-1, keepdim=True
+    ).clamp(min=eps)
 
     # apply log map
     quaternion_log: torch.Tensor = (
-        quaternion_vector * torch.acos(torch.clamp(quaternion_scalar, min=-1.0 + eps, max=1.0 - eps)) / norm_q
+        quaternion_vector
+        * torch.acos(torch.clamp(quaternion_scalar, min=-1.0 + eps, max=1.0 - eps))
+        / norm_q
     )
 
     return quaternion_log
@@ -776,7 +853,9 @@ def quaternion_exp_to_log(
 
 
 def angle_axis_to_quaternion(
-    angle_axis: torch.Tensor, eps: float = 1.0e-6, order: QuaternionCoeffOrder = QuaternionCoeffOrder.WXYZ
+    angle_axis: torch.Tensor,
+    eps: float = 1.0e-6,
+    order: QuaternionCoeffOrder = QuaternionCoeffOrder.WXYZ,
 ) -> torch.Tensor:
     r"""Convert an angle axis to a quaternion.
 
@@ -801,11 +880,15 @@ def angle_axis_to_quaternion(
     """
 
     if not angle_axis.shape[-1] == 3:
-        raise ValueError(f"Input must be a tensor of shape Nx3 or 3. Got {angle_axis.shape}")
+        raise ValueError(
+            f"Input must be a tensor of shape Nx3 or 3. Got {angle_axis.shape}"
+        )
 
     if not torch.jit.is_scripting():
         if order.name not in QuaternionCoeffOrder.__members__.keys():
-            raise ValueError(f"order must be one of {QuaternionCoeffOrder.__members__.keys()}")
+            raise ValueError(
+                f"order must be one of {QuaternionCoeffOrder.__members__.keys()}"
+            )
 
     if order == QuaternionCoeffOrder.XYZW:
         warnings.warn(
@@ -832,7 +915,9 @@ def angle_axis_to_quaternion(
     w: torch.Tensor = torch.where(mask, torch.cos(half_theta), ones)
 
     quaternion: torch.Tensor = torch.zeros(
-        size=angle_axis.shape[:-1] + (4,), dtype=angle_axis.dtype, device=angle_axis.device
+        size=angle_axis.shape[:-1] + (4,),
+        dtype=angle_axis.dtype,
+        device=angle_axis.device,
     )
     if order == QuaternionCoeffOrder.XYZW:
         quaternion[..., 0:1] = a0 * k
@@ -868,18 +953,26 @@ def normalize_pixel_coordinates(
         the normalized pixel coordinates.
     """
     if pixel_coordinates.shape[-1] != 2:
-        raise ValueError("Input pixel_coordinates must be of shape (*, 2). " "Got {}".format(pixel_coordinates.shape))
+        raise ValueError(
+            "Input pixel_coordinates must be of shape (*, 2). Got {}".format(
+                pixel_coordinates.shape
+            )
+        )
     # compute normalization factor
     hw: torch.Tensor = torch.stack(
         [
-            torch.tensor(width, device=pixel_coordinates.device, dtype=pixel_coordinates.dtype),
-            torch.tensor(height, device=pixel_coordinates.device, dtype=pixel_coordinates.dtype),
+            torch.tensor(
+                width, device=pixel_coordinates.device, dtype=pixel_coordinates.dtype
+            ),
+            torch.tensor(
+                height, device=pixel_coordinates.device, dtype=pixel_coordinates.dtype
+            ),
         ]
     )
 
-    factor: torch.Tensor = torch.tensor(2.0, device=pixel_coordinates.device, dtype=pixel_coordinates.dtype) / (
-        hw - 1
-    ).clamp(eps)
+    factor: torch.Tensor = torch.tensor(
+        2.0, device=pixel_coordinates.device, dtype=pixel_coordinates.dtype
+    ) / (hw - 1).clamp(eps)
 
     return factor * pixel_coordinates - 1
 
@@ -901,7 +994,11 @@ def denormalize_pixel_coordinates(
         the denormalized pixel coordinates.
     """
     if pixel_coordinates.shape[-1] != 2:
-        raise ValueError("Input pixel_coordinates must be of shape (*, 2). " "Got {}".format(pixel_coordinates.shape))
+        raise ValueError(
+            "Input pixel_coordinates must be of shape (*, 2). Got {}".format(
+                pixel_coordinates.shape
+            )
+        )
     # compute normalization factor
     hw: torch.Tensor = (
         torch.stack([torch.tensor(width), torch.tensor(height)])
@@ -915,7 +1012,11 @@ def denormalize_pixel_coordinates(
 
 
 def normalize_pixel_coordinates3d(
-    pixel_coordinates: torch.Tensor, depth: int, height: int, width: int, eps: float = 1e-8
+    pixel_coordinates: torch.Tensor,
+    depth: int,
+    height: int,
+    width: int,
+    eps: float = 1e-8,
 ) -> torch.Tensor:
     r"""Normalize pixel coordinates between -1 and 1.
 
@@ -932,7 +1033,11 @@ def normalize_pixel_coordinates3d(
         the normalized pixel coordinates.
     """
     if pixel_coordinates.shape[-1] != 3:
-        raise ValueError("Input pixel_coordinates must be of shape (*, 3). " "Got {}".format(pixel_coordinates.shape))
+        raise ValueError(
+            "Input pixel_coordinates must be of shape (*, 3). Got {}".format(
+                pixel_coordinates.shape
+            )
+        )
     # compute normalization factor
     dhw: torch.Tensor = (
         torch.stack([torch.tensor(depth), torch.tensor(width), torch.tensor(height)])
@@ -946,7 +1051,11 @@ def normalize_pixel_coordinates3d(
 
 
 def denormalize_pixel_coordinates3d(
-    pixel_coordinates: torch.Tensor, depth: int, height: int, width: int, eps: float = 1e-8
+    pixel_coordinates: torch.Tensor,
+    depth: int,
+    height: int,
+    width: int,
+    eps: float = 1e-8,
 ) -> torch.Tensor:
     r"""Denormalize pixel coordinates.
 
@@ -963,7 +1072,11 @@ def denormalize_pixel_coordinates3d(
         the denormalized pixel coordinates.
     """
     if pixel_coordinates.shape[-1] != 3:
-        raise ValueError("Input pixel_coordinates must be of shape (*, 3). " "Got {}".format(pixel_coordinates.shape))
+        raise ValueError(
+            "Input pixel_coordinates must be of shape (*, 3). Got {}".format(
+                pixel_coordinates.shape
+            )
+        )
     # compute normalization factor
     dhw: torch.Tensor = (
         torch.stack([torch.tensor(depth), torch.tensor(width), torch.tensor(height)])
@@ -1196,26 +1309,34 @@ def ARKitQTVecs_to_ColmapQTVecs(qvec: Tensor, tvec: Tensor) -> Tuple[Tensor, Ten
     Rcv, Tcv = camtoworld_graphics_to_vision_Rt(Rcg, tvec)
     R_colmap, t_colmap = camtoworld_to_worldtocam_Rt(Rcv, Tcv)
     t_colmap = t_colmap.reshape(-1, 3, 1)
-    q_colmap = rotation_matrix_to_quaternion(R_colmap.contiguous(), order=QuaternionCoeffOrder.WXYZ)
+    q_colmap = rotation_matrix_to_quaternion(
+        R_colmap.contiguous(), order=QuaternionCoeffOrder.WXYZ
+    )
     return q_colmap, t_colmap
 
 
 def rotation_about_x(angle: float) -> Tensor:
     cos = math.cos(angle)
     sin = math.sin(angle)
-    return torch.tensor([[1, 0, 0, 0], [0, cos, -sin, 0], [0, sin, cos, 0], [0, 0, 0, 1]])
+    return torch.tensor(
+        [[1, 0, 0, 0], [0, cos, -sin, 0], [0, sin, cos, 0], [0, 0, 0, 1]]
+    )
 
 
 def rotation_about_y(angle: float) -> Tensor:
     cos = math.cos(angle)
     sin = math.sin(angle)
-    return torch.tensor([[cos, 0, sin, 0], [0, 1, 0, 0], [-sin, 0, cos, 0], [0, 0, 0, 1]])
+    return torch.tensor(
+        [[cos, 0, sin, 0], [0, 1, 0, 0], [-sin, 0, cos, 0], [0, 0, 0, 1]]
+    )
 
 
 def rotation_about_z(angle: float) -> Tensor:
     cos = math.cos(angle)
     sin = math.sin(angle)
-    return torch.tensor([[cos, -sin, 0, 0], [sin, cos, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+    return torch.tensor(
+        [[cos, -sin, 0, 0], [sin, cos, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+    )
 
 
 def mat4x4_inverse(mat4x4):
@@ -1251,7 +1372,9 @@ def gl_camera_to_world_wo_x_rot(worldtocam: Tensor) -> Tensor:
 
 
 def slam_to_opencv(slam_cam_poses: Tensor) -> Tensor:
-    assert slam_cam_poses.shape[-2:] == (4, 4), f"Expected tensor shape to be (4,4) but found {slam_cam_poses.shape[-2:]}"
+    assert slam_cam_poses.shape[-2:] == (4, 4), (
+        f"Expected tensor shape to be (4,4) but found {slam_cam_poses.shape[-2:]}"
+    )
     orig_shape = slam_cam_poses.shape[:-2]
     slam_cam_poses = slam_cam_poses.reshape(-1, 4, 4)
 
@@ -1260,7 +1383,11 @@ def slam_to_opencv(slam_cam_poses: Tensor) -> Tensor:
 
     # Important bug fix here
     R, t = matrix4x4_to_Rt(slam_cam_poses)
-    R = R @ rotation_about_z(math.pi)[None, :3, :3] @ rotation_about_x(-math.pi / 2)[None, :3, :3]
+    R = (
+        R
+        @ rotation_about_z(math.pi)[None, :3, :3]
+        @ rotation_about_x(-math.pi / 2)[None, :3, :3]
+    )
 
     slam_cam_poses = Rt_to_matrix4x4(R, t)
 

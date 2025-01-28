@@ -1,9 +1,10 @@
 import logging
 import os
 from typing import Any
-import wandb
 
+import wandb
 from pytorch_lightning import Callback, LightningModule, Trainer
+
 from motiondiff.utils.tools import wandb_run_exists
 
 try:
@@ -16,7 +17,6 @@ except ModuleNotFoundError:
 
 
 class AutoResumeCallback(Callback):
-
     def __init__(self, version=None) -> None:
         if AutoResume is not None:
             AutoResume.init()
@@ -77,10 +77,7 @@ class AutoResumeCallback(Callback):
                 }
                 message = f"[Auto Resume] Terminateing. checkpoint: {checkpoint} wandb_id: {details['wandb_id']} version: {details['version']}"
                 print(message, flush=True)
-                AutoResume.request_resume(
-                    details,
-                    message=message
-                )
+                AutoResume.request_resume(details, message=message)
                 if wandb_run_exists():
                     wandb.run.finish()
                 trainer.should_stop = True

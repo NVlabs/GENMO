@@ -1,15 +1,16 @@
+import os
+
 import hydra
 import pytorch_lightning as pl
-import os
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks.checkpoint import Checkpoint
-
-from hmr4d.utils.pylogger import Log
-from hmr4d.configs import register_store_gvhmr
-from hmr4d.utils.vis.rich_logger import print_cfg
-from hmr4d.utils.net_utils import load_pretrained_model, get_resume_ckpt_path
-from motiondiff.utils.tools import find_last_version
 from pytorch_lightning.utilities import rank_zero_only
+
+from hmr4d.configs import register_store_gvhmr
+from hmr4d.utils.net_utils import get_resume_ckpt_path, load_pretrained_model
+from hmr4d.utils.pylogger import Log
+from hmr4d.utils.vis.rich_logger import print_cfg
+from motiondiff.utils.tools import find_last_version
 
 
 def get_callbacks(cfg: DictConfig) -> list:
@@ -35,13 +36,19 @@ def train(cfg: DictConfig) -> None:
     """Train/Test"""
     Log.info(f"[Exp Name]: {cfg.exp_name}")
     # use total batch size
-    cfg.data.loader_opts.train.batch_size = cfg.data.loader_opts.train.batch_size // cfg.pl_trainer.devices
+    cfg.data.loader_opts.train.batch_size = (
+        cfg.data.loader_opts.train.batch_size // cfg.pl_trainer.devices
+    )
     if cfg.task == "fit":
-        Log.info(f"[GPU x Batch] = {cfg.pl_trainer.devices} x {cfg.data.loader_opts.train.batch_size}")
+        Log.info(
+            f"[GPU x Batch] = {cfg.pl_trainer.devices} x {cfg.data.loader_opts.train.batch_size}"
+        )
     pl.seed_everything(cfg.seed)
 
     # preparation
-    datamodule: pl.LightningDataModule = hydra.utils.instantiate(cfg.data, _recursive_=False)
+    datamodule: pl.LightningDataModule = hydra.utils.instantiate(
+        cfg.data, _recursive_=False
+    )
     model: pl.LightningModule = hydra.utils.instantiate(cfg.model, _recursive_=False)
     if cfg.ckpt_path is not None:
         load_pretrained_model(model, cfg.ckpt_path)
@@ -55,10 +62,11 @@ def train(cfg: DictConfig) -> None:
 
     global_rank = rank_zero_only.rank if rank_zero_only.rank is not None else 0
     if global_rank == 0:
-
         slurm_job_id = int(os.environ.get("SLURM_JOB_ID", "-1"))
-        run_name = f'{cfg.exp_name}_{slurm_job_id}' if slurm_job_id > 0 else f'{cfg.exp_name}'
-        if cfg.task == 'fit':
+        run_name = (
+            f"{cfg.exp_name}_{slurm_job_id}" if slurm_job_id > 0 else f"{cfg.exp_name}"
+        )
+        if cfg.task == "fit":
             cfg.logger.name = run_name
             cfg.logger.version = run_name
 
@@ -78,11 +86,16 @@ def train(cfg: DictConfig) -> None:
     if cfg.task == "fit":
         resume_path = None
         if cfg.resume_mode is not None:
-            save_dir = cfg.logger.save_dir + '/checkpoints'
+            save_dir = cfg.logger.save_dir + "/checkpoints"
             resume_path = get_resume_ckpt_path(cfg.resume_mode, ckpt_dir=save_dir)
             Log.info(f"Resume training from {resume_path}")
         Log.info("Start Fitiing...")
-        trainer.fit(model, datamodule.train_dataloader(), datamodule.val_dataloader(), ckpt_path=resume_path)
+        trainer.fit(
+            model,
+            datamodule.train_dataloader(),
+            datamodule.val_dataloader(),
+            ckpt_path=resume_path,
+        )
     elif cfg.task == "test":
         Log.info("Start Testing...")
         trainer.test(model, datamodule.test_dataloader())

@@ -47,7 +47,6 @@ class AlexNet(BaseBackbone):
             )
 
     def forward(self, x):
-
         x = self.features(x)
         if self.num_classes > 0:
             x = x.view(x.size(0), 256 * 6 * 6)

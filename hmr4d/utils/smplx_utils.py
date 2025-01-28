@@ -1,12 +1,18 @@
-import torch
-import torch.nn.functional as F
+import pickle
+
 import numpy as np
 import smplx
-import pickle
+import torch
+import torch.nn.functional as F
 from smplx import SMPL, SMPLX, SMPLXLayer
-from hmr4d.utils.body_model import BodyModelSMPLH, BodyModelSMPLX
-from hmr4d.utils.body_model.smplx_lite import SmplxLiteCoco17, SmplxLiteV437Coco17, SmplxLiteSmplN24
+
 from hmr4d import PROJ_ROOT
+from hmr4d.utils.body_model import BodyModelSMPLH, BodyModelSMPLX
+from hmr4d.utils.body_model.smplx_lite import (
+    SmplxLiteCoco17,
+    SmplxLiteSmplN24,
+    SmplxLiteV437Coco17,
+)
 
 # fmt: off
 SMPLH_PARENTS = torch.tensor([-1,  0,  0,  0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  9,  9, 12, 13, 14,
@@ -18,7 +24,10 @@ SMPLH_PARENTS = torch.tensor([-1,  0,  0,  0,  1,  2,  3,  4,  5,  6,  7,  8,  9
 def make_smplx(type="neu_fullpose", **kwargs):
     if type == "neu_fullpose":
         model = smplx.create(
-            model_path="inputs/models/smplx/SMPLX_NEUTRAL.npz", use_pca=False, flat_hand_mean=True, **kwargs
+            model_path="inputs/models/smplx/SMPLX_NEUTRAL.npz",
+            use_pca=False,
+            flat_hand_mean=True,
+            **kwargs,
         )
     elif type == "supermotion":
         # SuperMotion is trained on BEDLAM dataset, the smplx config is the same except only 10 betas are used
@@ -29,7 +38,9 @@ def make_smplx(type="neu_fullpose", **kwargs):
             "flat_hand_mean": False,
         }
         bm_kwargs.update(kwargs)
-        model = BodyModelSMPLX(model_path=PROJ_ROOT / "inputs/checkpoints/body_models", **bm_kwargs)
+        model = BodyModelSMPLX(
+            model_path=PROJ_ROOT / "inputs/checkpoints/body_models", **bm_kwargs
+        )
     elif type == "supermotion_EVAL3DPW":
         # SuperMotion is trained on BEDLAM dataset, the smplx config is the same except only 10 betas are used
         bm_kwargs = {
@@ -132,9 +143,9 @@ def make_smplx(type="neu_fullpose", **kwargs):
     elif type in ["smplx-layer", "smplx-fit3d"]:
         # Use layer
         if type == "smplx-fit3d":
-            assert (
-                kwargs.get("gender") == "neutral"
-            ), "smplx-fit3d use neutral model: https://github.com/sminchisescu-research/imar_vision_datasets_tools/blob/e8c8f83ffac23cc36adf8ec8d0fd1c55679484ef/util/smplx_util.py#L15C34-L15C34"
+            assert kwargs.get("gender") == "neutral", (
+                "smplx-fit3d use neutral model: https://github.com/sminchisescu-research/imar_vision_datasets_tools/blob/e8c8f83ffac23cc36adf8ec8d0fd1c55679484ef/util/smplx_util.py#L15C34-L15C34"
+            )
 
         bm_kwargs = {
             "model_path": "inputs/checkpoints/body_models/smplx",
@@ -379,7 +390,9 @@ def normalize_joints(joints):
     z_dir[..., 2] = 1
     y_dir = torch.cross(z_dir, x_dir, dim=-1)
 
-    joints_normalized = (joints - joints[..., [0], :]) @ torch.stack([x_dir, y_dir, z_dir], dim=-1)
+    joints_normalized = (joints - joints[..., [0], :]) @ torch.stack(
+        [x_dir, y_dir, z_dir], dim=-1
+    )
     return joints_normalized
 
 
@@ -396,7 +409,9 @@ def compute_Rt_af2az(joints, inverse=False):
     t_af2az[:, 2] = 0  # do not modify z
 
     LR_xy = joints[:, 2, [0, 1]] - joints[:, 1, [0, 1]]  # (B, 2)
-    I_mask = LR_xy.pow(2).sum(-1) < 1e-4  # do not rotate, when can't decided the face direction
+    I_mask = (
+        LR_xy.pow(2).sum(-1) < 1e-4
+    )  # do not rotate, when can't decided the face direction
     x_dir = F.pad(F.normalize(LR_xy, 2, -1), (0, 1), "constant", 0)  # (B, 3)
     z_dir = torch.zeros_like(x_dir)
     z_dir[..., 2] = 1

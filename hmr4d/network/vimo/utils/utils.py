@@ -1,7 +1,8 @@
-import os
-import torch
-import shutil
 import logging
+import os
+import shutil
+
+import torch
 
 
 def prepare_output_dir(cfg):
@@ -10,28 +11,27 @@ def prepare_output_dir(cfg):
     cfg.LOGDIR = logdir
     os.makedirs(logdir, exist_ok=True)
 
-    shutil.copy(src=cfg.cfg_file, dst=f'{cfg.LOGDIR}/config.yaml')
+    shutil.copy(src=cfg.cfg_file, dst=f"{cfg.LOGDIR}/config.yaml")
     return cfg
 
 
-def create_logger(logdir, phase='train'):
+def create_logger(logdir, phase="train"):
     os.makedirs(logdir, exist_ok=True)
 
-    log_file = os.path.join(logdir, f'{phase}_log.txt')
-    head = '%(asctime)-15s %(message)s'
+    log_file = os.path.join(logdir, f"{phase}_log.txt")
+    head = "%(asctime)-15s %(message)s"
 
-    logging.basicConfig(filename=log_file,
-                        format=head)
+    logging.basicConfig(filename=log_file, format=head)
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
     console = logging.StreamHandler()
-    logging.getLogger('').addHandler(console)
-    
+    logging.getLogger("").addHandler(console)
+
     return logger
 
 
 def move_dict_to_device(dict, device, tensor2float=False):
-    for k,v in dict.items():
+    for k, v in dict.items():
         if isinstance(v, torch.Tensor):
             if tensor2float:
                 dict[k] = v.float().to(device)

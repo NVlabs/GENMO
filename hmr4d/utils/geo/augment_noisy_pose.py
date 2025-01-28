@@ -1,11 +1,45 @@
 import torch
-from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix, matrix_to_axis_angle, matrix_to_rotation_6d
+
 import hmr4d.utils.matrix as matrix
 from hmr4d import PROJ_ROOT
+from motiondiff.models.mdm.rotation_conversions import (
+    axis_angle_to_matrix,
+    matrix_to_axis_angle,
+    matrix_to_rotation_6d,
+)
 
-COCO17_AUG = {k: v.flatten() for k, v in torch.load(PROJ_ROOT / "hmr4d/utils/body_model/coco_aug_dict.pth").items()}
+COCO17_AUG = {
+    k: v.flatten()
+    for k, v in torch.load(
+        PROJ_ROOT / "hmr4d/utils/body_model/coco_aug_dict.pth"
+    ).items()
+}
 COCO17_AUG_CUDA = {}
-COCO17_TREE = [[5, 6], 0, 0, 1, 2, -1, -1, 5, 6, 7, 8, -1, -1, 11, 12, 13, 14, 15, 15, 15, 16, 16, 16]
+COCO17_TREE = [
+    [5, 6],
+    0,
+    0,
+    1,
+    2,
+    -1,
+    -1,
+    5,
+    6,
+    7,
+    8,
+    -1,
+    -1,
+    11,
+    12,
+    13,
+    14,
+    15,
+    15,
+    15,
+    16,
+    16,
+    16,
+]
 
 
 def gaussian_augment(body_pose, std_angle=10.0, to_R=True):
@@ -64,9 +98,13 @@ def get_jitter(shape=(8, 120), s_jittering=5e-2):
 
 def get_jitter_cuda(shape=(8, 120), s_jittering=5e-2):
     if "jittering" not in COCO17_AUG_CUDA:
-        COCO17_AUG_CUDA["jittering"] = COCO17_AUG["jittering"].cuda().reshape(1, 1, 17, 1)
+        COCO17_AUG_CUDA["jittering"] = (
+            COCO17_AUG["jittering"].cuda().reshape(1, 1, 17, 1)
+        )
     jittering = COCO17_AUG_CUDA["jittering"]
-    jittering_noise = torch.randn((*shape, 17, 3), device="cuda") * jittering * s_jittering
+    jittering_noise = (
+        torch.randn((*shape, 17, 3), device="cuda") * jittering * s_jittering
+    )
     return jittering_noise
 
 
@@ -80,7 +118,9 @@ def get_lfhp(shape=(8, 120), s_peak=3e-1, s_peak_mask=5e-3):
 
     peak_noise_mask = get_peak_noise_mask()  # (B, L, 17)
     peak_noise = peak_noise_mask.float().unsqueeze(-1).repeat(1, 1, 1, 3)
-    peak_noise = peak_noise * torch.randn(3) * COCO17_AUG["peak"].reshape(17, 1) * s_peak
+    peak_noise = (
+        peak_noise * torch.randn(3) * COCO17_AUG["peak"].reshape(17, 1) * s_peak
+    )
     return peak_noise
 
 
@@ -93,7 +133,10 @@ def get_lfhp_cuda(shape=(8, 120), s_peak=3e-1, s_peak_mask=5e-3):
     peak = COCO17_AUG_CUDA["peak"]
     peak_noise_mask = torch.rand(*shape, 17, device="cuda") * pmask < s_peak_mask
     peak_noise = (
-        peak_noise_mask.float().unsqueeze(-1).expand(-1, -1, -1, 3) * torch.randn(3, device="cuda") * peak * s_peak
+        peak_noise_mask.float().unsqueeze(-1).expand(-1, -1, -1, 3)
+        * torch.randn(3, device="cuda")
+        * peak
+        * s_peak
     )
     return peak_noise
 
@@ -101,8 +144,15 @@ def get_lfhp_cuda(shape=(8, 120), s_peak=3e-1, s_peak_mask=5e-3):
 def get_bias(shape=(8, 120), s_bias=1e-1):
     """Bias noise modeling."""
     b, l = shape
-    bias_noise = torch.normal(mean=torch.zeros((b, 17, 3)), std=COCO17_AUG["bias"].reshape(1, 17, 1)) * s_bias
-    bias_noise = bias_noise[:, None].expand(-1, l, -1, -1)  # (B, L, J, 3), the whole sequence is moved by the same bias
+    bias_noise = (
+        torch.normal(
+            mean=torch.zeros((b, 17, 3)), std=COCO17_AUG["bias"].reshape(1, 17, 1)
+        )
+        * s_bias
+    )
+    bias_noise = bias_noise[:, None].expand(
+        -1, l, -1, -1
+    )  # (B, L, J, 3), the whole sequence is moved by the same bias
     return bias_noise
 
 
@@ -149,7 +199,9 @@ def get_invisible_legs_mask(shape, s_mask=0.03):
     starts = torch.randint(0, L - 90, (B,))
     ends = starts + torch.randint(30, 90, (B,))
     mask_range = torch.arange(L).unsqueeze(0).expand(B, -1)
-    mask_to_apply = (mask_range >= starts.unsqueeze(1)) & (mask_range < ends.unsqueeze(1))
+    mask_to_apply = (mask_range >= starts.unsqueeze(1)) & (
+        mask_range < ends.unsqueeze(1)
+    )
     mask_to_apply = mask_to_apply.unsqueeze(2).expand(-1, -1, 17).clone()
     mask_to_apply[:, :, :11] = False  # only both legs are invisible
     mask_to_apply = mask_to_apply & (torch.rand(B, 1, 1) < s_mask)
@@ -168,7 +220,9 @@ def randomly_occlude_lower_half(i_x2d, s_mask=0.03):
     starts = torch.randint(0, L - 90, (B,))
     ends = starts + torch.randint(30, 90, (B,))
     mask_range = torch.arange(L).unsqueeze(0).expand(B, -1)
-    mask_to_apply = (mask_range >= starts.unsqueeze(1)) & (mask_range < ends.unsqueeze(1))
+    mask_to_apply = (mask_range >= starts.unsqueeze(1)) & (
+        mask_range < ends.unsqueeze(1)
+    )
     mask_to_apply = mask_to_apply.unsqueeze(2).expand(-1, -1, N)  # (B, L, N)
 
     # only the lower half of the image is invisible

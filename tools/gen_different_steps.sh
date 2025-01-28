@@ -63,4 +63,3 @@ python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=0 num_
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=1 num_parts=2 trial_ind=3 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=0 num_parts=2 trial_ind=4 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=1 num_parts=2 trial_ind=4 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"
-

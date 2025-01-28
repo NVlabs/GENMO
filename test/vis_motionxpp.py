@@ -1,18 +1,25 @@
-import torch
-from motiondiff.utils.vis_scenepic import ScenepicVisualizer
 import os
-from motiondiff.models.mdm.rotation_conversions import (
-    rotation_6d_to_matrix,
-    matrix_to_axis_angle,
-    axis_angle_to_matrix,
-)
+
 import cv2
+import torch
 
-motion_files = torch.load("inputs/MotionXpp/hmr4d_support/motionxpp_smplxposev3_aligned.pth")
+from motiondiff.models.mdm.rotation_conversions import (
+    axis_angle_to_matrix,
+    matrix_to_axis_angle,
+    rotation_6d_to_matrix,
+)
+from motiondiff.utils.vis_scenepic import ScenepicVisualizer
 
-device = torch.device('cuda')
-sp_visualizer = ScenepicVisualizer("/home/jiefengl/git/physdiff_megm/data/smpl_data", device=device)
+motion_files = torch.load(
+    "inputs/MotionXpp/hmr4d_support/motionxpp_smplxposev3_aligned.pth"
+)
+
+device = torch.device("cuda")
+sp_visualizer = ScenepicVisualizer(
+    "/home/jiefengl/git/physdiff_megm/data/smpl_data", device=device
+)
 smpl_dict = sp_visualizer.smpl_dict
+
 
 def draw_keypoints(body_kpts, img):
     for kpt in body_kpts:
@@ -22,14 +29,14 @@ def draw_keypoints(body_kpts, img):
 
 for idx, vid in enumerate(motion_files):
     motion_data = motion_files[vid]
-    smpl_layer = smpl_dict['neutral']
-    subset = motion_data['subset']
-    if subset == 'music':
+    smpl_layer = smpl_dict["neutral"]
+    subset = motion_data["subset"]
+    if subset == "music":
         continue
 
-    vname = motion_data['file_name']
-    video_path = f'/mnt/disk3/motion-x++/video/{subset}/{vname}.mp4'
-    assert os.path.exists(video_path), f'{video_path} not found'
+    vname = motion_data["file_name"]
+    video_path = f"/mnt/disk3/motion-x++/video/{subset}/{vname}.mp4"
+    assert os.path.exists(video_path), f"{video_path} not found"
 
     cap = cv2.VideoCapture(video_path)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -55,9 +62,9 @@ for idx, vid in enumerate(motion_files):
     continue
 
     body_pose = motion_data["pose"].reshape(-1, 21, 3)
-    global_orient = motion_data['global_orient'].reshape(-1, 1, 3)
-    beta = motion_data['beta']
-    trans = motion_data['trans']
+    global_orient = motion_data["global_orient"].reshape(-1, 1, 3)
+    beta = motion_data["beta"]
+    trans = motion_data["trans"]
 
     pose_pad = torch.cat([body_pose, torch.zeros_like(body_pose[:, :2])], dim=1)
     smpl_output = smpl_layer(
@@ -71,7 +78,7 @@ for idx, vid in enumerate(motion_files):
     j3d = smpl_output.joints.detach()
 
     smpl_seq = {
-        "text": '',
+        "text": "",
         "joints_pos": j3d,
         # "joints_pos": torch.from_numpy(data_jts[:, :24]).float(),
     }

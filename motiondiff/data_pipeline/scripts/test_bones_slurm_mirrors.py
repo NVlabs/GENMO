@@ -1,16 +1,15 @@
-import json
-import glob
-import subprocess
-import os
-import time
 import argparse
+import glob
+import json
+import os
+import subprocess
+import time
 
-
-parser = argparse.ArgumentParser(description='Process bones')
-parser.add_argument('-pt', '--partition', default='cpu_long', help='slurm partition')
-parser.add_argument('--start_index', type=int, default=0)
-parser.add_argument('--end_index', type=int, default=2)
-parser.add_argument('--local', action='store_true')
+parser = argparse.ArgumentParser(description="Process bones")
+parser.add_argument("-pt", "--partition", default="cpu_long", help="slurm partition")
+parser.add_argument("--start_index", type=int, default=0)
+parser.add_argument("--end_index", type=int, default=2)
+parser.add_argument("--local", action="store_true")
 args = parser.parse_args()
 
 # 150k motions / 5000 motions per job = 35 total jobs
@@ -19,21 +18,20 @@ num_motion_per_job = 5000
 total_jobs = 35
 
 for job_index in range(args.start_index, args.end_index):
-    
     motion_start_index = job_index * num_motion_per_job
     motion_end_index = motion_start_index + num_motion_per_job
 
-    cmd = f'python motiondiff/data_pipeline/scripts/test_bones_bvh_mirrors.py --start {motion_start_index} --end {motion_end_index} --job_id {job_index}'
+    cmd = f"python motiondiff/data_pipeline/scripts/test_bones_bvh_mirrors.py --start {motion_start_index} --end {motion_end_index} --job_id {job_index}"
     print(cmd)
     if args.local:
         subprocess.run(cmd, shell=True)
     else:
-        job_cmd = f'mkdir -p /repo; cd /repo; git clone ssh://git@gitlab-master.nvidia.com:12051/ediff-i-motion/physdiff.git; cd physdiff; git pull origin main; git fetch; git checkout bones; pip install lxml bvh pyrender pyvista==0.38.6; apt-get update; apt install -y libgl1-mesa-glx xvfb; {cmd}'
-        
-        ssh_cmd = \
-        f'submit_job --partition {args.partition} --duration 48 --nodes 1 --cpu 8 --exclude_hosts cpu-00016,cpu-00038,cpu-00039,cpu-00026,cpu-00009,cpu-00025,cpu-00058 --image /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/docker/motiondiff_0.3.5.sqsh' + \
-        f' --name "bones_mirror.{job_index:04d}" --command "{job_cmd}"'
+        job_cmd = f"mkdir -p /repo; cd /repo; git clone ssh://git@gitlab-master.nvidia.com:12051/ediff-i-motion/physdiff.git; cd physdiff; git pull origin main; git fetch; git checkout bones; pip install lxml bvh pyrender pyvista==0.38.6; apt-get update; apt install -y libgl1-mesa-glx xvfb; {cmd}"
+
+        ssh_cmd = (
+            f"submit_job --partition {args.partition} --duration 48 --nodes 1 --cpu 8 --exclude_hosts cpu-00016,cpu-00038,cpu-00039,cpu-00026,cpu-00009,cpu-00025,cpu-00058 --image /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/docker/motiondiff_0.3.5.sqsh"
+            + f' --name "bones_mirror.{job_index:04d}" --command "{job_cmd}"'
+        )
         print(ssh_cmd)
 
         subprocess.run(f"ssh drempe@cs-oci-ord-login-01 '{ssh_cmd}'", shell=True)
-    

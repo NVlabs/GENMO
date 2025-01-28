@@ -1,20 +1,28 @@
-import torch
 # from torch.utils import data
 from pathlib import Path
-import numpy as np
 
-from hmr4d.utils.pylogger import Log
-from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
-from hmr4d.utils.geo_transform import compute_cam_angvel, compute_cam_tvel
-from hmr4d.utils.geo.hmr_cam import estimate_K, resize_K
-from hmr4d.utils.geo.flip_utils import flip_kp2d_coco17
-from hmr4d.dataset.imgfeat_motion.base_dataset import ImgfeatMotionDatasetBase
-from hmr4d.utils.net_utils import get_valid_mask, repeat_to_max_len, repeat_to_max_len_dict
-from hmr4d.utils.smplx_utils import make_smplx
-from hmr4d.utils.video_io_utils import get_video_lwh, read_video_np, save_video
-from hmr4d.utils.geo_transform import normalize_T_w2c, as_identity
+import numpy as np
+import torch
 
 from hmr4d.configs import MainStore, builds
+from hmr4d.dataset.imgfeat_motion.base_dataset import ImgfeatMotionDatasetBase
+from hmr4d.utils.geo.flip_utils import flip_kp2d_coco17
+from hmr4d.utils.geo.hmr_cam import estimate_K, resize_K
+from hmr4d.utils.geo_transform import (
+    as_identity,
+    compute_cam_angvel,
+    compute_cam_tvel,
+    normalize_T_w2c,
+)
+from hmr4d.utils.net_utils import (
+    get_valid_mask,
+    repeat_to_max_len,
+    repeat_to_max_len_dict,
+)
+from hmr4d.utils.pylogger import Log
+from hmr4d.utils.smplx_utils import make_smplx
+from hmr4d.utils.video_io_utils import get_video_lwh, read_video_np, save_video
+from hmr4d.utils.wis3d_utils import add_motion_as_lines, make_wis3d
 
 
 class ThreedpwOccSmplDataset(ImgfeatMotionDatasetBase):
@@ -29,7 +37,9 @@ class ThreedpwOccSmplDataset(ImgfeatMotionDatasetBase):
         super().__init__()
 
     def _load_dataset(self):
-        self.train_labels = torch.load(self.hmr4d_support_dir / "train_3dpw_gt_labels.pt")
+        self.train_labels = torch.load(
+            self.hmr4d_support_dir / "train_3dpw_gt_labels.pt"
+        )
         self.refit_smplx = torch.load(self.hmr4d_support_dir / "train_refit_smplx.pt")
         if True:  # Remove clips that have obvious error
             update_list = {
@@ -70,25 +80,37 @@ class ThreedpwOccSmplDataset(ImgfeatMotionDatasetBase):
         min_motion_len = self.min_motion_frames
         max_motion_len = self.max_motion_frames
 
-        if mlength < min_motion_len:  # this may happen, the minimal mlength is around 30
+        if (
+            mlength < min_motion_len
+        ):  # this may happen, the minimal mlength is around 30
             start = range1
             length = mlength
         else:
             effect_max_motion_len = min(max_motion_len, mlength)
-            length = np.random.randint(min_motion_len, effect_max_motion_len + 1)  # [low, high)
+            length = np.random.randint(
+                min_motion_len, effect_max_motion_len + 1
+            )  # [low, high)
             start = np.random.randint(range1, range2 - length + 1)
         end = start + length
         data["length"] = length
-        data["meta"] = {"data_name": self.dataset_name, "idx": idx, "vid": vid, "start_end": (start, end)}
+        data["meta"] = {
+            "data_name": self.dataset_name,
+            "idx": idx,
+            "vid": vid,
+            "start_end": (start, end),
+        }
 
         # Select motion subset
-        data["smplx_params_incam"] = {k: v[start:end] for k, v in self.refit_smplx[vid]["smplx_params_incam"].items()}
+        data["smplx_params_incam"] = {
+            k: v[start:end]
+            for k, v in self.refit_smplx[vid]["smplx_params_incam"].items()
+        }
         data["K_fullimg"] = self.train_labels[vid]["K_fullimg"]
         data["T_w2c"] = self.train_labels[vid]["T_w2c"][start:end]
 
         # Img (as feature):
         f_img_dict = torch.load(self.f_img_folder / f"{vid}.pth")
-        
+
         data["bbx_xys"] = f_img_dict["bbx_xys"][start:end]  # (F, 3)
         data["f_imgseq"] = f_img_dict["features"][start:end].float()  # (F, 3)
         data["img_wh"] = f_img_dict["img_wh"]  # (2)
@@ -136,11 +158,12 @@ class ThreedpwOccSmplDataset(ImgfeatMotionDatasetBase):
                 "f_imgseq": True,
                 "spv_incam_only": True,
             },
-            'use_det_kp': torch.ones(length),     # default: False
+            "use_det_kp": torch.ones(length),  # default: False
         }
 
         if False:  # Debug, render incam
             from hmr4d.utils.vis.renderer_utils import simple_render_mesh_background
+
             start, end = data["meta"]["start_end"]
             vid = data["meta"]["vid"]
 
@@ -151,7 +174,9 @@ class ThreedpwOccSmplDataset(ImgfeatMotionDatasetBase):
             K_render = resize_K(K_fullimg, ds)
 
             video_path = self.hmr4d_support_dir / f"videos/{vid[:-2]}.mp4"
-            images = read_video_np(video_path, scale=ds, start_frame=start, end_frame=end)
+            images = read_video_np(
+                video_path, scale=ds, start_frame=start, end_frame=end
+            )
 
             render_dict = {
                 "K": K_render[:1],  # only support batch size 1
@@ -163,21 +188,35 @@ class ThreedpwOccSmplDataset(ImgfeatMotionDatasetBase):
             save_video(img_overlay, f"tmp.mp4", crf=28)
 
         # Batchable
-        return_data["smpl_params_c"] = repeat_to_max_len_dict(return_data["smpl_params_c"], max_len)
-        return_data["smpl_params_w"] = repeat_to_max_len_dict(return_data["smpl_params_w"], max_len)
+        return_data["smpl_params_c"] = repeat_to_max_len_dict(
+            return_data["smpl_params_c"], max_len
+        )
+        return_data["smpl_params_w"] = repeat_to_max_len_dict(
+            return_data["smpl_params_w"], max_len
+        )
         return_data["R_c2gv"] = repeat_to_max_len(return_data["R_c2gv"], max_len)
         return_data["bbx_xys"] = repeat_to_max_len(return_data["bbx_xys"], max_len)
         return_data["K_fullimg"] = repeat_to_max_len(return_data["K_fullimg"], max_len)
         return_data["f_imgseq"] = repeat_to_max_len(return_data["f_imgseq"], max_len)
         return_data["kp2d"] = repeat_to_max_len(return_data["kp2d"], max_len)
-        return_data["cam_angvel"] = repeat_to_max_len(return_data["cam_angvel"], max_len)
+        return_data["cam_angvel"] = repeat_to_max_len(
+            return_data["cam_angvel"], max_len
+        )
         return_data["cam_tvel"] = repeat_to_max_len(return_data["cam_tvel"], max_len)
-        return_data["noisy_cam_tvel"] = repeat_to_max_len(return_data["noisy_cam_tvel"], max_len)
+        return_data["noisy_cam_tvel"] = repeat_to_max_len(
+            return_data["noisy_cam_tvel"], max_len
+        )
         return_data["T_w2c"] = repeat_to_max_len(return_data["T_w2c"], max_len)
-        return_data["use_det_kp"] = repeat_to_max_len(return_data["use_det_kp"], max_len)
+        return_data["use_det_kp"] = repeat_to_max_len(
+            return_data["use_det_kp"], max_len
+        )
 
         return return_data
 
 
 # 3DPW
-MainStore.store(name="v1", node=builds(ThreedpwOccSmplDataset), group="train_datasets/imgfeat_3dpw_occ")
+MainStore.store(
+    name="v1",
+    node=builds(ThreedpwOccSmplDataset),
+    group="train_datasets/imgfeat_3dpw_occ",
+)

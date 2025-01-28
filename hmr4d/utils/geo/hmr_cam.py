@@ -1,6 +1,11 @@
-import torch
 import numpy as np
-from hmr4d.utils.geo_transform import project_p2d, convert_bbx_xys_to_lurb, cvt_to_bi01_p2d
+import torch
+
+from hmr4d.utils.geo_transform import (
+    convert_bbx_xys_to_lurb,
+    cvt_to_bi01_p2d,
+    project_p2d,
+)
 
 
 def estimate_focal_length(img_w, img_h):
@@ -88,7 +93,9 @@ def convert_xys_to_cliff_cam_wham(xys, res):
         """
         res = res.to(x.device)
         scale = res.max(-1)[0].reshape(-1)
-        mean = torch.stack([res[..., 0] / scale, res[..., 1] / scale], dim=-1).to(x.device)
+        mean = torch.stack([res[..., 0] / scale, res[..., 1] / scale], dim=-1).to(
+            x.device
+        )
         x = 2 * x / scale.reshape(*[1 for i in range(len(x.shape[1:]))]) - mean.reshape(
             *[1 for i in range(len(x.shape[1:-1]))], -1
         )
@@ -349,8 +356,12 @@ def bbx_xyxy_from_masked_x(p2d, mask):
     mask_flat = mask.view(-1, mask.shape[-1])
 
     # Set masked out values to a large positive and negative value respectively
-    p2d_min = torch.where(mask_flat.unsqueeze(-1), p2d_flat, torch.tensor(float("inf")).to(p2d_flat))
-    p2d_max = torch.where(mask_flat.unsqueeze(-1), p2d_flat, torch.tensor(float("-inf")).to(p2d_flat))
+    p2d_min = torch.where(
+        mask_flat.unsqueeze(-1), p2d_flat, torch.tensor(float("inf")).to(p2d_flat)
+    )
+    p2d_max = torch.where(
+        mask_flat.unsqueeze(-1), p2d_flat, torch.tensor(float("-inf")).to(p2d_flat)
+    )
 
     # Compute the minimum and maximum coordinates for the bounding box
     xy_min = p2d_min.min(dim=1).values  # (BL, 2)
@@ -397,7 +408,12 @@ def get_mesh_in_fov_category(mask):
 
     mask_frame_any_verts = mask.any(1)
     assert is_class1.int() + is_class2.int() + is_class3.int() + is_class4.int() == 1
-    class_type = is_class1.int() + 2 * is_class2.int() + 3 * is_class3.int() + 4 * is_class4.int()
+    class_type = (
+        is_class1.int()
+        + 2 * is_class2.int()
+        + 3 * is_class3.int()
+        + 4 * is_class4.int()
+    )
     return class_type.item(), mask_frame_any_verts
 
 

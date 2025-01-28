@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 from hmr4d.configs import MainStore, builds
+from hmr4d.utils.geo.hmr_cam import create_camera_sensor
 from hmr4d.utils.geo.hmr_global import (
     get_c_rootparam,
     get_R_c2gv,
@@ -13,9 +14,11 @@ from hmr4d.utils.geo.hmr_global import (
 )
 from hmr4d.utils.geo_transform import (
     apply_T_on_points,
+    as_identity,
     compute_cam_angvel,
     compute_cam_tvel,
     cvt_p2d_from_i_to_c,
+    normalize_T_w2c,
     project_p2d,
 )
 from hmr4d.utils.net_utils import (
@@ -30,11 +33,9 @@ from hmr4d.utils.wis3d_utils import (
     convert_motion_as_line_mesh,
     make_wis3d,
 )
-from hmr4d.utils.geo_transform import normalize_T_w2c, as_identity
 
-from .cam_traj_utils import CameraAugmentorV11
-from hmr4d.utils.geo.hmr_cam import create_camera_sensor
 from .base_dataset import BaseDataset
+from .cam_traj_utils import CameraAugmentorV11
 from .utils import *
 
 
@@ -62,10 +63,14 @@ class Humanml3dDataset(BaseDataset):
     ):
         self.root = Path("inputs/HumanML3D_SMPL/hmr4d_support")
         if split == "train":
-            self.text_embed_file = Path("inputs/HumanML3D_SMPL_ye/t5_embeddings_v1_half/all_text_embed.pth") # TODO: USE THE STANDARD PATH
+            self.text_embed_file = Path(
+                "inputs/HumanML3D_SMPL_ye/t5_embeddings_v1_half/all_text_embed.pth"
+            )  # TODO: USE THE STANDARD PATH
         else:
-            self.text_embed_file = Path("inputs/HumanML3D_SMPL_ye/t5_embeddings_v1_half/test_text_embed.pth")
-        if split == 'test':
+            self.text_embed_file = Path(
+                "inputs/HumanML3D_SMPL_ye/t5_embeddings_v1_half/test_text_embed.pth"
+            )
+        if split == "test":
             no_subsample = True
         self.motion_frames = motion_frames
         self.l_factor = l_factor
@@ -99,28 +104,37 @@ class Humanml3dDataset(BaseDataset):
         for i, (vid, _) in enumerate(self.idx2meta):
             self.vid_to_idx[vid] = i
         return
-        
-        
+
     def _load_dataset(self):
         filename = self.root / f"humanml3d_smplhpose_{self.split}.pth"
         Log.info(f"[{self.dataset_name}] Loading from {filename} ...")
         tic = Log.time()
         if self.random1024:  # Debug, faster loading
             try:
-                Log.info(f"[{self.dataset_name}] Loading 1024 samples for debugging ...")
-                self.motion_files = torch.load(self.root / "smplxpose_v2_random1024.pth")
+                Log.info(
+                    f"[{self.dataset_name}] Loading 1024 samples for debugging ..."
+                )
+                self.motion_files = torch.load(
+                    self.root / "smplxpose_v2_random1024.pth"
+                )
             except:
-                Log.info(f"[{self.dataset_name}] Not found! Saving 1024 samples for debugging ...")
+                Log.info(
+                    f"[{self.dataset_name}] Not found! Saving 1024 samples for debugging ..."
+                )
                 self.motion_files = torch.load(filename)
                 keys = list(self.motion_files.keys())
                 keys = np.random.choice(keys, 1024, replace=False)
                 self.motion_files = {k: self.motion_files[k] for k in keys}
-                torch.save(self.motion_files, self.root / "humanml3d_smplhpose_random1024.pth")
+                torch.save(
+                    self.motion_files, self.root / "humanml3d_smplhpose_random1024.pth"
+                )
         else:
             self.motion_files = torch.load(filename)
         self.text_embed_dict = torch.load(self.text_embed_file)
         self.seqs = list(self.motion_files.keys())
-        Log.info(f"[{self.dataset_name}] {len(self.seqs)} sequences. Elapsed: {Log.time() - tic:.2f}s")
+        Log.info(
+            f"[{self.dataset_name}] {len(self.seqs)} sequences. Elapsed: {Log.time() - tic:.2f}s"
+        )
 
     def _get_idx2meta(self):
         # We expect to see the entire sequence during one epoch,
@@ -136,7 +150,9 @@ class Humanml3dDataset(BaseDataset):
             seq_length = self.motion_files[vid]["pose"].shape[0]
             start_id = motion_start_id[vid] if vid in motion_start_id else 0
             seq_length = seq_length - start_id
-            if seq_length < 25 and not self.no_subsample:  # Skip clips that are too short
+            if (
+                seq_length < 25 and not self.no_subsample
+            ):  # Skip clips that are too short
                 continue
             num_samples = max(seq_length // self.motion_frames, 1)
             if self.use_random_subset or self.no_subsample:
@@ -144,24 +160,30 @@ class Humanml3dDataset(BaseDataset):
             seq_lengths.append(seq_length)
             self.idx2meta.extend([(vid, start_id)] * num_samples)
             assert start_id == 0, f"start_id is not 0 for {vid}"
-        
+
         if self.num_parts > 0:
             part_size = len(self.idx2meta) // self.num_parts
             start_idx = self.part_ind * part_size
             end_idx = (self.part_ind + 1) * part_size
             self.idx2meta = self.idx2meta[start_idx:end_idx]
             seq_lengths = seq_lengths[start_idx:end_idx]
-            
+
         if self.use_random_subset:
             self.rng = np.random.RandomState(self.random_subset_seed)
             shuffle_ind = np.arange(len(self.idx2meta))
             self.rng.shuffle(shuffle_ind)
-            self.idx2meta = [self.idx2meta[i] for i in shuffle_ind[:self.random_subset_size]]
-            seq_lengths = [seq_lengths[i] for i in shuffle_ind[:self.random_subset_size]]
+            self.idx2meta = [
+                self.idx2meta[i] for i in shuffle_ind[: self.random_subset_size]
+            ]
+            seq_lengths = [
+                seq_lengths[i] for i in shuffle_ind[: self.random_subset_size]
+            ]
         else:
             self.rng = np.random
         hours = sum(seq_lengths) / 30 / 3600
-        Log.info(f"[{self.dataset_name}] has {hours:.1f} hours motion -> Resampled to {len(self.idx2meta)} samples.")
+        Log.info(
+            f"[{self.dataset_name}] has {hours:.1f} hours motion -> Resampled to {len(self.idx2meta)} samples."
+        )
 
     def _load_data(self, idx):
         """
@@ -183,7 +205,9 @@ class Humanml3dDataset(BaseDataset):
         # Get {tgt_len} frames from data
         # Random select a subset with speed augmentation  [start, end)
         tgt_len = self.motion_frames
-        raw_subset_len = self.rng.randint(int(tgt_len / self.l_factor), int(tgt_len * self.l_factor))
+        raw_subset_len = self.rng.randint(
+            int(tgt_len / self.l_factor), int(tgt_len * self.l_factor)
+        )
         if raw_subset_len <= raw_len:
             start = self.rng.randint(0, raw_len - raw_subset_len + 1)
             end = start + raw_subset_len
@@ -201,7 +225,7 @@ class Humanml3dDataset(BaseDataset):
             text_ind = self.rng.randint(0, len(raw_data["text_data"]))
         text_data = raw_data["text_data"][text_ind]
         text_embed = text_embed_data[text_ind]
-        
+
         caption, tokens = text_data["caption"], text_data["tokens"]
 
         if len(tokens) < self.max_text_len:
@@ -216,10 +240,12 @@ class Humanml3dDataset(BaseDataset):
             sent_len = len(tokens)
 
         # AZ -> AY
-        data_interpolated["global_orient"], data_interpolated["transl"], _ = get_tgtcoord_rootparam(
-            data_interpolated["global_orient"],
-            data_interpolated["transl"],
-            tsf="az->ay",
+        data_interpolated["global_orient"], data_interpolated["transl"], _ = (
+            get_tgtcoord_rootparam(
+                data_interpolated["global_orient"],
+                data_interpolated["transl"],
+                tsf="az->ay",
+            )
         )
 
         data_interpolated["data_name"] = "humanml3d"
@@ -245,10 +271,12 @@ class Humanml3dDataset(BaseDataset):
         text_ind = data["text_ind"]
         length = data["body_pose"].shape[0]
         # Augmentation: betas, SMPL (gravity-axis)
-        gender = str(data['gender'])
+        gender = str(data["gender"])
         body_pose = data["body_pose"]
         betas = augment_betas(data["betas"], std=0.1)
-        global_orient_w, transl_w = rotate_around_axis(data["global_orient"], data["transl"], axis="y")
+        global_orient_w, transl_w = rotate_around_axis(
+            data["global_orient"], data["transl"], axis="y"
+        )
         caption = data["caption"]
         text_embed = data["text_embed"]
         del data
@@ -272,7 +300,9 @@ class Humanml3dDataset(BaseDataset):
                 smpl_params_w["global_orient"][::N],
                 None,
             )
-            w_j3d = w_j3d.repeat_interleave(N, dim=0) + smpl_params_w["transl"][:, None]  # (F, 24, 3)
+            w_j3d = (
+                w_j3d.repeat_interleave(N, dim=0) + smpl_params_w["transl"][:, None]
+            )  # (F, 24, 3)
 
             if False:
                 wis3d = make_wis3d(name="debug_amass")
@@ -292,7 +322,9 @@ class Humanml3dDataset(BaseDataset):
                 smpl_params_w["global_orient"][::N],
                 None,
             )
-            w_j3d = w_j3d.repeat_interleave(N, dim=0) + smpl_params_w["transl"][:, None]  # (F, 24, 3)
+            w_j3d = (
+                w_j3d.repeat_interleave(N, dim=0) + smpl_params_w["transl"][:, None]
+            )  # (F, 24, 3)
 
             if False:
                 wis3d = make_wis3d(name="debug_amass")
@@ -353,7 +385,15 @@ class Humanml3dDataset(BaseDataset):
         # NOTE: bbx_xys and f_imgseq will be added later
         max_len = length
         return_data = {
-            "meta": {"data_name": data_name, "dataset_id": 'humanml3d', "idx": idx, "T_w2c": T_w2c, "eval_text_only": self.eval_text_only, "mid": mid, "text_ind": text_ind},
+            "meta": {
+                "data_name": data_name,
+                "dataset_id": "humanml3d",
+                "idx": idx,
+                "T_w2c": T_w2c,
+                "eval_text_only": self.eval_text_only,
+                "mid": mid,
+                "text_ind": text_ind,
+            },
             "length": length,
             "smpl_params_c": smpl_params_c,
             "smpl_params_w": smpl_params_w,
@@ -379,16 +419,24 @@ class Humanml3dDataset(BaseDataset):
         }
 
         # Batchable
-        return_data["smpl_params_c"] = repeat_to_max_len_dict(return_data["smpl_params_c"], max_len)
-        return_data["smpl_params_w"] = repeat_to_max_len_dict(return_data["smpl_params_w"], max_len)
+        return_data["smpl_params_c"] = repeat_to_max_len_dict(
+            return_data["smpl_params_c"], max_len
+        )
+        return_data["smpl_params_w"] = repeat_to_max_len_dict(
+            return_data["smpl_params_w"], max_len
+        )
         return_data["R_c2gv"] = repeat_to_max_len(return_data["R_c2gv"], max_len)
         return_data["K_fullimg"] = repeat_to_max_len(return_data["K_fullimg"], max_len)
-        return_data["cam_angvel"] = repeat_to_max_len(return_data["cam_angvel"], max_len)
+        return_data["cam_angvel"] = repeat_to_max_len(
+            return_data["cam_angvel"], max_len
+        )
         return_data["cam_tvel"] = repeat_to_max_len(return_data["cam_tvel"], max_len)
-        return_data["noisy_cam_tvel"] = repeat_to_max_len(return_data["noisy_cam_tvel"], max_len)
+        return_data["noisy_cam_tvel"] = repeat_to_max_len(
+            return_data["noisy_cam_tvel"], max_len
+        )
         return_data["T_w2c"] = repeat_to_max_len(return_data["T_w2c"], max_len)
         return return_data
-    
+
     def __getitem__(self, idx):
         if self.multi_text_vid is not None:
             idx = self.vid_to_idx[self.multi_text_vid[0]]
@@ -405,12 +453,12 @@ class Humanml3dDataset(BaseDataset):
                 data_i = self._process_data(data_i, new_idx)
                 all_data.append(data_i)
             multi_text_data = {
-                'vid': [],
-                'caption': [],
-                'text_ind': [],
-                'text_embed': [],
-                'window_start': [],
-                'window_end': [],
+                "vid": [],
+                "caption": [],
+                "text_ind": [],
+                "text_embed": [],
+                "window_start": [],
+                "window_end": [],
             }
             window_stride = 1 / self.num_multi_text
             for i, data_i in enumerate(all_data):
@@ -431,7 +479,9 @@ class Humanml3dDataset(BaseDataset):
             # multi_text_data["window_start"][1] = 120/600
             # multi_text_data["window_start"][2] = 300/600
             multi_text_data["text_embed"] = torch.stack(multi_text_data["text_embed"])
-            multi_text_data["window_start"] = torch.tensor(multi_text_data["window_start"])
+            multi_text_data["window_start"] = torch.tensor(
+                multi_text_data["window_start"]
+            )
             multi_text_data["window_end"] = torch.tensor(multi_text_data["window_end"])
             print("vid & captions:")
             print(multi_text_data["vid"])
@@ -441,9 +491,36 @@ class Humanml3dDataset(BaseDataset):
 
 
 train_group_name = "train_datasets/pure_motion_humanml3d"
-MainStore.store(name="v11_train", node=builds(Humanml3dDataset, cam_augmentation="v11", split="train"), group=train_group_name)
-MainStore.store(name="static_train", node=builds(Humanml3dDataset, cam_augmentation="static", split="train"), group=train_group_name)
+MainStore.store(
+    name="v11_train",
+    node=builds(Humanml3dDataset, cam_augmentation="v11", split="train"),
+    group=train_group_name,
+)
+MainStore.store(
+    name="static_train",
+    node=builds(Humanml3dDataset, cam_augmentation="static", split="train"),
+    group=train_group_name,
+)
 test_group_name = "test_datasets/pure_motion_humanml3d"
-MainStore.store(name="v11_test", node=builds(Humanml3dDataset, cam_augmentation="v11", split="test", eval_text_only=True, no_subsample=True), group=test_group_name)
-MainStore.store(name="static_test", node=builds(Humanml3dDataset, cam_augmentation="static", split="test", eval_text_only=True, no_subsample=True), group=test_group_name)
-
+MainStore.store(
+    name="v11_test",
+    node=builds(
+        Humanml3dDataset,
+        cam_augmentation="v11",
+        split="test",
+        eval_text_only=True,
+        no_subsample=True,
+    ),
+    group=test_group_name,
+)
+MainStore.store(
+    name="static_test",
+    node=builds(
+        Humanml3dDataset,
+        cam_augmentation="static",
+        split="test",
+        eval_text_only=True,
+        no_subsample=True,
+    ),
+    group=test_group_name,
+)

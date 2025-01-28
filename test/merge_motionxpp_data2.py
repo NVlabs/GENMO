@@ -70,35 +70,41 @@ def render_mesh(img, mesh, face, cam_param, img_white_bg=None, deg=0):
     cur_mesh = mesh.copy()
     mesh = trimesh.Trimesh(mesh, face)
 
-    if (deg != 0):
-        rot = trimesh.transformations.rotation_matrix(np.radians(deg), [0, 1, 0], point=np.mean(cur_mesh, axis=0))
+    if deg != 0:
+        rot = trimesh.transformations.rotation_matrix(
+            np.radians(deg), [0, 1, 0], point=np.mean(cur_mesh, axis=0)
+        )
         mesh.apply_transform(rot)
 
-    rot = trimesh.transformations.rotation_matrix(
-        np.radians(180), [1, 0, 0])
+    rot = trimesh.transformations.rotation_matrix(np.radians(180), [1, 0, 0])
     mesh.apply_transform(rot)
     # baseColorFactor = (1.0, 1.0, 0.9, 1.0)   # graw color
-    material = pyrender.MetallicRoughnessMaterial(metallicFactor=0.0, alphaMode='OPAQUE',
-                                                  baseColorFactor=(1.0, 1.0, 0.9, 1.0))
+    material = pyrender.MetallicRoughnessMaterial(
+        metallicFactor=0.0, alphaMode="OPAQUE", baseColorFactor=(1.0, 1.0, 0.9, 1.0)
+    )
 
     # Set other material properties for appearance
-    #material.baseColorFactor = [0.25, 0.4, 0.65, 1.0]      # gray
-    #material.baseColorFactor = [0.3, 0.3, 0.3, 1.0]      # silver
-    material.baseColorFactor = [1.0, 1.0, 0.9, 1.0]     # white
+    # material.baseColorFactor = [0.25, 0.4, 0.65, 1.0]      # gray
+    # material.baseColorFactor = [0.3, 0.3, 0.3, 1.0]      # silver
+    material.baseColorFactor = [1.0, 1.0, 0.9, 1.0]  # white
     material.metallicFactor = 0.2
     material.roughnessFactor = 0.7
 
     mesh = pyrender.Mesh.from_trimesh(mesh, material=material, smooth=True)
 
     scene = pyrender.Scene(ambient_light=(0.3, 0.3, 0.3))
-    scene.add(mesh, 'mesh')
+    scene.add(mesh, "mesh")
 
-    focal, princpt = cam_param['focal'], cam_param['princpt']
-    camera = pyrender.IntrinsicsCamera(fx=focal[0], fy=focal[1], cx=princpt[0], cy=princpt[1])
+    focal, princpt = cam_param["focal"], cam_param["princpt"]
+    camera = pyrender.IntrinsicsCamera(
+        fx=focal[0], fy=focal[1], cx=princpt[0], cy=princpt[1]
+    )
     scene.add(camera)
 
     # renderer
-    renderer = pyrender.OffscreenRenderer(viewport_width=img.shape[1], viewport_height=img.shape[0], point_size=1.0)
+    renderer = pyrender.OffscreenRenderer(
+        viewport_width=img.shape[1], viewport_height=img.shape[0], point_size=1.0
+    )
 
     # light
     light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=0.8)
@@ -111,8 +117,7 @@ def render_mesh(img, mesh, face, cam_param, img_white_bg=None, deg=0):
     scene.add(light, pose=light_pose)
 
     # render
-    flags = (pyrender.RenderFlags.RGBA |
-             pyrender.RenderFlags.SKIP_CULL_FACES)
+    flags = pyrender.RenderFlags.RGBA | pyrender.RenderFlags.SKIP_CULL_FACES
     rgb, depth = renderer.render(scene, flags=flags)
     renderer.delete()
     rgb = rgb[:, :, :3].astype(np.float32)
@@ -159,8 +164,12 @@ if __name__ == "__main__":
         # video_file = f"/mnt/disk3/motion-x++/video/{subset}/{file_name}.mp4"
         local_motion_file = f"/mnt/disk3/motion-x++/motion/mesh_recovery/local_motion/{subset}/{file_name}.json"
         global_motion_file = f"/mnt/disk3/motion-x++/motion/mesh_recovery/global_motion/{subset}/{file_name}.json"
-        keypoint_file = f"/mnt/disk3/motion-x++/motion/keypoints/{subset}/{file_name}.json"
-        semmantic_text_file = f"/mnt/disk3/motion-x++/text/semantic_label/{subset}/{file_name}.txt"
+        keypoint_file = (
+            f"/mnt/disk3/motion-x++/motion/keypoints/{subset}/{file_name}.json"
+        )
+        semmantic_text_file = (
+            f"/mnt/disk3/motion-x++/text/semantic_label/{subset}/{file_name}.txt"
+        )
         whole_desc_file = f"/mnt/disk3/motion-x++/text/wholebody_pose_description/{subset}/{file_name}.json"
         assert os.path.exists(local_motion_file), (local_motion_file, video_file)
         # assert os.path.exists(global_motion_file), (global_motion_file, video_file)
@@ -236,13 +245,15 @@ if __name__ == "__main__":
                     w_text = db_w_text[str(i)]
                     w_text_lst.append(w_text)
 
-                smpl_layer = smpl_dict['neutral']
+                smpl_layer = smpl_dict["neutral"]
                 bbox = ann["bbox"]
                 bbox_lst.append(bbox)
                 body_kpts = np.array(ann_keypoint["body_kpts"])
                 body_kpts_lst.append(body_kpts)
                 # local camera intrinsics
-                intrins_global = ann_global["cam_params"]["intrins"] # [1500.0, 1500.0, 960.0, 540.0]
+                intrins_global = ann_global["cam_params"][
+                    "intrins"
+                ]  # [1500.0, 1500.0, 960.0, 540.0]
                 orig_intrins_local = get_local_camint(bbox)
                 f_scale = intrins_global[0] / orig_intrins_local[0]
 
@@ -263,20 +274,39 @@ if __name__ == "__main__":
                     focal = (intrins_global[0], intrins_global[1])
                     princpt = (intrins_global[2], intrins_global[3])
                     output_c = smplx_layer(
-                        betas=torch.from_numpy(beta).to(device=device, dtype=torch.float32).unsqueeze(0),
-                        body_pose=torch.from_numpy(pose_body).to(device=device, dtype=torch.float32).unsqueeze(0),
-                        global_orient=torch.from_numpy(global_orient_c).to(device=device, dtype=torch.float32).unsqueeze(0),
-                        right_hand_pose=torch.from_numpy(right_hand_pose).to(device=device, dtype=torch.float32).unsqueeze(0),
-                        left_hand_pose=torch.from_numpy(left_hand_pose).to(device=device, dtype=torch.float32).unsqueeze(0),
-                        transl=torch.from_numpy(transl_c).to(device=device, dtype=torch.float32).unsqueeze(0),
+                        betas=torch.from_numpy(beta)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0),
+                        body_pose=torch.from_numpy(pose_body)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0),
+                        global_orient=torch.from_numpy(global_orient_c)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0),
+                        right_hand_pose=torch.from_numpy(right_hand_pose)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0),
+                        left_hand_pose=torch.from_numpy(left_hand_pose)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0),
+                        transl=torch.from_numpy(transl_c)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0),
                         jaw_pose=torch.zeros([1, 3]).to(device),
                         leye_pose=torch.zeros([1, 3]).to(device),
                         reye_pose=torch.zeros([1, 3]).to(device),
-                        expression=torch.from_numpy(expr).to(device=device, dtype=torch.float32).unsqueeze(0),
+                        expression=torch.from_numpy(expr)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0),
                     )
 
                     mesh_cam_c = output_c.vertices.detach().cpu().numpy()[0]
-                    frame_loc = render_mesh(frame.copy(), mesh_cam_c, smplx_layer.faces, {'focal': focal, 'princpt': princpt})
+                    frame_loc = render_mesh(
+                        frame.copy(),
+                        mesh_cam_c,
+                        smplx_layer.faces,
+                        {"focal": focal, "princpt": princpt},
+                    )
 
                 R_w2c = np.array(ann_global["cam_params"]["cam_R"])
                 t_w2c = np.array(ann_global["cam_params"]["cam_T"])
@@ -288,8 +318,12 @@ if __name__ == "__main__":
 
                 # transform the global motion
                 transl_w = (trans_matrix @ transl_w[..., None])[..., 0]
-                global_orient_w_mat = axis_angle_to_matrix(torch.from_numpy(global_orient_w).float())
-                global_orient_w_mat = torch.from_numpy(trans_matrix).float() @ global_orient_w_mat
+                global_orient_w_mat = axis_angle_to_matrix(
+                    torch.from_numpy(global_orient_w).float()
+                )
+                global_orient_w_mat = (
+                    torch.from_numpy(trans_matrix).float() @ global_orient_w_mat
+                )
                 global_orient_w = matrix_to_axis_angle(global_orient_w_mat).numpy()
 
                 # pose_pad = np.concatenate([pose_body, np.zeros_like(pose_body[:6])], axis=0)
@@ -311,16 +345,20 @@ if __name__ == "__main__":
                 trans_glob_mat = np.eye(4)
                 trans_glob_mat[:3, :3] = trans_matrix
                 # trans_glob_mat[:3, 3] = -offset_xy
-                # T_c2w = T_c2w 
+                # T_c2w = T_c2w
                 T_w2c = T_w2c @ np.linalg.inv(trans_glob_mat)
 
                 # T_w2c = np.linalg.inv(T_c2w)
                 R_w2c = T_w2c[:3, :3]
                 t_w2c = T_w2c[:3, 3]
 
-                global_orient_w_mat = axis_angle_to_matrix(torch.from_numpy(global_orient_w).float())
+                global_orient_w_mat = axis_angle_to_matrix(
+                    torch.from_numpy(global_orient_w).float()
+                )
                 global_orient_w_c_mat = R_w2c @ global_orient_w_mat.numpy()
-                global_orient_w_c = matrix_to_axis_angle(torch.from_numpy(global_orient_w_c_mat).float()).numpy()
+                global_orient_w_c = matrix_to_axis_angle(
+                    torch.from_numpy(global_orient_w_c_mat).float()
+                ).numpy()
                 transl_w_c = R_w2c @ transl_w + t_w2c
 
                 cam_R_lst.append(R_w2c)
@@ -330,21 +368,40 @@ if __name__ == "__main__":
                     focal = (intrins_global[0], intrins_global[1])
                     princpt = (intrins_global[2], intrins_global[3])
                     output_w = smplx_layer(
-                        betas=torch.from_numpy(beta).to(device=device, dtype=torch.float32).unsqueeze(0),
-                        body_pose=torch.from_numpy(pose_body).to(device=device, dtype=torch.float32).unsqueeze(0),
-                        global_orient=torch.from_numpy(global_orient_w_c).to(device=device, dtype=torch.float32).unsqueeze(0),
-                        right_hand_pose=torch.from_numpy(right_hand_pose).to(device=device, dtype=torch.float32).unsqueeze(0),
-                        left_hand_pose=torch.from_numpy(left_hand_pose).to(device=device, dtype=torch.float32).unsqueeze(0),
-                        transl=torch.from_numpy(transl_w_c).to(device=device, dtype=torch.float32).unsqueeze(0),
+                        betas=torch.from_numpy(beta)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0),
+                        body_pose=torch.from_numpy(pose_body)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0),
+                        global_orient=torch.from_numpy(global_orient_w_c)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0),
+                        right_hand_pose=torch.from_numpy(right_hand_pose)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0),
+                        left_hand_pose=torch.from_numpy(left_hand_pose)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0),
+                        transl=torch.from_numpy(transl_w_c)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0),
                         jaw_pose=torch.zeros([1, 3]).to(device),
                         leye_pose=torch.zeros([1, 3]).to(device),
                         reye_pose=torch.zeros([1, 3]).to(device),
-                        expression=torch.from_numpy(expr).to(device=device, dtype=torch.float32).unsqueeze(0),
+                        expression=torch.from_numpy(expr)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0),
                     )
                     joints_w = output_w.joints
 
                     mesh_cam_w = output_w.vertices.detach().cpu().numpy()[0]
-                    frame_global = render_mesh(frame.copy(), mesh_cam_w, smplx_layer.faces, {'focal': focal, 'princpt': princpt})
+                    frame_global = render_mesh(
+                        frame.copy(),
+                        mesh_cam_w,
+                        smplx_layer.faces,
+                        {"focal": focal, "princpt": princpt},
+                    )
 
                     frame = np.concatenate([frame_global, frame_loc], axis=1)
                     out.write(frame.astype(np.uint8))
@@ -403,8 +460,12 @@ if __name__ == "__main__":
             cap.release()
             # out.release()
             pose_lst = torch.from_numpy(np.stack(pose_lst)).float()
-            global_orient_w_lst = torch.from_numpy(np.stack(global_orient_w_lst)).float()
-            global_orient_c_lst = torch.from_numpy(np.stack(global_orient_c_lst)).float()
+            global_orient_w_lst = torch.from_numpy(
+                np.stack(global_orient_w_lst)
+            ).float()
+            global_orient_c_lst = torch.from_numpy(
+                np.stack(global_orient_c_lst)
+            ).float()
             transl_w_lst = torch.from_numpy(np.stack(transl_w_lst)).float()
             transl_c_lst = torch.from_numpy(np.stack(transl_c_lst)).float()
             beta_lst = torch.from_numpy(np.stack(beta_lst)).float()
@@ -441,4 +502,3 @@ if __name__ == "__main__":
             # import ipdb; ipdb.set_trace()
 print(f"total {len(motionx_db)} samples")
 torch.save(motionx_db, "/mnt/disk3/motion-x++/motionxpp_smplxposev3.pth")
-

@@ -18,8 +18,7 @@ def channel_shuffle(x, groups):
     """
 
     batch_size, num_channels, height, width = x.size()
-    assert (num_channels % groups == 0), ('num_channels should be '
-                                          'divisible by groups')
+    assert num_channels % groups == 0, "num_channels should be divisible by groups"
     channels_per_group = num_channels // groups
 
     x = x.view(batch_size, groups, channels_per_group, height, width)

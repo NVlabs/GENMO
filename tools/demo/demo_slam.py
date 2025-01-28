@@ -1,18 +1,18 @@
 import argparse
 import os
 import subprocess
+from glob import glob
 from pathlib import Path
 
 import cv2
 import hydra
+import imageio.v3 as iio
 import numpy as np
 import pytorch_lightning as pl
 import torch
 from einops import einsum, rearrange
 from hydra import compose, initialize_config_module
 from tqdm import tqdm
-from glob import glob
-import imageio.v3 as iio
 
 from hmr4d.configs import register_store_gvhmr
 from hmr4d.model.gvhmr.gvhmr_pl_demo import DemoPL
@@ -67,14 +67,23 @@ def parse_args_to_cfg():
     parser = argparse.ArgumentParser()
     parser.add_argument("--video", type=str, default=None)
     parser.add_argument("--img_dir", type=str, default=None)
-    parser.add_argument("--output_root", type=str, default="outputs/demo", help="by default to outputs/demo")
-    parser.add_argument("-s", "--static_cam", action="store_true", help="If true, skip DPVO")
-    parser.add_argument("--verbose", action="store_true", help="If true, draw intermediate results")
+    parser.add_argument(
+        "--output_root",
+        type=str,
+        default="outputs/demo",
+        help="by default to outputs/demo",
+    )
+    parser.add_argument(
+        "-s", "--static_cam", action="store_true", help="If true, skip DPVO"
+    )
+    parser.add_argument(
+        "--verbose", action="store_true", help="If true, draw intermediate results"
+    )
     args = parser.parse_args()
 
     if args.img_dir is not None:
         Log.info(f"[Input]: {args.img_dir}")
-        video_path = os.path.join(args.output_root, 'demo.mp4')
+        video_path = os.path.join(args.output_root, "demo.mp4")
         assert args.video is None
         if Path(video_path).exists():
             args.video = video_path
@@ -90,7 +99,9 @@ def parse_args_to_cfg():
             for imgfile in all_imgfiles:
                 frames.append(cv2.imread(imgfile))
             height, width, _ = frames[0].shape
-            writer = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*"mp4v"), 30, (width, height))
+            writer = cv2.VideoWriter(
+                video_path, cv2.VideoWriter_fourcc(*"mp4v"), 30, (width, height)
+            )
             for frame in tqdm(frames[:300], desc="Merge Images"):
                 writer.write(frame)
             writer.release()
@@ -123,7 +134,10 @@ def parse_args_to_cfg():
 
     # Copy raw-input-video to video_path
     Log.info(f"[Copy Video] {video_path} -> {cfg.video_path}")
-    if not Path(cfg.video_path).exists() or get_video_lwh(video_path)[0] != get_video_lwh(cfg.video_path)[0]:
+    if (
+        not Path(cfg.video_path).exists()
+        or get_video_lwh(video_path)[0] != get_video_lwh(cfg.video_path)[0]
+    ):
         reader = get_video_reader(video_path)
         writer = get_writer(cfg.video_path, fps=30, crf=CRF)
         for img in tqdm(reader, total=get_video_lwh(video_path)[0], desc=f"Copy"):
@@ -147,7 +161,9 @@ def run_preprocess(cfg):
     if not Path(paths.bbx).exists():
         tracker = Tracker()
         bbx_xyxy = tracker.get_one_track(video_path).float()  # (L, 4)
-        bbx_xys = get_bbx_xys_from_xyxy(bbx_xyxy, base_enlarge=1.2).float()  # (L, 3) apply aspect ratio and enlarge
+        bbx_xys = get_bbx_xys_from_xyxy(
+            bbx_xyxy, base_enlarge=1.2
+        ).float()  # (L, 3) apply aspect ratio and enlarge
         torch.save({"bbx_xyxy": bbx_xyxy, "bbx_xys": bbx_xys}, paths.bbx)
         del tracker
     else:
@@ -179,9 +195,14 @@ def run_preprocess(cfg):
             length, width, height = get_video_lwh(cfg.video_path)
             K_fullimg = estimate_K(width, height)
             intrinsics = convert_K_to_K4(K_fullimg)
-            cam_int = [K_fullimg[0, 0], K_fullimg[1, 1], K_fullimg[0, 2], K_fullimg[1, 2]]
+            cam_int = [
+                K_fullimg[0, 0],
+                K_fullimg[1, 1],
+                K_fullimg[0, 2],
+                K_fullimg[1, 2],
+            ]
             out_dir = os.path.dirname(paths.slam)
-            np.save(f'{out_dir}/cam_int.npy', cam_int)
+            np.save(f"{out_dir}/cam_int.npy", cam_int)
 
             # parse video to frames
             video = read_video_np(video_path)
@@ -211,14 +232,16 @@ def run_preprocess(cfg):
     if not Path(paths.vimo_pred).exists():
         extractor = ExtractorVIMO()
         out_dir = os.path.dirname(paths.slam)
-        calib = np.load(f'{out_dir}/cam_int.npy')
-        pred_smpl = extractor.extract_video_features(video_path, bbx_xys, calib, img_ds=1.0)
+        calib = np.load(f"{out_dir}/cam_int.npy")
+        pred_smpl = extractor.extract_video_features(
+            video_path, bbx_xys, calib, img_ds=1.0
+        )
         torch.save(pred_smpl, paths.vimo_pred)
         del extractor
     else:
         Log.info(f"[Preprocess] VIMO features from {paths.vimo_pred}")
 
-    Log.info(f"[Preprocess] End. Time elapsed: {Log.time()-tic:.2f}s")
+    Log.info(f"[Preprocess] End. Time elapsed: {Log.time() - tic:.2f}s")
 
 
 def load_data_dict(cfg):
@@ -287,7 +310,9 @@ def render_incam(cfg):
 
     # smpl
     smplx_out = smplx(**to_cuda(pred["smpl_params_incam"]))
-    pred_c_verts = torch.stack([torch.matmul(smplx2smpl, v_) for v_ in smplx_out.vertices])
+    pred_c_verts = torch.stack(
+        [torch.matmul(smplx2smpl, v_) for v_ in smplx_out.vertices]
+    )
 
     # -- rendering code -- #
     video_path = cfg.video_path
@@ -302,7 +327,9 @@ def render_incam(cfg):
     # -- render mesh -- #
     verts_incam = pred_c_verts
     writer = get_writer(incam_video_path, fps=30, crf=CRF)
-    for i, img_raw in tqdm(enumerate(reader), total=get_video_lwh(video_path)[0], desc=f"Rendering Incam"):
+    for i, img_raw in tqdm(
+        enumerate(reader), total=get_video_lwh(video_path)[0], desc=f"Rendering Incam"
+    ):
         img = renderer.render_mesh(verts_incam[i].cuda(), img_raw, [0.8, 0.8, 0.8])
 
         # # bbx
@@ -327,11 +354,15 @@ def render_global(cfg):
     smplx = make_smplx("supermotion").cuda()
     smplx2smpl = torch.load("hmr4d/utils/body_model/smplx2smpl_sparse.pt").cuda()
     faces_smpl = make_smplx("smpl").faces
-    J_regressor = torch.load("hmr4d/utils/body_model/smpl_neutral_J_regressor.pt").cuda()
+    J_regressor = torch.load(
+        "hmr4d/utils/body_model/smpl_neutral_J_regressor.pt"
+    ).cuda()
 
     # smpl
     smplx_out = smplx(**to_cuda(pred["smpl_params_global"]))
-    pred_ay_verts = torch.stack([torch.matmul(smplx2smpl, v_) for v_ in smplx_out.vertices])
+    pred_ay_verts = torch.stack(
+        [torch.matmul(smplx2smpl, v_) for v_ in smplx_out.vertices]
+    )
 
     def move_to_start_point_face_z(verts):
         "XZ to origin, Start from the ground, Face-Z"
@@ -341,7 +372,9 @@ def render_global(cfg):
         offset[1] = verts[:, :, [1]].min()
         verts = verts - offset
         # face direction
-        T_ay2ayfz = compute_T_ayfz2ay(einsum(J_regressor, verts[[0]], "j v, l v i -> l j i"), inverse=True)
+        T_ay2ayfz = compute_T_ayfz2ay(
+            einsum(J_regressor, verts[[0]], "j v, l v i -> l j i"), inverse=True
+        )
         verts = apply_T_on_points(verts, T_ay2ayfz)
         return verts, T_ay2ayfz
 
@@ -381,7 +414,9 @@ def render_global(cfg):
     writer = get_writer(global_video_path, fps=30, crf=CRF)
     for i in tqdm(range(render_length), desc=f"Rendering Global"):
         cameras = renderer.create_camera(global_R[i], global_T[i])
-        img = renderer.render_with_ground(verts_glob[[i]], color[None], cameras, global_lights)
+        img = renderer.render_with_ground(
+            verts_glob[[i]], color[None], cameras, global_lights
+        )
         writer.write_frame(img)
     writer.close()
 
@@ -390,7 +425,7 @@ if __name__ == "__main__":
     cfg = parse_args_to_cfg()
     paths = cfg.paths
     Log.info(f"[GPU]: {torch.cuda.get_device_name()}")
-    Log.info(f'[GPU]: {torch.cuda.get_device_properties("cuda")}')
+    Log.info(f"[GPU]: {torch.cuda.get_device_properties('cuda')}")
 
     # ===== Preprocess and save to disk ===== #
     run_preprocess(cfg)
@@ -406,7 +441,9 @@ if __name__ == "__main__":
         pred = model.predict(data, static_cam=cfg.static_cam)
         pred = detach_to_cpu(pred)
         data_time = data["length"] / 30
-        Log.info(f"[HMR4D] Elapsed: {Log.sync_time() - tic:.2f}s for data-length={data_time:.1f}s")
+        Log.info(
+            f"[HMR4D] Elapsed: {Log.sync_time() - tic:.2f}s for data-length={data_time:.1f}s"
+        )
         torch.save(pred, paths.hmr4d_results)
 
     # ===== Render ===== #
@@ -414,4 +451,6 @@ if __name__ == "__main__":
     render_global(cfg)
     if not Path(paths.incam_global_horiz_video).exists():
         Log.info("[Merge Videos]")
-        merge_videos_horizontal([paths.incam_video, paths.global_video], paths.incam_global_horiz_video)
+        merge_videos_horizontal(
+            [paths.incam_video, paths.global_video], paths.incam_global_horiz_video
+        )

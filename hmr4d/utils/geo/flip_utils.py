@@ -1,16 +1,31 @@
 import torch
-from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix, matrix_to_axis_angle
+
+from motiondiff.models.mdm.rotation_conversions import (
+    axis_angle_to_matrix,
+    matrix_to_axis_angle,
+)
 
 
 def flip_heatmap_coco17(output_flipped):
     assert output_flipped.ndim == 4, "output_flipped should be [B, J, H, W]"
     shape_ori = output_flipped.shape
     channels = 1
-    output_flipped = output_flipped.reshape(shape_ori[0], -1, channels, shape_ori[2], shape_ori[3])
+    output_flipped = output_flipped.reshape(
+        shape_ori[0], -1, channels, shape_ori[2], shape_ori[3]
+    )
     output_flipped_back = output_flipped.clone()
 
     # Swap left-right parts
-    for left, right in [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10], [11, 12], [13, 14], [15, 16]]:
+    for left, right in [
+        [1, 2],
+        [3, 4],
+        [5, 6],
+        [7, 8],
+        [9, 10],
+        [11, 12],
+        [13, 14],
+        [15, 16],
+    ]:
         output_flipped_back[:, left, ...] = output_flipped[:, right, ...]
         output_flipped_back[:, right, ...] = output_flipped[:, left, ...]
     output_flipped_back = output_flipped_back.reshape(shape_ori)
@@ -41,12 +56,37 @@ def flip_smplx_params(smplx_params):
     """Flip pose.
     The flipping is based on SMPLX parameters.
     """
-    rotation = torch.cat([smplx_params["global_orient"], smplx_params["body_pose"]], dim=1)
+    rotation = torch.cat(
+        [smplx_params["global_orient"], smplx_params["body_pose"]], dim=1
+    )
 
     BN = rotation.shape[0]
     pose = rotation.reshape(BN, -1).transpose(0, 1)
 
-    SMPL_JOINTS_FLIP_PERM = [0, 2, 1, 3, 5, 4, 6, 8, 7, 9, 11, 10, 12, 14, 13, 15, 17, 16, 19, 18, 21, 20]  # , 23, 22]
+    SMPL_JOINTS_FLIP_PERM = [
+        0,
+        2,
+        1,
+        3,
+        5,
+        4,
+        6,
+        8,
+        7,
+        9,
+        11,
+        10,
+        12,
+        14,
+        13,
+        15,
+        17,
+        16,
+        19,
+        18,
+        21,
+        20,
+    ]  # , 23, 22]
     SMPL_POSE_FLIP_PERM = []
     for i in SMPL_JOINTS_FLIP_PERM:
         SMPL_POSE_FLIP_PERM.append(3 * i)

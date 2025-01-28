@@ -1,21 +1,24 @@
 import os
 import sys
-sys.path.append('./')
+
+sys.path.append("./")
 import argparse
 import glob
 import pickle
-from tqdm import tqdm
 from collections import defaultdict
 
+from tqdm import tqdm
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-d', '--dir_query', nargs='+', default=['dataset/HumanML3D_gpt_aug/part1'])
-parser.add_argument('-o', '--out_file', default='dataset/HumanML3D_gpt_aug/part1.pkl')
+parser.add_argument(
+    "-d", "--dir_query", nargs="+", default=["dataset/HumanML3D_gpt_aug/part1"]
+)
+parser.add_argument("-o", "--out_file", default="dataset/HumanML3D_gpt_aug/part1.pkl")
 args = parser.parse_args()
 
 txt_files = []
 for query in args.dir_query:
-	txt_files += sorted(glob.glob(f'{query}/**.txt', recursive=True))
+    txt_files += sorted(glob.glob(f"{query}/**.txt", recursive=True))
 
 text_mapping = {}
 text_counter = defaultdict(int)
@@ -25,15 +28,15 @@ text_counter = defaultdict(int)
 
 for f in tqdm(txt_files):
     # read lines from file
-	with open(f, 'r') as f:
-		lines = f.readlines()
-		lines = [x.strip() for x in lines]
-		text_mapping[lines[0]] = lines
-		text_counter[lines[0]] += 1
-		# print(lines[0], text_mapping[lines[0]])
+    with open(f, "r") as f:
+        lines = f.readlines()
+        lines = [x.strip() for x in lines]
+        text_mapping[lines[0]] = lines
+        text_counter[lines[0]] += 1
+        # print(lines[0], text_mapping[lines[0]])
 
 for k, v in text_counter.items():
-	if v > 1:
-		print(k, v)
+    if v > 1:
+        print(k, v)
 
-pickle.dump(text_mapping, open(args.out_file, 'wb'))
+pickle.dump(text_mapping, open(args.out_file, "wb"))

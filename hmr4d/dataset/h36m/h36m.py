@@ -1,23 +1,39 @@
-import torch
-import numpy as np
 from pathlib import Path
-from hmr4d.configs import MainStore, builds
 
-from hmr4d.utils.pylogger import Log
-from hmr4d.dataset.imgfeat_motion.base_dataset import ImgfeatMotionDatasetBase
-from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix, matrix_to_axis_angle
-from hmr4d.utils import matrix
-from hmr4d.utils.smplx_utils import make_smplx
+import imageio
+import numpy as np
+import torch
 from tqdm import tqdm
 
-from hmr4d.utils.geo_transform import compute_cam_angvel, compute_cam_tvel, apply_T_on_points
-from hmr4d.utils.geo.hmr_global import get_tgtcoord_rootparam, get_T_w2c_from_wcparams, get_c_rootparam, get_R_c2gv
-
-from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
-import imageio
+from hmr4d.configs import MainStore, builds
+from hmr4d.dataset.imgfeat_motion.base_dataset import ImgfeatMotionDatasetBase
+from hmr4d.utils import matrix
+from hmr4d.utils.geo.hmr_global import (
+    get_c_rootparam,
+    get_R_c2gv,
+    get_T_w2c_from_wcparams,
+    get_tgtcoord_rootparam,
+)
+from hmr4d.utils.geo_transform import (
+    apply_T_on_points,
+    as_identity,
+    compute_cam_angvel,
+    compute_cam_tvel,
+    normalize_T_w2c,
+)
+from hmr4d.utils.net_utils import (
+    get_valid_mask,
+    repeat_to_max_len,
+    repeat_to_max_len_dict,
+)
+from hmr4d.utils.pylogger import Log
+from hmr4d.utils.smplx_utils import make_smplx
 from hmr4d.utils.video_io_utils import read_video_np
-from hmr4d.utils.net_utils import get_valid_mask, repeat_to_max_len, repeat_to_max_len_dict
-from hmr4d.utils.geo_transform import normalize_T_w2c, as_identity
+from hmr4d.utils.wis3d_utils import add_motion_as_lines, make_wis3d
+from motiondiff.models.mdm.rotation_conversions import (
+    axis_angle_to_matrix,
+    matrix_to_axis_angle,
+)
 
 
 class H36mSmplDataset(ImgfeatMotionDatasetBase):
@@ -77,13 +93,17 @@ class H36mSmplDataset(ImgfeatMotionDatasetBase):
             seq_lengths.append(seq_length)
             self.idx2meta.extend([vid] * num_samples)
         hours = sum(seq_lengths) / 25 / 3600
-        Log.info(f"[H36M] has {hours:.1f} hours motion -> Resampled to {len(self.idx2meta)} samples.")
+        Log.info(
+            f"[H36M] has {hours:.1f} hours motion -> Resampled to {len(self.idx2meta)} samples."
+        )
 
     def _load_data(self, idx):
         sampled_motion = {}
         vid = self.idx2meta[idx]
         motion = self.motion_files[vid]
-        seq_length = self.f_img_dicts[vid]["bbx_xys"].shape[0]  # this is a better choice
+        seq_length = self.f_img_dicts[vid]["bbx_xys"].shape[
+            0
+        ]  # this is a better choice
         sampled_motion["vid"] = vid
 
         # Random select a subset
@@ -91,7 +111,9 @@ class H36mSmplDataset(ImgfeatMotionDatasetBase):
         if target_length > seq_length:  # this should not happen
             start = 0
             length = seq_length
-            Log.info(f"[H36M] ({idx}) target length < sequence length: {target_length} <= {seq_length}")
+            Log.info(
+                f"[H36M] ({idx}) target length < sequence length: {target_length} <= {seq_length}"
+            )
         else:
             start = np.random.randint(0, seq_length - target_length)
             length = target_length
@@ -101,11 +123,15 @@ class H36mSmplDataset(ImgfeatMotionDatasetBase):
 
         # Select motion subset
         # body_pose, global_orient, transl, betas
-        sampled_motion["smpl_params_global"] = {k: v[start:end] for k, v in motion["smpl_params_glob"].items()}
+        sampled_motion["smpl_params_global"] = {
+            k: v[start:end] for k, v in motion["smpl_params_glob"].items()
+        }
 
         # Image as feature
         f_img_dict = self.f_img_dicts[vid]
-        sampled_motion["f_imgseq"] = f_img_dict["features"][start:end].float()  # (L, 1024)
+        sampled_motion["f_imgseq"] = f_img_dict["features"][
+            start:end
+        ].float()  # (L, 1024)
         sampled_motion["bbx_xys"] = f_img_dict["bbx_xys"][start:end]
         sampled_motion["K_fullimg"] = f_img_dict["K_fullimg"]
         # sampled_motion["kp2d"] = self.vitpose[vid][start:end].float()  # (L, 17, 3)
@@ -141,7 +167,9 @@ class H36mSmplDataset(ImgfeatMotionDatasetBase):
         # World params
         gravity_vec = torch.tensor([0, 0, -1]).float()  # (3), H36M is az
         T_w2c = T_w2c.repeat(length, 1, 1)  # (F, 4, 4)
-        R_c2gv = get_R_c2gv(T_w2c[..., :3, :3], axis_gravity_in_w=gravity_vec)  # (F, 3, 3)
+        R_c2gv = get_R_c2gv(
+            T_w2c[..., :3, :3], axis_gravity_in_w=gravity_vec
+        )  # (F, 3, 3)
 
         # Image
         bbx_xys = data["bbx_xys"]  # (F, 3)
@@ -150,7 +178,9 @@ class H36mSmplDataset(ImgfeatMotionDatasetBase):
 
         normed_T_w2c = normalize_T_w2c(T_w2c)
 
-        cam_angvel = compute_cam_angvel(normed_T_w2c[:, :3, :3])  # (F, 6)  slightly different from WHAM
+        cam_angvel = compute_cam_angvel(
+            normed_T_w2c[:, :3, :3]
+        )  # (F, 6)  slightly different from WHAM
         cam_tvel = compute_cam_tvel(normed_T_w2c[:, :3, 3])  # (F, 3)
         assert cam_tvel.sum() == 0, cam_tvel
 
@@ -185,7 +215,9 @@ class H36mSmplDataset(ImgfeatMotionDatasetBase):
             # ----- Overlay ----- #
             mid = return_data["meta"]["mid"]
             video_path = self.root / f"videos/{mid}.mp4"
-            images = read_video_np(video_path, data["start_end"][0], data["start_end"][1])
+            images = read_video_np(
+                video_path, data["start_end"][0], data["start_end"][1]
+            )
             render_dict = {
                 "K": K_fullimg[:1],  # only support batch size 1
                 "faces": self.smplx.faces,
@@ -196,16 +228,24 @@ class H36mSmplDataset(ImgfeatMotionDatasetBase):
             save_video(img_overlay, f"tmp.mp4")
 
         # Batchable
-        return_data["smpl_params_c"] = repeat_to_max_len_dict(return_data["smpl_params_c"], max_len)
-        return_data["smpl_params_w"] = repeat_to_max_len_dict(return_data["smpl_params_w"], max_len)
+        return_data["smpl_params_c"] = repeat_to_max_len_dict(
+            return_data["smpl_params_c"], max_len
+        )
+        return_data["smpl_params_w"] = repeat_to_max_len_dict(
+            return_data["smpl_params_w"], max_len
+        )
         return_data["R_c2gv"] = repeat_to_max_len(return_data["R_c2gv"], max_len)
         return_data["bbx_xys"] = repeat_to_max_len(return_data["bbx_xys"], max_len)
         return_data["K_fullimg"] = repeat_to_max_len(return_data["K_fullimg"], max_len)
         return_data["f_imgseq"] = repeat_to_max_len(return_data["f_imgseq"], max_len)
         return_data["kp2d"] = repeat_to_max_len(return_data["kp2d"], max_len)
-        return_data["cam_angvel"] = repeat_to_max_len(return_data["cam_angvel"], max_len)
+        return_data["cam_angvel"] = repeat_to_max_len(
+            return_data["cam_angvel"], max_len
+        )
         return_data["cam_tvel"] = repeat_to_max_len(return_data["cam_tvel"], max_len)
-        return_data["noisy_cam_tvel"] = repeat_to_max_len(return_data["noisy_cam_tvel"], max_len)
+        return_data["noisy_cam_tvel"] = repeat_to_max_len(
+            return_data["noisy_cam_tvel"], max_len
+        )
         return_data["T_w2c"] = repeat_to_max_len(return_data["T_w2c"], max_len)
         return return_data
 

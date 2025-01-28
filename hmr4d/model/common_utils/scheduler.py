@@ -1,9 +1,18 @@
-import torch
 from bisect import bisect_right
+
+import torch
 
 
 class WarmupMultiStepLR(torch.optim.lr_scheduler.LRScheduler):
-    def __init__(self, optimizer, milestones, warmup=0, gamma=0.1, last_epoch=-1, verbose="deprecated"):
+    def __init__(
+        self,
+        optimizer,
+        milestones,
+        warmup=0,
+        gamma=0.1,
+        last_epoch=-1,
+        verbose="deprecated",
+    ):
         """Assume optimizer does not change lr; Scheduler is called epoch-based"""
         self.milestones = milestones
         self.warmup = warmup
@@ -14,7 +23,9 @@ class WarmupMultiStepLR(torch.optim.lr_scheduler.LRScheduler):
     def get_lr(self):
         base_lrs = self.base_lrs  # base lr for each groups
         n_groups = len(base_lrs)
-        comming_epoch = self.last_epoch  # the lr will be set for the comming epoch, starts from 0
+        comming_epoch = (
+            self.last_epoch
+        )  # the lr will be set for the comming epoch, starts from 0
 
         # add extra warmup
         if comming_epoch < self.warmup:

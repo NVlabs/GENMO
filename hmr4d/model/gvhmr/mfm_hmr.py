@@ -1,37 +1,58 @@
-from typing import Any, Dict
-import numpy as np
-from pathlib import Path
-import torch
-import pytorch_lightning as pl
 import os
+from pathlib import Path
+from typing import Any, Dict
+
+import numpy as np
+import pytorch_lightning as pl
+import torch
+from einops import einsum, rearrange
 from hydra.utils import instantiate
-from hmr4d.utils.pylogger import Log
-from einops import rearrange, einsum
+
 from hmr4d.configs import MainStore, builds
-
-from hmr4d.utils.geo_transform import compute_T_ayfz2ay, apply_T_on_points
-from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
-from hmr4d.utils.smplx_utils import make_smplx
-from hmr4d.utils.geo.augment_noisy_pose import (
-    get_wham_aug_kp3d,
-    get_visible_mask,
-    get_invisible_legs_mask,
-    randomly_occlude_lower_half,
-    randomly_modify_hands_legs,
+from hmr4d.model.gvhmr.utils.postprocess import (
+    pp_static_joint,
+    pp_static_joint_cam,
+    process_ik,
 )
-from hmr4d.utils.geo.hmr_cam import perspective_projection, normalize_kp2d, safely_render_x3d_K, get_bbx_xys
-
+from hmr4d.utils.geo.augment_noisy_pose import (
+    get_invisible_legs_mask,
+    get_visible_mask,
+    get_wham_aug_kp3d,
+    randomly_modify_hands_legs,
+    randomly_occlude_lower_half,
+)
+from hmr4d.utils.geo.flip_utils import avg_smplx_aa, flip_smplx_params
+from hmr4d.utils.geo.hmr_cam import (
+    get_bbx_xys,
+    normalize_kp2d,
+    perspective_projection,
+    safely_render_x3d_K,
+)
+from hmr4d.utils.geo_transform import apply_T_on_points, compute_T_ayfz2ay
+from hmr4d.utils.pylogger import Log
+from hmr4d.utils.smplx_utils import make_smplx
 from hmr4d.utils.video_io_utils import save_video
 from hmr4d.utils.vis.cv2_utils import draw_bbx_xys_on_image_batch
-from hmr4d.utils.geo.flip_utils import flip_smplx_params, avg_smplx_aa
-from hmr4d.model.gvhmr.utils.postprocess import pp_static_joint, pp_static_joint_cam, process_ik
-from motiondiff.utils.torch_transform import angle_axis_to_rotation_matrix, make_transform, transform_trans, inverse_transform
-from motiondiff.utils.tools import Timer
-from motiondiff.utils.torch_utils import interp_tensor_with_scipy
-from motiondiff.models.model_util import create_gaussian_diffusion
-from motiondiff.models.common.cfg_sampler import ClassifierFreeSampleModel
+from hmr4d.utils.wis3d_utils import add_motion_as_lines, make_wis3d
 from motiondiff.diffusion.resample import create_named_schedule_sampler
-from .utils.mv2d_utils import draw_motion_2d, coco_joint_parents, generate_cam, project_keypoints, recon_from_2d
+from motiondiff.models.common.cfg_sampler import ClassifierFreeSampleModel
+from motiondiff.models.model_util import create_gaussian_diffusion
+from motiondiff.utils.tools import Timer
+from motiondiff.utils.torch_transform import (
+    angle_axis_to_rotation_matrix,
+    inverse_transform,
+    make_transform,
+    transform_trans,
+)
+from motiondiff.utils.torch_utils import interp_tensor_with_scipy
+
+from .utils.mv2d_utils import (
+    coco_joint_parents,
+    draw_motion_2d,
+    generate_cam,
+    project_keypoints,
+    recon_from_2d,
+)
 
 
 class MFMHMR(pl.LightningModule):
@@ -67,54 +88,65 @@ class MFMHMR(pl.LightningModule):
 
         # SMPLX
         self.smplx = make_smplx("supermotion_v437coco17")
-        if 'diffusion' in model_cfg:
+        if "diffusion" in model_cfg:
             self.init_diffusion()
         else:
             self.train_diffusion = self.test_diffusion = self.schedule_sampler = None
 
     def init_diffusion(self):
-        self.train_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=True)
-        self.test_diffusion = create_gaussian_diffusion(self.model_cfg.diffusion, training=False)
-        self.schedule_sampler = create_named_schedule_sampler(self.model_cfg.diffusion.schedule_sampler_type, self.train_diffusion)
+        self.train_diffusion = create_gaussian_diffusion(
+            self.model_cfg.diffusion, training=True
+        )
+        self.test_diffusion = create_gaussian_diffusion(
+            self.model_cfg.diffusion, training=False
+        )
+        self.schedule_sampler = create_named_schedule_sampler(
+            self.model_cfg.diffusion.schedule_sampler_type, self.train_diffusion
+        )
         return
 
     def training_step(self, batch, batch_idx):
-        if not ('3d' in batch or '2d' in batch):
-            if 'is_2d' in batch and batch['is_2d'][0]:
-                batch = {'2d': batch}
+        if not ("3d" in batch or "2d" in batch):
+            if "is_2d" in batch and batch["is_2d"][0]:
+                batch = {"2d": batch}
             else:
-                batch = {'3d': batch}
+                batch = {"3d": batch}
 
         def append_mode_to_loss(outputs, mode, suffix=""):
             if suffix != "":
                 suffix = f"_{suffix}"
             for k in list(outputs.keys()):
                 if "_loss" in k or k in {"loss", "loss_2d"}:
-                    outputs[f'Loss_{mode}{suffix}/{k}'] = outputs.pop(k)
+                    outputs[f"Loss_{mode}{suffix}/{k}"] = outputs.pop(k)
             return outputs
-            
-        outputs = {'loss': 0}
-        if '3d' in batch:
+
+        outputs = {"loss": 0}
+        if "3d" in batch:
             with Timer("train_3d_step", enabled=self.timing):
                 for mode in self.train_3d_modes:
-                    outputs_3d = self.train_3d_step(batch['3d'], batch_idx, mode=mode)
-                    outputs['loss'] += outputs_3d['loss']
+                    outputs_3d = self.train_3d_step(batch["3d"], batch_idx, mode=mode)
+                    outputs["loss"] += outputs_3d["loss"]
                     append_mode_to_loss(outputs_3d, mode)
                     outputs.update(outputs_3d)
-                    if mode == 'regression' and ('diffusion' in self.train_3d_modes or 'rf' in self.train_3d_modes):
-                        batch['3d']['regression_outputs'] = outputs_3d.copy()
-                    
-        
+                    if mode == "regression" and (
+                        "diffusion" in self.train_3d_modes
+                        or "rf" in self.train_3d_modes
+                    ):
+                        batch["3d"]["regression_outputs"] = outputs_3d.copy()
+
         start_2d_training_steps = self.model_cfg.get("start_2d_training_steps", 0)
-        if '2d' in batch and self.trainer.global_step >= start_2d_training_steps:
+        if "2d" in batch and self.trainer.global_step >= start_2d_training_steps:
             with Timer("train_2d_step", enabled=self.timing):
                 for mode in self.train_2d_modes:
-                    outputs_2d = self.train_2d_step(batch['2d'], batch_idx, mode=mode)
-                    outputs['loss'] += outputs_2d['loss_2d']
+                    outputs_2d = self.train_2d_step(batch["2d"], batch_idx, mode=mode)
+                    outputs["loss"] += outputs_2d["loss_2d"]
                     append_mode_to_loss(outputs_2d, mode, suffix="2d")
                     outputs.update(outputs_2d)
-                    if mode == 'regression' and ('diffusion' in self.train_2d_modes or 'rf' in self.train_2d_modes):
-                        batch['2d']['regression_outputs'] = outputs_2d.copy()
+                    if mode == "regression" and (
+                        "diffusion" in self.train_2d_modes
+                        or "rf" in self.train_2d_modes
+                    ):
+                        batch["2d"]["regression_outputs"] = outputs_2d.copy()
 
         # Log
         log_kwargs = {
@@ -128,7 +160,7 @@ class MFMHMR(pl.LightningModule):
         for k, v in outputs.items():
             if "_loss" in k:
                 self.log(f"{k}", v, **log_kwargs)
-                
+
         return outputs
 
     def train_3d_step(self, batch, batch_idx, mode):
@@ -156,7 +188,9 @@ class MFMHMR(pl.LightningModule):
             batch["bbx_xys"] = bbx_xys
         else:
             mask_bbx_xys = batch["mask"]["bbx_xys"]
-            batch["bbx_xys"][~mask_bbx_xys] = bbx_xys[~mask_bbx_xys].to(batch["bbx_xys"])
+            batch["bbx_xys"][~mask_bbx_xys] = bbx_xys[~mask_bbx_xys].to(
+                batch["bbx_xys"]
+            )
 
         # noisy_j3d -> project to i_j2d -> compute a bbx -> normalized kp2d [-1, 1]
 
@@ -164,29 +198,43 @@ class MFMHMR(pl.LightningModule):
         noisy_j3d = gt_j3d + get_wham_aug_kp3d(gt_j3d.shape[:2])
         if True:
             noisy_j3d = randomly_modify_hands_legs(noisy_j3d)
-        obs_i_j2d = perspective_projection(noisy_j3d, batch["K_fullimg"])  # (B, L, J, 2)
+        obs_i_j2d = perspective_projection(
+            noisy_j3d, batch["K_fullimg"]
+        )  # (B, L, J, 2)
         j2d_visible_mask = get_visible_mask(gt_j3d.shape[:2]).cuda()  # (B, L, J)
-        j2d_visible_mask[noisy_j3d[..., 2] < 0.3] = False  # Set close-to-image-plane points as invisible
-        det_obs_i_j2d = normalize_kp2d(batch["kp2d"], batch["bbx_xys"])[..., :2].to(obs_i_j2d)
+        j2d_visible_mask[noisy_j3d[..., 2] < 0.3] = (
+            False  # Set close-to-image-plane points as invisible
+        )
+        det_obs_i_j2d = normalize_kp2d(batch["kp2d"], batch["bbx_xys"])[..., :2].to(
+            obs_i_j2d
+        )
         det_j2d_visible_mask = batch["kp2d"][..., 2] > 0.5
         obs_i_j2d[use_det_kp] = det_obs_i_j2d[use_det_kp]
         j2d_visible_mask[use_det_kp] = det_j2d_visible_mask[use_det_kp]
 
         if True:  # Set both legs as invisible for a period
-            legs_invisible_mask = get_invisible_legs_mask(gt_j3d.shape[:2]).cuda()  # (B, L, J)
+            legs_invisible_mask = get_invisible_legs_mask(
+                gt_j3d.shape[:2]
+            ).cuda()  # (B, L, J)
             j2d_visible_mask[legs_invisible_mask] = False
-        if 'mask_cfg' in self.model_cfg:
-            mask = self.generate_mask(self.model_cfg.mask_cfg, j2d_visible_mask, batch["length"])
+        if "mask_cfg" in self.model_cfg:
+            mask = self.generate_mask(
+                self.model_cfg.mask_cfg, j2d_visible_mask, batch["length"]
+            )
             j2d_visible_mask = j2d_visible_mask & mask
-        if 'body_mask_cfg' in self.model_cfg:
-            mask = self.generate_mask(self.model_cfg.body_mask_cfg, j2d_visible_mask, batch["length"])
+        if "body_mask_cfg" in self.model_cfg:
+            mask = self.generate_mask(
+                self.model_cfg.body_mask_cfg, j2d_visible_mask, batch["length"]
+            )
             j2d_visible_mask = j2d_visible_mask & mask
-        if self.model_cfg.get("mask_occluded_imgfeats", False) and 'f_imgseq' in batch:
+        if self.model_cfg.get("mask_occluded_imgfeats", False) and "f_imgseq" in batch:
             # occluded_img_mask = (~j2d_visible_mask).all(dim=-1)
-            occluded_img_mask = (j2d_visible_mask.sum(dim=-1) <= 3)
-            batch['f_imgseq'][occluded_img_mask] = 0
+            occluded_img_mask = j2d_visible_mask.sum(dim=-1) <= 3
+            batch["f_imgseq"][occluded_img_mask] = 0
 
-        obs_kp2d = torch.cat([obs_i_j2d, j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
+        obs_kp2d = torch.cat(
+            [obs_i_j2d, j2d_visible_mask[:, :, :, None].float()], dim=-1
+        )  # (B, L, J, 3)
         obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
         obs[~j2d_visible_mask] = 0  # if not visible, set to (0,0,0)
         batch["obs"] = obs
@@ -194,8 +242,12 @@ class MFMHMR(pl.LightningModule):
 
         if True:  # Use some detected vitpose (presave data)
             prob = 0.5
-            mask_real_vitpose = (torch.rand(B).to(obs_kp2d) < prob) * batch["mask"]["vitpose"]
-            batch["obs"][mask_real_vitpose] = normalize_kp2d(batch["kp2d"], batch["bbx_xys"])[mask_real_vitpose]
+            mask_real_vitpose = (torch.rand(B).to(obs_kp2d) < prob) * batch["mask"][
+                "vitpose"
+            ]
+            batch["obs"][mask_real_vitpose] = normalize_kp2d(
+                batch["kp2d"], batch["bbx_xys"]
+            )[mask_real_vitpose]
 
         # Set untrusted frames to False
         batch["obs"][~batch["mask"]["valid"]] = 0
@@ -205,7 +257,9 @@ class MFMHMR(pl.LightningModule):
         if False:  # wis3d
             wis3d = make_wis3d(name="debug-aug-kp3d")
             add_motion_as_lines(gt_j3d[0], wis3d, name="gt_j3d", skeleton_type="coco17")
-            add_motion_as_lines(noisy_j3d[0], wis3d, name="noisy_j3d", skeleton_type="coco17")
+            add_motion_as_lines(
+                noisy_j3d[0], wis3d, name="noisy_j3d", skeleton_type="coco17"
+            )
 
         # f_imgseq: apply random aug on offline extracted features
         # f_imgseq = batch["f_imgseq"] + torch.randn_like(batch["f_imgseq"]) * 0.1
@@ -213,55 +267,67 @@ class MFMHMR(pl.LightningModule):
         # batch["f_imgseq"] = f_imgseq.clone()
 
         # Forward and get loss
-        outputs = self.pipeline.forward(batch, train=True, global_step=self.trainer.global_step, mode=mode)
-        outputs['batch_size'] = B
+        outputs = self.pipeline.forward(
+            batch, train=True, global_step=self.trainer.global_step, mode=mode
+        )
+        outputs["batch_size"] = B
 
         return outputs
-    
+
     def train_2d_step(self, batch, batch_idx, mode):
         batch = batch.copy()
         for k, v in batch.items():
             if isinstance(v, torch.Tensor):
                 # print(k, v.shape)
                 batch[k] = v.detach().clone()
-        
+
         B = batch["obs_kp2d"].shape[0]
-        obs_kp2d = batch['obs_kp2d'].squeeze(2)
-        conf = batch['conf']
-        aug_bbox = self.model_cfg.get('train_2d_aug_bbox', False)
+        obs_kp2d = batch["obs_kp2d"].squeeze(2)
+        conf = batch["conf"]
+        aug_bbox = self.model_cfg.get("train_2d_aug_bbox", False)
         batch["bbx_xys"] = get_bbx_xys(obs_kp2d, do_augment=aug_bbox)
-        
+
         # TODO: add bbox augmentation
-        
+
         orig_obs_kp2d = obs_kp2d.clone()
-        orig_obs_kp2d = torch.cat([orig_obs_kp2d, conf[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
-        batch["orig_obs"] = normalize_kp2d(orig_obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
+        orig_obs_kp2d = torch.cat(
+            [orig_obs_kp2d, conf[:, :, :, None].float()], dim=-1
+        )  # (B, L, J, 3)
+        batch["orig_obs"] = normalize_kp2d(
+            orig_obs_kp2d, batch["bbx_xys"]
+        )  # (B, L, J, 3)
         batch["orig_obs"][~batch["mask"]] = 0
-        
+
         noisy_2d_obs = self.model_cfg.get("noisy_2d_obs", False)
         if noisy_2d_obs:
             aug = get_wham_aug_kp3d(obs_kp2d.shape[:2])[..., :2]
-            f = torch.tensor([1024., 1024.]).to(aug) / 4.
+            f = torch.tensor([1024.0, 1024.0]).to(aug) / 4.0
             aug *= f * self.model_cfg.kp2d_noise_scale
             obs_kp2d += aug
             obs_kp2d = randomly_modify_hands_legs(obs_kp2d)
             j2d_visible_mask = get_visible_mask(obs_kp2d.shape[:2]).cuda()  # (B, L, J)
-            legs_invisible_mask = get_invisible_legs_mask(obs_kp2d.shape[:2]).cuda()  # (B, L, J)
+            legs_invisible_mask = get_invisible_legs_mask(
+                obs_kp2d.shape[:2]
+            ).cuda()  # (B, L, J)
             j2d_visible_mask[legs_invisible_mask] = False
-            j2d_visible_mask *= (conf > 0.5)
+            j2d_visible_mask *= conf > 0.5
         else:
             j2d_visible_mask = conf > 0.5
-        if 'mask_cfg' in self.model_cfg:
-            mask = self.generate_mask(self.model_cfg.mask_cfg, j2d_visible_mask, batch["length"])
+        if "mask_cfg" in self.model_cfg:
+            mask = self.generate_mask(
+                self.model_cfg.mask_cfg, j2d_visible_mask, batch["length"]
+            )
             j2d_visible_mask = j2d_visible_mask & mask
-        if 'body_mask_cfg' in self.model_cfg:
-            mask = self.generate_mask(self.model_cfg.body_mask_cfg, j2d_visible_mask, batch["length"])
+        if "body_mask_cfg" in self.model_cfg:
+            mask = self.generate_mask(
+                self.model_cfg.body_mask_cfg, j2d_visible_mask, batch["length"]
+            )
             j2d_visible_mask = j2d_visible_mask & mask
-        if self.model_cfg.get("mask_occluded_imgfeats", False) and 'f_imgseq' in batch:
+        if self.model_cfg.get("mask_occluded_imgfeats", False) and "f_imgseq" in batch:
             occluded_img_mask = (~j2d_visible_mask).all(dim=-1)
-            batch['f_imgseq'][occluded_img_mask] = 0
-        
-        if mode == 'sv-diffusion':  #single view diffusion
+            batch["f_imgseq"][occluded_img_mask] = 0
+
+        if mode == "sv-diffusion":  # single view diffusion
             diffusion = self.train_diffusion
             t, t_weights = self.schedule_sampler.sample(B, obs_kp2d.device)
             scaled_t = diffusion._scale_timesteps(t)
@@ -269,17 +335,21 @@ class MFMHMR(pl.LightningModule):
             noise = torch.randn_like(x_start)
             x_t = diffusion.q_sample(x_start, t, noise=noise)
             x_t = torch.cat([x_t, batch["orig_obs"][..., [-1]]], dim=-1)
-            batch['obs_x_t'] = x_t
+            batch["obs_x_t"] = x_t
             batch["obs_x_t"][~batch["mask"]] = 0
-            batch['scaled_t'] = scaled_t
-            outputs = self.pipeline.forward_singleview_diffusion(batch, train=True, global_step=self.trainer.global_step)
-        elif mode in {'regression', 'diffusion', 'rf'}:
-            obs_kp2d = torch.cat([obs_kp2d, j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
+            batch["scaled_t"] = scaled_t
+            outputs = self.pipeline.forward_singleview_diffusion(
+                batch, train=True, global_step=self.trainer.global_step
+            )
+        elif mode in {"regression", "diffusion", "rf"}:
+            obs_kp2d = torch.cat(
+                [obs_kp2d, j2d_visible_mask[:, :, :, None].float()], dim=-1
+            )  # (B, L, J, 3)
             obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"].clone())  # (B, L, J, 3)
             obs[~batch["mask"]] = 0
             batch["obs"] = obs
             # batch["j2d_visible_mask"] = j2d_visible_mask
-            
+
             # vis_ind = 0
             # mv2d_norm = obs.unsqueeze(2)
             # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
@@ -289,36 +359,68 @@ class MFMHMR(pl.LightningModule):
             # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/2d_test_obs.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
 
             # Forward and get loss
-            outputs = self.pipeline.forward_2d(batch, train=True, global_step=self.trainer.global_step, diffusion=self.train_diffusion, mode=mode)
-            outputs['batch_size'] = B
+            outputs = self.pipeline.forward_2d(
+                batch,
+                train=True,
+                global_step=self.trainer.global_step,
+                diffusion=self.train_diffusion,
+                mode=mode,
+            )
+            outputs["batch_size"] = B
 
         return outputs
-    
+
     def generate_mask(self, mask_cfg, orig_mask, length):
         _cfg = mask_cfg
         mask = torch.ones_like(orig_mask)
-        drop_prob = _cfg.get('drop_prob', 0.0)
+        drop_prob = _cfg.get("drop_prob", 0.0)
         if drop_prob <= 0:
             return mask
-        max_num_drops = _cfg.get('max_num_drops', 1)
-        min_drop_nframes = _cfg.get('min_drop_nframes', 1)
-        max_drop_nframes = _cfg.get('max_drop_nframes', 30)
-        joint_drop_prob = _cfg.get('joint_drop_prob', 0.0)
+        max_num_drops = _cfg.get("max_num_drops", 1)
+        min_drop_nframes = _cfg.get("min_drop_nframes", 1)
+        max_drop_nframes = _cfg.get("max_drop_nframes", 30)
+        joint_drop_prob = _cfg.get("joint_drop_prob", 0.0)
         for i in range(orig_mask.shape[0]):
             mlen = length[i].item()
             if np.random.rand() < drop_prob:
                 num_drops = np.random.randint(1, max_num_drops + 1)
                 for _ in range(num_drops):
-                    drop_len = np.random.randint(min_drop_nframes, min(max_drop_nframes, mlen) + 1)
+                    drop_len = np.random.randint(
+                        min_drop_nframes, min(max_drop_nframes, mlen) + 1
+                    )
                     drop_start = np.random.randint(0, max(mlen - drop_len, 1))
                     if joint_drop_prob > 0:
                         drop_joints = np.random.rand(17) < joint_drop_prob
-                        mask[i, drop_start:drop_start+drop_len, drop_joints] = False
+                        mask[i, drop_start : drop_start + drop_len, drop_joints] = False
                     else:
-                        mask[i, drop_start:drop_start+drop_len] = False
+                        mask[i, drop_start : drop_start + drop_len] = False
                     # print(f"Drop {i} {drop_start} {drop_len}")
         if joint_drop_prob > 0:
-            COCO17_TREE = [[5, 6], 0, 0, 1, 2, -1, -1, 5, 6, 7, 8, -1, -1, 11, 12, 13, 14, 15, 15, 15, 16, 16, 16]
+            COCO17_TREE = [
+                [5, 6],
+                0,
+                0,
+                1,
+                2,
+                -1,
+                -1,
+                5,
+                6,
+                7,
+                8,
+                -1,
+                -1,
+                11,
+                12,
+                13,
+                14,
+                15,
+                15,
+                15,
+                16,
+                16,
+                16,
+            ]
             for child in range(17):
                 parent = COCO17_TREE[child]
                 if parent == -1:
@@ -328,12 +430,12 @@ class MFMHMR(pl.LightningModule):
                 else:
                     mask[..., child] *= mask[..., parent]
         return mask
-    
+
     def center_kp2d(self, kp2d):
         center = (kp2d[..., [11], :] + kp2d[..., [12], :]) / 2
         kp2d = kp2d - center
         return kp2d
-    
+
     def norm_kp2d(self, kp2d):
         bbox = get_bbx_xys(kp2d, do_augment=False)
         kp2d_norm = normalize_kp2d(kp2d, bbox)
@@ -343,13 +445,13 @@ class MFMHMR(pl.LightningModule):
         obs_shape = batch["obs"][..., :2].shape
         B, L = obs_shape[:2]
         device = batch["obs"].device
-        
+
         diffusion = self.test_diffusion
         diff_sampler = self.model_cfg.diffusion.get("sampler", "ddim")
         ddim_eta = self.model_cfg.diffusion.get("ddim_eta", 0.0)
         indices = list(range(diffusion.num_timesteps))[::-1]
         denoiser = self.pipeline.denoiser3d.get_denoiser()
-        
+
         """ Diffusion Loop """
         cond = {
             "length": batch["length"],
@@ -358,57 +460,69 @@ class MFMHMR(pl.LightningModule):
         x_t = torch.randn(*obs_shape, device=device)
         for t in indices:
             t = torch.tensor([t] * x_t.shape[0], device=device)
-            out = diffusion.p_mean_variance(denoiser, x_t, t, model_kwargs=cond, clip_denoised=False)
+            out = diffusion.p_mean_variance(
+                denoiser, x_t, t, model_kwargs=cond, clip_denoised=False
+            )
             x0 = out["pred_xstart"]
             res = diffusion.ddim_get_xt(x_t, t=t, pred_xstart=x0, eta=ddim_eta)
             x_t = res["x_t-1"]
         x0 = x_t
         outputs = {
-            'diffusion': {
-                'x_start': x0,
+            "diffusion": {
+                "x_start": x0,
             }
         }
         return outputs
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
-        if 'is_2d' in batch and batch['is_2d'][0]:
+        if "is_2d" in batch and batch["is_2d"][0]:
             return self.validation_2d(batch, batch_idx, dataloader_idx)
         else:
             return self.validation_3d(batch, batch_idx, dataloader_idx)
-        
+
     def validation_2d(self, batch, batch_idx, dataloader_idx=0):
         B = batch["obs_kp2d"].shape[0]
-        obs_kp2d = batch['obs_kp2d'].squeeze(2)
-        conf = batch['conf']
+        obs_kp2d = batch["obs_kp2d"].squeeze(2)
+        conf = batch["conf"]
         batch["bbx_xys"] = get_bbx_xys(obs_kp2d, do_augment=False)
-        
+
         orig_obs_kp2d = obs_kp2d.clone()
-        orig_obs_kp2d = torch.cat([orig_obs_kp2d, conf[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
-        batch["orig_obs"] = normalize_kp2d(orig_obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
+        orig_obs_kp2d = torch.cat(
+            [orig_obs_kp2d, conf[:, :, :, None].float()], dim=-1
+        )  # (B, L, J, 3)
+        batch["orig_obs"] = normalize_kp2d(
+            orig_obs_kp2d, batch["bbx_xys"]
+        )  # (B, L, J, 3)
         batch["orig_obs"][~batch["mask"]] = 0
-        
+
         noisy_2d_obs = self.model_cfg.get("test_with_noisy_2d_obs", False)
         test_2d_with_mask = self.model_cfg.get("test_2d_with_mask", True)
         if noisy_2d_obs:
             aug = get_wham_aug_kp3d(obs_kp2d.shape[:2])[..., :2]
-            f = torch.tensor([1024., 1024.]).to(aug) / 4.
+            f = torch.tensor([1024.0, 1024.0]).to(aug) / 4.0
             aug *= f * self.model_cfg.kp2d_noise_scale
             obs_kp2d += aug
             obs_kp2d = randomly_modify_hands_legs(obs_kp2d)
             j2d_visible_mask = get_visible_mask(obs_kp2d.shape[:2]).cuda()  # (B, L, J)
-            legs_invisible_mask = get_invisible_legs_mask(obs_kp2d.shape[:2]).cuda()  # (B, L, J)
+            legs_invisible_mask = get_invisible_legs_mask(
+                obs_kp2d.shape[:2]
+            ).cuda()  # (B, L, J)
             j2d_visible_mask[legs_invisible_mask] = False
-            j2d_visible_mask *= (conf > 0.5)
+            j2d_visible_mask *= conf > 0.5
         else:
             j2d_visible_mask = conf > 0.5
-        if test_2d_with_mask and 'mask_cfg' in self.model_cfg:
-            mask = self.generate_mask(self.model_cfg.mask_cfg, j2d_visible_mask, batch["length"])
+        if test_2d_with_mask and "mask_cfg" in self.model_cfg:
+            mask = self.generate_mask(
+                self.model_cfg.mask_cfg, j2d_visible_mask, batch["length"]
+            )
             j2d_visible_mask = j2d_visible_mask & mask
-        obs_kp2d = torch.cat([obs_kp2d, j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
+        obs_kp2d = torch.cat(
+            [obs_kp2d, j2d_visible_mask[:, :, :, None].float()], dim=-1
+        )  # (B, L, J, 3)
         obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
         obs[~batch["mask"]] = 0
         batch["obs"] = obs
-        
+
         # vis_ind = 0
         # mv2d_norm = obs.unsqueeze(2)
         # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
@@ -418,20 +532,27 @@ class MFMHMR(pl.LightningModule):
         # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/2d_test_obs.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
 
         # Forward and get loss
-        if self.infer_mode == 'regression':
-            outputs = self.pipeline.forward_2d(batch, train=False, global_step=self.trainer.global_step, diffusion=self.train_diffusion)
+        if self.infer_mode == "regression":
+            outputs = self.pipeline.forward_2d(
+                batch,
+                train=False,
+                global_step=self.trainer.global_step,
+                diffusion=self.train_diffusion,
+            )
         else:
             outputs = self.infer_diffusion(batch)
         outputs["batch"] = batch
-        outputs['vis_2d'] = self.model_cfg.get("vis_2d", False)
+        outputs["vis_2d"] = self.model_cfg.get("vis_2d", False)
         return outputs
-        
+
     def validation_3d(self, batch, batch_idx, dataloader_idx=0):
         # Options & Check
         do_postproc = self.trainer.state.stage == "test"  # Only apply postproc in test
         do_postproc = False
         do_flip_test = "flip_test" in batch
-        do_postproc_not_flip_test = do_postproc and not do_flip_test  # later pp when flip_test
+        do_postproc_not_flip_test = (
+            do_postproc and not do_flip_test
+        )  # later pp when flip_test
         assert batch["B"] == 1, "Only support batch size 1 in evalution."
 
         # ROPE inference
@@ -441,25 +562,31 @@ class MFMHMR(pl.LightningModule):
             obs[0, ~batch["mask"][0]] = 0
 
         # occluded_img_mask = (~j2d_visible_mask).all(dim=-1)
-        occluded_img_mask = (j2d_visible_mask.sum(dim=-1) <= 3)
+        occluded_img_mask = j2d_visible_mask.sum(dim=-1) <= 3
         batch["f_imgseq"][occluded_img_mask] = 0
 
         if self.validate_2d_in_3d:
             batch_2d = {
-                'obs_kp2d': batch['kp2d'][..., :2],
-                'conf': batch['kp2d'][..., 2],
-                'mask': batch['mask'],
-                'length': batch['length']
+                "obs_kp2d": batch["kp2d"][..., :2],
+                "conf": batch["kp2d"][..., 2],
+                "mask": batch["mask"],
+                "length": batch["length"],
             }
-            
+
             if self.enable_test_time_opt:
-                init_state_dict = {k: v.detach().clone() for k, v in self.pipeline.state_dict().items()}
+                init_state_dict = {
+                    k: v.detach().clone() for k, v in self.pipeline.state_dict().items()
+                }
                 with torch.enable_grad():
                     self.train()
-                    optimizer = torch.optim.AdamW(params=self.pipeline.parameters(), lr=1e-5)
+                    optimizer = torch.optim.AdamW(
+                        params=self.pipeline.parameters(), lr=1e-5
+                    )
                     for _ in range(50):
-                        outputs_2d = self.validation_2d(batch_2d, batch_idx, dataloader_idx)
-                        loss = outputs_2d['loss_2d']
+                        outputs_2d = self.validation_2d(
+                            batch_2d, batch_idx, dataloader_idx
+                        )
+                        loss = outputs_2d["loss_2d"]
                         optimizer.zero_grad()
                         loss.backward()
                         optimizer.step()
@@ -467,7 +594,7 @@ class MFMHMR(pl.LightningModule):
                 self.eval()
             else:
                 outputs_2d = self.validation_2d(batch_2d, batch_idx, dataloader_idx)
-            
+
         batch_ = {
             "length": batch["length"],
             "obs": obs,
@@ -475,18 +602,27 @@ class MFMHMR(pl.LightningModule):
             "K_fullimg": batch["K_fullimg"],
             "cam_angvel": batch["cam_angvel"],
             "cam_tvel": batch["cam_tvel"],
-            "R_w2c": batch['R_w2c'],
+            "R_w2c": batch["R_w2c"],
             "f_imgseq": batch["f_imgseq"],
-            "meta": batch['meta']
+            "meta": batch["meta"],
         }
-        if 'vimo_smpl_params' in batch:
-            batch_['vimo_smpl_params'] = batch['vimo_smpl_params']
-            batch_['scales'] = batch['scales']
-            batch_['mean_scale'] = batch['mean_scale']
+        if "vimo_smpl_params" in batch:
+            batch_["vimo_smpl_params"] = batch["vimo_smpl_params"]
+            batch_["scales"] = batch["scales"]
+            batch_["mean_scale"] = batch["mean_scale"]
 
-        outputs = self.pipeline.forward(batch_, train=False, postproc=do_postproc_not_flip_test, global_step=self.trainer.global_step)
-        outputs["pred_smpl_params_global"] = {k: v[0] for k, v in outputs["pred_smpl_params_global"].items()}
-        outputs["pred_smpl_params_incam"] = {k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()}
+        outputs = self.pipeline.forward(
+            batch_,
+            train=False,
+            postproc=do_postproc_not_flip_test,
+            global_step=self.trainer.global_step,
+        )
+        outputs["pred_smpl_params_global"] = {
+            k: v[0] for k, v in outputs["pred_smpl_params_global"].items()
+        }
+        outputs["pred_smpl_params_incam"] = {
+            k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()
+        }
 
         if do_flip_test:
             flip_test = batch["flip_test"]
@@ -510,7 +646,9 @@ class MFMHMR(pl.LightningModule):
                 batch_["scales"] = flip_test["scales"]
                 batch_["mean_scale"] = flip_test["mean_scale"]
             batch_["meta"][0]["flip"] = True
-            flipped_outputs = self.pipeline.forward(batch_, train=False, global_step=self.trainer.global_step)
+            flipped_outputs = self.pipeline.forward(
+                batch_, train=False, global_step=self.trainer.global_step
+            )
 
             # First update incam results
             flipped_outputs["pred_smpl_params_incam"] = {
@@ -520,8 +658,12 @@ class MFMHMR(pl.LightningModule):
             smpl_params2 = flip_smplx_params(flipped_outputs["pred_smpl_params_incam"])
 
             smpl_params_avg = smpl_params1.copy()
-            smpl_params_avg["betas"] = (smpl_params1["betas"] + smpl_params2["betas"]) / 2
-            smpl_params_avg["body_pose"] = avg_smplx_aa(smpl_params1["body_pose"], smpl_params2["body_pose"])
+            smpl_params_avg["betas"] = (
+                smpl_params1["betas"] + smpl_params2["betas"]
+            ) / 2
+            smpl_params_avg["body_pose"] = avg_smplx_aa(
+                smpl_params1["body_pose"], smpl_params2["body_pose"]
+            )
             smpl_params_avg["global_orient"] = avg_smplx_aa(
                 smpl_params1["global_orient"], smpl_params2["global_orient"]
             )
@@ -533,19 +675,27 @@ class MFMHMR(pl.LightningModule):
             # global_vel_w1 = global_trans_w1[1:] - global_trans_w1[:-1]
             # global_vel_w2 = global_trans_w2[1:] - global_trans_w2[:-1]
             outputs["pred_smpl_params_global"]["betas"] = smpl_params_avg["betas"]
-            outputs["pred_smpl_params_global"]["body_pose"] = smpl_params_avg["body_pose"]
+            outputs["pred_smpl_params_global"]["body_pose"] = smpl_params_avg[
+                "body_pose"
+            ]
 
             # Finally, apply postprocess
             if do_postproc:
                 # temporarily recover the original batch-dim
-                outputs["pred_smpl_params_global"] = {k: v[None] for k, v in outputs["pred_smpl_params_global"].items()}
-                outputs["pred_smpl_params_global"]["transl"] = pp_static_joint(outputs, self.pipeline.endecoder)
+                outputs["pred_smpl_params_global"] = {
+                    k: v[None] for k, v in outputs["pred_smpl_params_global"].items()
+                }
+                outputs["pred_smpl_params_global"]["transl"] = pp_static_joint(
+                    outputs, self.pipeline.endecoder
+                )
                 body_pose = process_ik(outputs, self.pipeline.endecoder)
-                outputs["pred_smpl_params_global"] = {k: v[0] for k, v in outputs["pred_smpl_params_global"].items()}
+                outputs["pred_smpl_params_global"] = {
+                    k: v[0] for k, v in outputs["pred_smpl_params_global"].items()
+                }
 
                 outputs["pred_smpl_params_global"]["body_pose"] = body_pose[0]
                 # outputs["pred_smpl_params_incam"]["body_pose"] = body_pose[0]
-        
+
         if self.validate_2d_in_3d:
             outputs["outputs_2d"] = outputs_2d
             if self.enable_test_time_opt:
@@ -563,25 +713,39 @@ class MFMHMR(pl.LightningModule):
             smplx_out = smplx_model(**pred_smpl_params_global)
             for i in range(len(smplx_out.vertices)):
                 wis3d.set_scene_id(i)
-                wis3d.add_mesh(smplx_out.vertices[i], smplx_model.bm.faces, name=f"pred-smplx-global")
+                wis3d.add_mesh(
+                    smplx_out.vertices[i],
+                    smplx_model.bm.faces,
+                    name=f"pred-smplx-global",
+                )
 
             # GT (w)
             smplx_models = {
                 "male": make_smplx("rich-smplx", gender="male").cuda(),
                 "female": make_smplx("rich-smplx", gender="female").cuda(),
             }
-            gt_smpl_params = {k: v[0, windows[0]] for k, v in batch["gt_smpl_params"].items()}
+            gt_smpl_params = {
+                k: v[0, windows[0]] for k, v in batch["gt_smpl_params"].items()
+            }
             gt_smplx_out = smplx_models[gender](**gt_smpl_params)
 
             # GT (ayfz)
             smplx_verts_ay = apply_T_on_points(gt_smplx_out.vertices, T_w2ay)
             smplx_joints_ay = apply_T_on_points(gt_smplx_out.joints, T_w2ay)
-            T_ay2ayfz = compute_T_ayfz2ay(smplx_joints_ay[:1], inverse=True)[0]  # (4, 4)
-            smplx_verts_ayfz = apply_T_on_points(smplx_verts_ay, T_ay2ayfz)  # (F, 22, 3)
+            T_ay2ayfz = compute_T_ayfz2ay(smplx_joints_ay[:1], inverse=True)[
+                0
+            ]  # (4, 4)
+            smplx_verts_ayfz = apply_T_on_points(
+                smplx_verts_ay, T_ay2ayfz
+            )  # (F, 22, 3)
 
             for i in range(len(smplx_verts_ayfz)):
                 wis3d.set_scene_id(i)
-                wis3d.add_mesh(smplx_verts_ayfz[i], smplx_models[gender].bm.faces, name=f"gt-smplx-ayfz")
+                wis3d.add_mesh(
+                    smplx_verts_ayfz[i],
+                    smplx_models[gender].bm.faces,
+                    name=f"gt-smplx-ayfz",
+                )
 
             breakpoint()
 
@@ -611,7 +775,9 @@ class MFMHMR(pl.LightningModule):
             return optimizer
 
         scheduler_cfg = dict(self.scheduler_cfg)
-        scheduler_cfg["scheduler"] = instantiate(scheduler_cfg["scheduler"], optimizer=optimizer)
+        scheduler_cfg["scheduler"] = instantiate(
+            scheduler_cfg["scheduler"], optimizer=optimizer
+        )
         return [optimizer], [scheduler_cfg]
 
     # ============== Utils ================= #
@@ -631,7 +797,9 @@ class MFMHMR(pl.LightningModule):
         missing, unexpected = self.load_state_dict(state_dict, strict=False)
         real_missing = []
         for k in missing:
-            ignored_when_saving = any(k.startswith(ig_keys) for ig_keys in self.ignored_weights_prefix)
+            ignored_when_saving = any(
+                k.startswith(ig_keys) for ig_keys in self.ignored_weights_prefix
+            )
             if not ignored_when_saving:
                 real_missing.append(k)
 
@@ -640,7 +808,6 @@ class MFMHMR(pl.LightningModule):
         if len(unexpected) > 0:
             Log.warn(f"Unexpected keys: {unexpected}")
         return ckpt
-
 
 
 mfm_hmr = builds(

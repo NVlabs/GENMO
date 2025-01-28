@@ -1,23 +1,38 @@
 from pathlib import Path
-import numpy as np
-import torch
-from hmr4d.utils.pylogger import Log
-from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix, matrix_to_axis_angle
-
 from time import time
 
-from hmr4d.configs import MainStore, builds
-from hmr4d.utils.smplx_utils import make_smplx
-from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
-from hmr4d.utils.video_io_utils import read_video_np, save_video
+import numpy as np
+import torch
 
 import hmr4d.utils.matrix as matrix
-from hmr4d.utils.net_utils import get_valid_mask, repeat_to_max_len, repeat_to_max_len_dict
-from hmr4d.dataset.imgfeat_motion.base_dataset import ImgfeatMotionDatasetBase
+from hmr4d.configs import MainStore, builds
 from hmr4d.dataset.bedlam.utils import mid2featname, mid2vname
-from hmr4d.utils.geo_transform import compute_cam_angvel, compute_cam_tvel, apply_T_on_points
-from hmr4d.utils.geo.hmr_global import get_T_w2c_from_wcparams, get_c_rootparam, get_R_c2gv
-from hmr4d.utils.geo_transform import normalize_T_w2c, as_identity
+from hmr4d.dataset.imgfeat_motion.base_dataset import ImgfeatMotionDatasetBase
+from hmr4d.utils.geo.hmr_global import (
+    get_c_rootparam,
+    get_R_c2gv,
+    get_T_w2c_from_wcparams,
+)
+from hmr4d.utils.geo_transform import (
+    apply_T_on_points,
+    as_identity,
+    compute_cam_angvel,
+    compute_cam_tvel,
+    normalize_T_w2c,
+)
+from hmr4d.utils.net_utils import (
+    get_valid_mask,
+    repeat_to_max_len,
+    repeat_to_max_len_dict,
+)
+from hmr4d.utils.pylogger import Log
+from hmr4d.utils.smplx_utils import make_smplx
+from hmr4d.utils.video_io_utils import read_video_np, save_video
+from hmr4d.utils.wis3d_utils import add_motion_as_lines, make_wis3d
+from motiondiff.models.mdm.rotation_conversions import (
+    axis_angle_to_matrix,
+    matrix_to_axis_angle,
+)
 
 
 class BedlamDatasetV2(ImgfeatMotionDatasetBase):
@@ -58,7 +73,9 @@ class BedlamDatasetV2(ImgfeatMotionDatasetBase):
             fn, feat_dir = self.MIDINDEX_TO_LOAD[m]
             mid_to_valid_range_ = torch.load(self.root / fn)
             self.mid_to_valid_range.update(mid_to_valid_range_)
-            self.mid_to_imgfeat_dir.update({mid: self.root / feat_dir for mid in mid_to_valid_range_})
+            self.mid_to_imgfeat_dir.update(
+                {mid: self.root / feat_dir for mid in mid_to_valid_range_}
+            )
 
         # Load motionfiles
         Log.info(f"[BEDLAM] Start loading motion files")
@@ -73,7 +90,11 @@ class BedlamDatasetV2(ImgfeatMotionDatasetBase):
                 keys = np.random.choice(keys, 1024, replace=False)
                 self.motion_files = {k: self.motion_files[k] for k in keys}
                 torch.save(self.motion_files, self.root / "smplpose_v2_random1024.pth")
-            self.mid_to_valid_range = {k: v for k, v in self.mid_to_valid_range.items() if k in self.motion_files}
+            self.mid_to_valid_range = {
+                k: v
+                for k, v in self.mid_to_valid_range.items()
+                if k in self.motion_files
+            }
         else:
             self.motion_files = torch.load(self.root / "smplpose_v2.pth")
         Log.info(f"[BEDLAM] Motion files loaded. Elapsed: {time() - tic:.2f}s")
@@ -100,7 +121,9 @@ class BedlamDatasetV2(ImgfeatMotionDatasetBase):
             length = mlength
         else:
             effect_max_motion_len = min(max_motion_len, mlength)
-            length = np.random.randint(min_motion_len, effect_max_motion_len + 1)  # [low, high)
+            length = np.random.randint(
+                min_motion_len, effect_max_motion_len + 1
+            )  # [low, high)
             start = np.random.randint(range1, range2 - length + 1)
         end = start + length
         data["start_end"] = (start, end)
@@ -119,10 +142,16 @@ class BedlamDatasetV2(ImgfeatMotionDatasetBase):
         start_mapped = start - f_img_dict["start_end"][0]
         end_mapped = end - f_img_dict["start_end"][0]
 
-        data["f_imgseq"] = f_img_dict["features"][start_mapped:end_mapped].float()  # (L, 1024)
-        data["bbx_xys"] = f_img_dict["bbx_xys"][start_mapped:end_mapped].float()  # (L, 4)
+        data["f_imgseq"] = f_img_dict["features"][
+            start_mapped:end_mapped
+        ].float()  # (L, 1024)
+        data["bbx_xys"] = f_img_dict["bbx_xys"][
+            start_mapped:end_mapped
+        ].float()  # (L, 4)
         data["img_wh"] = f_img_dict["img_wh"]  # (2)
-        data["kp2d"] = torch.zeros((end - start), 17, 3)  # (L, 17, 3)  # do not provide kp2d
+        data["kp2d"] = torch.zeros(
+            (end - start), 17, 3
+        )  # (L, 17, 3)  # do not provide kp2d
 
         return data
 
@@ -133,13 +162,25 @@ class BedlamDatasetV2(ImgfeatMotionDatasetBase):
         body_pose = data["pose"][:, 3:]  # (F, 63)
         betas = data["beta"].repeat(length, 1)  # (F, 10)
         global_orient = data["global_orient_incam"]  # (F, 3)
-        transl = data["trans_incam"] + data["cam_ext"][:, :3, 3]  # (F, 3), bedlam convention
-        smpl_params_c = {"body_pose": body_pose, "betas": betas, "transl": transl, "global_orient": global_orient}
+        transl = (
+            data["trans_incam"] + data["cam_ext"][:, :3, 3]
+        )  # (F, 3), bedlam convention
+        smpl_params_c = {
+            "body_pose": body_pose,
+            "betas": betas,
+            "transl": transl,
+            "global_orient": global_orient,
+        }
 
         # SMPL params in world
         global_orient_w = data["pose"][:, :3]  # (F, 3)
         transl_w = data["trans"]  # (F, 3)
-        smpl_params_w = {"body_pose": body_pose, "betas": betas, "transl": transl_w, "global_orient": global_orient_w}
+        smpl_params_w = {
+            "body_pose": body_pose,
+            "betas": betas,
+            "transl": transl_w,
+            "global_orient": global_orient_w,
+        }
 
         gravity_vec = torch.tensor([0, -1, 0], dtype=torch.float32)  # (3), BEDLAM is ay
         T_w2c = get_T_w2c_from_wcparams(
@@ -204,21 +245,35 @@ class BedlamDatasetV2(ImgfeatMotionDatasetBase):
             add_motion_as_lines(c_gt_joints, wis3d, name="c-gt_joints")
 
             # Check transformation works correctly
-            print("T_w2c", (apply_T_on_points(w_gt_joints, T_w2c) - c_gt_joints).abs().max())
+            print(
+                "T_w2c",
+                (apply_T_on_points(w_gt_joints, T_w2c) - c_gt_joints).abs().max(),
+            )
             R_c, t_c = get_c_rootparam(
-                smpl_params_w["global_orient"], smpl_params_w["transl"], T_w2c, data["skeleton"][0]
+                smpl_params_w["global_orient"],
+                smpl_params_w["transl"],
+                T_w2c,
+                data["skeleton"][0],
             )
             print("transl_c", (t_c - smpl_params_c["transl"]).abs().max())
             R_diff = matrix_to_axis_angle(
-                (axis_angle_to_matrix(R_c) @ axis_angle_to_matrix(smpl_params_c["global_orient"]).transpose(-1, -2))
+                (
+                    axis_angle_to_matrix(R_c)
+                    @ axis_angle_to_matrix(smpl_params_c["global_orient"]).transpose(
+                        -1, -2
+                    )
+                )
             ).norm(dim=-1)
             print("global_orient_c", R_diff.abs().max())  # < 1e-6
 
             skeleton_beta = smplx.get_skeleton(smpl_params_c["betas"])
-            print("Skeleton", (skeleton_beta[0] - data["skeleton"]).abs().max())  # (1.2e-7)
+            print(
+                "Skeleton", (skeleton_beta[0] - data["skeleton"]).abs().max()
+            )  # (1.2e-7)
 
         if False:  # cam-overlay
             from hmr4d.utils.vis.renderer_utils import simple_render_mesh_background
+
             smplx = make_smplx("supermotion")
 
             # *. original bedlam param
@@ -238,7 +293,11 @@ class BedlamDatasetV2(ImgfeatMotionDatasetBase):
 
             # ----- Render Overlay ----- #
             mid = self.idx2meta[idx]
-            images = read_video_np(self.root / "videos" / mid2vname(mid), data["start_end"][0], data["start_end"][1])
+            images = read_video_np(
+                self.root / "videos" / mid2vname(mid),
+                data["start_end"][0],
+                data["start_end"][1],
+            )
             render_dict = {
                 "K": data["cam_int"][:1],  # only support batch-size 1
                 "faces": smplx.faces,
@@ -249,16 +308,24 @@ class BedlamDatasetV2(ImgfeatMotionDatasetBase):
             save_video(img_overlay, "tmp.mp4", crf=23)
 
         # Batchable
-        return_data["smpl_params_c"] = repeat_to_max_len_dict(return_data["smpl_params_c"], max_len)
-        return_data["smpl_params_w"] = repeat_to_max_len_dict(return_data["smpl_params_w"], max_len)
+        return_data["smpl_params_c"] = repeat_to_max_len_dict(
+            return_data["smpl_params_c"], max_len
+        )
+        return_data["smpl_params_w"] = repeat_to_max_len_dict(
+            return_data["smpl_params_w"], max_len
+        )
         return_data["R_c2gv"] = repeat_to_max_len(return_data["R_c2gv"], max_len)
         return_data["bbx_xys"] = repeat_to_max_len(return_data["bbx_xys"], max_len)
         return_data["K_fullimg"] = repeat_to_max_len(return_data["K_fullimg"], max_len)
         return_data["f_imgseq"] = repeat_to_max_len(return_data["f_imgseq"], max_len)
         return_data["kp2d"] = repeat_to_max_len(return_data["kp2d"], max_len)
-        return_data["cam_angvel"] = repeat_to_max_len(return_data["cam_angvel"], max_len)
+        return_data["cam_angvel"] = repeat_to_max_len(
+            return_data["cam_angvel"], max_len
+        )
         return_data["cam_tvel"] = repeat_to_max_len(return_data["cam_tvel"], max_len)
-        return_data["noisy_cam_tvel"] = repeat_to_max_len(return_data["noisy_cam_tvel"], max_len)
+        return_data["noisy_cam_tvel"] = repeat_to_max_len(
+            return_data["noisy_cam_tvel"], max_len
+        )
         return_data["T_w2c"] = repeat_to_max_len(return_data["T_w2c"], max_len)
 
         return return_data
@@ -266,4 +333,8 @@ class BedlamDatasetV2(ImgfeatMotionDatasetBase):
 
 group_name = "train_datasets/imgfeat_bedlam"
 MainStore.store(name="v2", node=builds(BedlamDatasetV2), group=group_name)
-MainStore.store(name="v2_random1024", node=builds(BedlamDatasetV2, random1024=True), group=group_name)
+MainStore.store(
+    name="v2_random1024",
+    node=builds(BedlamDatasetV2, random1024=True),
+    group=group_name,
+)

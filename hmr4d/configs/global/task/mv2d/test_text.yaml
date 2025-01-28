@@ -24,12 +24,12 @@ pl_trainer:
   devices: 1
 
 logger:
-    _target_: pytorch_lightning.loggers.WandbLogger
-    project: 'mfm-hmr-test'
-    entity: 'nvr-lpr'
-    save_dir: "/tmp" # /save_dir/name/version/sub_dir
-    name: ""
-    version: ""
-    resume: 'allow'
-    dir: "/tmp"
-    id: null
+  _target_: pytorch_lightning.loggers.WandbLogger
+  project: "mfm-hmr-test"
+  entity: "nvr-lpr"
+  save_dir: "/tmp" # /save_dir/name/version/sub_dir
+  name: ""
+  version: ""
+  resume: "allow"
+  dir: "/tmp"
+  id: null

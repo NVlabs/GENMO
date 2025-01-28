@@ -1,12 +1,12 @@
-import torch
+import json
 import os
 
-import open3d as o3d
-import numpy as np
-from tqdm import tqdm
-from o3d_materials import Settings
-import json
 import matplotlib.pyplot as plt
+import numpy as np
+import open3d as o3d
+import torch
+from o3d_materials import Settings
+from tqdm import tqdm
 
 
 def create_meshes(verts, faces, colors):
@@ -41,6 +41,7 @@ def create_meshes(verts, faces, colors):
 
     return mesh
 
+
 def compute_look_at(cam_R, cam_T):
     # Convert cam_R and cam_T to numpy arrays if they are not already
     cam_R = cam_R.cpu().numpy() if isinstance(cam_R, torch.Tensor) else cam_R
@@ -64,9 +65,14 @@ def compute_look_at(cam_R, cam_T):
     return camera_position, camera_target, world_up_vector
 
 
-
 def get_global_cameras_static(
-    verts, beta=4.0, cam_height_degree=30, target_center_height=1.0, use_long_axis=False, vec_rot=45, device="cuda"
+    verts,
+    beta=4.0,
+    cam_height_degree=30,
+    target_center_height=1.0,
+    use_long_axis=False,
+    vec_rot=45,
+    device="cuda",
 ):
     L, V, _ = verts.shape
 
@@ -92,7 +98,9 @@ def get_global_cameras_static(
     target_scale = target_scale * beta
 
     position = target_center + vec * target_scale
-    position[1] = target_scale * np.tan(np.pi * cam_height_degree / 180) + target_center_height
+    position[1] = (
+        target_scale * np.tan(np.pi * cam_height_degree / 180) + target_center_height
+    )
 
     # Compute camera rotation and translation
     # positions = position.unsqueeze(0).repeat(L, 1)
@@ -120,7 +128,7 @@ if __name__ == "__main__":
     cam_T = cameras.T
     gv, gf, gc = ground_geometry
 
-    with open(os.path.join(os.path.dirname(__file__), 'smpl_key.json'), 'r') as f:
+    with open(os.path.join(os.path.dirname(__file__), "smpl_key.json"), "r") as f:
         data_format = json.load(f)
 
     POSE_COLOR = {}
@@ -128,13 +136,21 @@ if __name__ == "__main__":
         if len(data_format["color_order"][key]) > 0:
             POSE_COLOR[key] = np.array(data_format["color_order"][key]) / 255
         else:
-            POSE_COLOR[key] = plt.get_cmap(data_format["color_map"])((i * 2 + 1) % 20)[:3]
+            POSE_COLOR[key] = plt.get_cmap(data_format["color_map"])((i * 2 + 1) % 20)[
+                :3
+            ]
 
     # colors = np.stack([np.array(color) for color in list(POSE_COLOR.values())]).astype(np.float32)
     # colors = torch.from_numpy(colors).to(verts_list[0].device)
-    color_purple = torch.tensor([0.69019608, 0.39215686, 0.95686275]).to(verts_list[0].device)
-    color_green = torch.tensor([0.46666667, 0.90196078, 0.74901961]).to(verts_list[0].device)
-    color_light_purple = torch.tensor([1.0, 0.65490196, 0.95294118]).to(verts_list[0].device)
+    color_purple = torch.tensor([0.69019608, 0.39215686, 0.95686275]).to(
+        verts_list[0].device
+    )
+    color_green = torch.tensor([0.46666667, 0.90196078, 0.74901961]).to(
+        verts_list[0].device
+    )
+    color_light_purple = torch.tensor([1.0, 0.65490196, 0.95294118]).to(
+        verts_list[0].device
+    )
 
     mat_settings = Settings()
     # Set up OffscreenRenderer
@@ -194,19 +210,27 @@ if __name__ == "__main__":
     colors[:, 2] = torch.linspace(color_green[2], color_purple[2], len(verts_list))
 
     colors_trans = torch.zeros_like(colors)
-    colors_trans[:, 0] = torch.linspace(color_green[0], color_light_purple[0], len(verts_list))
-    colors_trans[:, 1] = torch.linspace(color_green[1], color_light_purple[1], len(verts_list))
-    colors_trans[:, 2] = torch.linspace(color_green[2], color_light_purple[2], len(verts_list))
+    colors_trans[:, 0] = torch.linspace(
+        color_green[0], color_light_purple[0], len(verts_list)
+    )
+    colors_trans[:, 1] = torch.linspace(
+        color_green[1], color_light_purple[1], len(verts_list)
+    )
+    colors_trans[:, 2] = torch.linspace(
+        color_green[2], color_light_purple[2], len(verts_list)
+    )
 
     for t, verts in tqdm(enumerate(verts_list)):
         if t % 20 != 0:
             continue
         N, V, _ = verts.shape
-        verts = list(torch.unbind(verts_list[t], dim=0))# + [gv]
-        faces_list = list(torch.unbind(faces, dim=0)) #+ [gf]
+        verts = list(torch.unbind(verts_list[t], dim=0))  # + [gv]
+        faces_list = list(torch.unbind(faces, dim=0))  # + [gf]
         # colors_list = list(torch.unbind(colors, dim=0))# + [gc[..., :3]]
         for i in range(N):
-            mesh = create_meshes(verts[i], faces_list[i], colors[t] if i == N-1 else colors_trans[t])
+            mesh = create_meshes(
+                verts[i], faces_list[i], colors[t] if i == N - 1 else colors_trans[t]
+            )
             renderer.scene.add_geometry(
                 f"mesh_{i}_{t}", mesh, lit_mat_box if i == N - 1 else trans_mat_box
             )
@@ -217,4 +241,6 @@ if __name__ == "__main__":
         # o3d.io.write_triangle_mesh(f"out/mesh_{t}_{i}.obj", mesh)
     image = renderer.render_to_image()
     o3d.io.write_image(f"out/mesh_{t}.png", image)
-    import ipdb; ipdb.set_trace()
+    import ipdb
+
+    ipdb.set_trace()

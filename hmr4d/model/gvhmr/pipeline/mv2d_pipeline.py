@@ -1,36 +1,40 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.cuda.amp import autocast
-import numpy as np
 from einops import einsum, rearrange, repeat
 from hydra.utils import instantiate
-from hmr4d.utils.pylogger import Log
-from hmr4d.utils.net_utils import gaussian_smooth
+from torch.cuda.amp import autocast
 
+from hmr4d.model.gvhmr.utils import stats_compose
 from hmr4d.model.gvhmr.utils.endecoder import EnDecoder
+from hmr4d.model.gvhmr.utils.mv2d_utils import coco_joint_parents, draw_motion_2d
 from hmr4d.model.gvhmr.utils.postprocess import (
     pp_static_joint,
-    process_ik,
     pp_static_joint_cam,
+    process_ik,
 )
-from hmr4d.model.gvhmr.utils import stats_compose
-
-from motiondiff.models.mdm.rotation_conversions import (
-    matrix_to_rotation_6d,
-    rotation_6d_to_matrix,
-    axis_angle_to_matrix,
-    matrix_to_axis_angle,
+from hmr4d.utils.geo.hmr_cam import (
+    compute_bbox_info_bedlam,
+    compute_transl_full_cam,
+    get_a_pred_cam,
+    project_to_bi01,
 )
-from hmr4d.utils.geo.hmr_cam import compute_bbox_info_bedlam, compute_transl_full_cam, get_a_pred_cam, project_to_bi01
 from hmr4d.utils.geo.hmr_global import (
-    rollout_local_transl_vel,
     get_static_joint_mask,
     get_tgtcoord_rootparam,
+    rollout_local_transl_vel,
 )
-from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
+from hmr4d.utils.net_utils import gaussian_smooth
+from hmr4d.utils.pylogger import Log
 from hmr4d.utils.smplx_utils import make_smplx
-from hmr4d.model.gvhmr.utils.mv2d_utils import draw_motion_2d, coco_joint_parents
+from hmr4d.utils.wis3d_utils import add_motion_as_lines, make_wis3d
+from motiondiff.models.mdm.rotation_conversions import (
+    axis_angle_to_matrix,
+    matrix_to_axis_angle,
+    matrix_to_rotation_6d,
+    rotation_6d_to_matrix,
+)
 
 
 class Pipeline(nn.Module):
@@ -38,7 +42,9 @@ class Pipeline(nn.Module):
         super().__init__()
         self.args = args
         self.weights = args.weights  # loss weights
-        self.fix_network_for_mv2d_second_view = args.get('fix_network_for_mv2d_second_view', False)
+        self.fix_network_for_mv2d_second_view = args.get(
+            "fix_network_for_mv2d_second_view", False
+        )
 
         # Networks
         self.num_views = args.num_views
@@ -53,21 +59,33 @@ class Pipeline(nn.Module):
         self.endecoder: EnDecoder = instantiate(args.endecoder_opt, _recursive_=False)
         if self.args.normalize_cam_angvel:
             cam_angvel_stats = stats_compose.cam_angvel["manual"]
-            self.register_buffer("cam_angvel_mean", torch.tensor(cam_angvel_stats["mean"]), persistent=False)
-            self.register_buffer("cam_angvel_std", torch.tensor(cam_angvel_stats["std"]), persistent=False)
-            
+            self.register_buffer(
+                "cam_angvel_mean",
+                torch.tensor(cam_angvel_stats["mean"]),
+                persistent=False,
+            )
+            self.register_buffer(
+                "cam_angvel_std",
+                torch.tensor(cam_angvel_stats["std"]),
+                persistent=False,
+            )
+
         self.denoiser3d.endecoder = [self.endecoder]
         if self.fix_network_for_mv2d_second_view:
             self.denoiser3d_copy[0].endecoder = [self.endecoder]
 
     # ========== Training ========== #
 
-    def forward(self, inputs, train=False, postproc=False, static_cam=False, global_step=0):
+    def forward(
+        self, inputs, train=False, postproc=False, static_cam=False, global_step=0
+    ):
         outputs = dict()
         length = inputs["length"]  # (B,) effective length of each sample
 
         # *. Conditions
-        cliff_cam = compute_bbox_info_bedlam(inputs["bbx_xys"], inputs["K_fullimg"])  # (B, L, 3)
+        cliff_cam = compute_bbox_info_bedlam(
+            inputs["bbx_xys"], inputs["K_fullimg"]
+        )  # (B, L, 3)
         f_cam_angvel = inputs["cam_angvel"]
         if self.args.normalize_cam_angvel:
             f_cam_angvel = (f_cam_angvel - self.cam_angvel_mean) / self.cam_angvel_std
@@ -76,14 +94,16 @@ class Pipeline(nn.Module):
             "f_cliffcam": cliff_cam,  # (B, L, 3)
             "f_cam_angvel": f_cam_angvel,  # (B, L, C=6)
             "f_imgseq": inputs["f_imgseq"],  # (B, L, C=1024)
-            "detach_j3d_for_mv2d": self.args.get('train3d_detach_j3d_for_mv2d', True),
-            "detach_cam_for_mv2d": self.args.get('train3d_detach_cam_for_mv2d', False)
+            "detach_j3d_for_mv2d": self.args.get("train3d_detach_j3d_for_mv2d", True),
+            "detach_cam_for_mv2d": self.args.get("train3d_detach_cam_for_mv2d", False),
         }
         if train:
             f_condition = randomly_set_null_condition(f_condition, 0.1)
 
         # Forward & output
-        model_output = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
+        model_output = self.denoiser3d(
+            length=length, **f_condition
+        )  # pred_x, pred_cam, static_conf_logits
         decode_dict = self.endecoder.decode(model_output["pred_x"])  # (B, L, C) -> dict
         outputs.update({"model_output": model_output, "decode_dict": decode_dict})
 
@@ -92,14 +112,18 @@ class Pipeline(nn.Module):
             "body_pose": decode_dict["body_pose"],  # (B, L, 63)
             "betas": decode_dict["betas"],  # (B, L, 10)
             "global_orient": decode_dict["global_orient"],  # (B, L, 3)
-            "transl": compute_transl_full_cam(model_output["pred_cam"], inputs["bbx_xys"], inputs["K_fullimg"]),
+            "transl": compute_transl_full_cam(
+                model_output["pred_cam"], inputs["bbx_xys"], inputs["K_fullimg"]
+            ),
         }
         if not train:
-            pred_smpl_params_global = get_smpl_params_w_Rt_v2(  # This function has for-loop
-                global_orient_gv=decode_dict["global_orient_gv"],
-                local_transl_vel=decode_dict["local_transl_vel"],
-                global_orient_c=decode_dict["global_orient"],
-                cam_angvel=inputs["cam_angvel"],
+            pred_smpl_params_global = (
+                get_smpl_params_w_Rt_v2(  # This function has for-loop
+                    global_orient_gv=decode_dict["global_orient_gv"],
+                    local_transl_vel=decode_dict["local_transl_vel"],
+                    global_orient_c=decode_dict["global_orient"],
+                    cam_angvel=inputs["cam_angvel"],
+                )
             )
             outputs["pred_smpl_params_global"] = {
                 "body_pose": decode_dict["body_pose"],
@@ -110,9 +134,13 @@ class Pipeline(nn.Module):
 
             if postproc:  # apply post-processing
                 if static_cam:  # extra post-processing to utilize static camera prior
-                    outputs["pred_smpl_params_global"]["transl"] = pp_static_joint_cam(outputs, self.endecoder)
+                    outputs["pred_smpl_params_global"]["transl"] = pp_static_joint_cam(
+                        outputs, self.endecoder
+                    )
                 else:
-                    outputs["pred_smpl_params_global"]["transl"] = pp_static_joint(outputs, self.endecoder)
+                    outputs["pred_smpl_params_global"]["transl"] = pp_static_joint(
+                        outputs, self.endecoder
+                    )
                 body_pose = process_ik(outputs, self.endecoder)
                 decode_dict["body_pose"] = body_pose
                 outputs["pred_smpl_params_global"]["body_pose"] = body_pose
@@ -123,9 +151,11 @@ class Pipeline(nn.Module):
         # ========== Compute Loss ========== #
         total_loss = 0
         mask = inputs["mask"]["valid"]  # (B, L)
-        
+
         # 0. MV2D loss
-        if self.weights.get('mv2d', 0.0) > 0.0 and global_step >= self.weights.get("mv2d_start_step", 0):
+        if self.weights.get("mv2d", 0.0) > 0.0 and global_step >= self.weights.get(
+            "mv2d_start_step", 0
+        ):
             mv2d = model_output["mv2d"]
             target_mv2d = inputs["mv2d_norm"]
             mv2d_loss = F.mse_loss(mv2d, target_mv2d[..., :2], reduction="none")
@@ -140,35 +170,35 @@ class Pipeline(nn.Module):
         # mv2d_norm = target_mv2d.detach()
         # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
         # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 128, f"out/debug_vis/loss_mv2d_target.mp4", coco_joint_parents, 256, 256, fps=30)
-        
+
         # 0.1 MV2D cam loss
         if self.weights.get("cam_elevation_loss", 0.0) > 0.0:
             elevations = torch.deg2rad(model_output["mv2d_cam_params"]["elevations"])
             target_elevations = inputs["cam_elevations"]
             elevation_loss = F.mse_loss(elevations, target_elevations, reduction="none")
-            elevation_loss = (elevation_loss * mask)[inputs['cam_param_valid']].mean()
+            elevation_loss = (elevation_loss * mask)[inputs["cam_param_valid"]].mean()
             total_loss += self.weights.cam_elevation_loss * elevation_loss
             outputs["cam_elevation_loss"] = elevation_loss
-            
+
         if self.weights.get("cam_tilt_loss", 0.0) > 0.0:
             tilt = torch.deg2rad(model_output["mv2d_cam_params"]["tilt"])
             target_tilt = inputs["cam_tilt"]
             tilt_loss = F.mse_loss(tilt, target_tilt, reduction="none")
-            tilt_loss = (tilt_loss * mask)[inputs['cam_param_valid']].mean()
+            tilt_loss = (tilt_loss * mask)[inputs["cam_param_valid"]].mean()
             total_loss += self.weights.cam_tilt_loss * tilt_loss
             outputs["cam_tilt_loss"] = tilt_loss
-            
+
         if self.weights.get("cam_elevation_reg", 0.0) > 0.0:
             elevations = torch.deg2rad(model_output["mv2d_cam_params"]["elevations"])
-            elevation_reg = elevations ** 2
-            elevation_reg = (elevation_reg * mask)[inputs['cam_param_valid']].mean()
+            elevation_reg = elevations**2
+            elevation_reg = (elevation_reg * mask)[inputs["cam_param_valid"]].mean()
             total_loss += self.weights.cam_elevation_reg * elevation_reg
             outputs["cam_elevation_reg_loss"] = elevation_reg
-            
+
         if self.weights.get("cam_tilt_reg", 0.0) > 0.0:
             tilt = torch.deg2rad(model_output["mv2d_cam_params"]["tilt"])
-            tilt_reg = tilt ** 2
-            tilt_reg = (tilt_reg * mask)[inputs['cam_param_valid']].mean()
+            tilt_reg = tilt**2
+            tilt_reg = (tilt_reg * mask)[inputs["cam_param_valid"]].mean()
             total_loss += self.weights.cam_tilt_reg * tilt_reg
             outputs["cam_tilt_reg_loss"] = tilt_reg
 
@@ -176,9 +206,11 @@ class Pipeline(nn.Module):
         pred_x = model_output["pred_x"]  # (B, L, C)
         target_x = self.endecoder.encode(inputs)  # (B, L, C)
         simple_loss = F.mse_loss(pred_x, target_x, reduction="none")
-        mask_simple = mask[:, :, None].expand(-1, -1, pred_x.size(2)).clone()  # (B, L, C)
+        mask_simple = (
+            mask[:, :, None].expand(-1, -1, pred_x.size(2)).clone()
+        )  # (B, L, C)
         mask_simple[inputs["mask"]["spv_incam_only"], :, 142:] = False  # 3dpw training
-        if self.weights.get('simple_loss_local_only', False):
+        if self.weights.get("simple_loss_local_only", False):
             mask_simple[..., 142:] = False
         simple_loss = (simple_loss * mask_simple).mean()
         total_loss += simple_loss * self.weights.get("simple", 1.0)
@@ -196,7 +228,7 @@ class Pipeline(nn.Module):
 
         outputs["loss"] = total_loss
         return outputs
-    
+
     def forward_2d(self, inputs, train=False, global_step=0, diffusion=None):
         outputs = dict()
         length = inputs["length"]  # (B,) effective length of each sample
@@ -208,83 +240,114 @@ class Pipeline(nn.Module):
             "f_cliffcam": torch.zeros(B, L, 3).to(device),  # (B, L, 3)
             "f_cam_angvel": torch.zeros(B, L, 6).to(device),  # (B, L, C=6)
             "f_imgseq": inputs.get("f_imgseq", torch.zeros(B, L, 1024).to(device)),
-            "detach_j3d_for_mv2d": self.args.get('train2d_detach_j3d_for_mv2d', False),
-            "detach_cam_for_mv2d": self.args.get('train2d_detach_cam_for_mv2d', False)
+            "detach_j3d_for_mv2d": self.args.get("train2d_detach_j3d_for_mv2d", False),
+            "detach_cam_for_mv2d": self.args.get("train2d_detach_cam_for_mv2d", False),
         }
         if train:
             f_condition = randomly_set_null_condition(f_condition, 0.1)
         f_condition["obs"] = inputs["obs"]  # (B, L, J, 3)
-        model_output = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
-        if 'decode_dict' in model_output:
+        model_output = self.denoiser3d(
+            length=length, **f_condition
+        )  # pred_x, pred_cam, static_conf_logits
+        if "decode_dict" in model_output:
             decode_dict = model_output.pop("decode_dict")
         else:
-            decode_dict = self.endecoder.decode(model_output["pred_x"])  # (B, L, C) -> dict
+            decode_dict = self.endecoder.decode(
+                model_output["pred_x"]
+            )  # (B, L, C) -> dict
         outputs.update({"2d_model_output": model_output, "2d_decode_dict": decode_dict})
-        
+
         # second view generation
         if not self.weights.get("disable_second_view", False):
             second_view = np.random.randint(1, self.num_views)
-            view_correspondence = (np.arange(self.num_views) + second_view) % self.num_views
+            view_correspondence = (
+                np.arange(self.num_views) + second_view
+            ) % self.num_views
             input_view_id = (-second_view) % self.num_views
             mv2d_shuffle = model_output["mv2d"][:, :, view_correspondence]
-            model_output['mv2d_shuffle'] = mv2d_shuffle
-            model_output['input_view_id'] = input_view_id
+            model_output["mv2d_shuffle"] = mv2d_shuffle
+            model_output["input_view_id"] = input_view_id
             obs_sv = mv2d_shuffle[:, :, 0]
-            obs_sv = torch.cat([obs_sv, torch.ones_like(obs_sv[..., :1])], dim=-1)  # (B, L, J, 3)
+            obs_sv = torch.cat(
+                [obs_sv, torch.ones_like(obs_sv[..., :1])], dim=-1
+            )  # (B, L, J, 3)
             f_condition = {
                 "obs": obs_sv,  # (B, L, J, 3)
                 "f_cliffcam": torch.zeros(B, L, 3).to(device),  # (B, L, 3)
                 "f_cam_angvel": torch.zeros(B, L, 6).to(device),  # (B, L, C=6)
                 "f_imgseq": torch.zeros(B, L, 1024).to(device),
-                "detach_j3d_for_mv2d": self.args.get('train2d_detach_j3d_for_mv2d', False),
-                "detach_cam_for_mv2d": self.args.get('train2d_detach_cam_for_mv2d', False)
+                "detach_j3d_for_mv2d": self.args.get(
+                    "train2d_detach_j3d_for_mv2d", False
+                ),
+                "detach_cam_for_mv2d": self.args.get(
+                    "train2d_detach_cam_for_mv2d", False
+                ),
             }
-            if self.args.get('use_firstview_proj_cam_for_sideview', False):
+            if self.args.get("use_firstview_proj_cam_for_sideview", False):
                 f_condition["proj_2d_cam"] = model_output["proj_2d_cam"]
             if self.fix_network_for_mv2d_second_view:
-                self.transfer_network_weights_to_copy()    
+                self.transfer_network_weights_to_copy()
                 denoiser3d = self.denoiser3d_copy[0]
             else:
                 denoiser3d = self.denoiser3d
-            model_output_sv = denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
+            model_output_sv = denoiser3d(
+                length=length, **f_condition
+            )  # pred_x, pred_cam, static_conf_logits
             # model_output_sv2 = self.denoiser3d(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
             # diff = (model_output_sv["pred_x"] - model_output_sv2["pred_x"]).abs()
             # grad = torch.autograd.grad(model_output_sv["pred_x"].sum(), obs_sv, create_graph=True)[0]
-            if 'decode_dict' in model_output_sv:
+            if "decode_dict" in model_output_sv:
                 decode_dict_sv = model_output_sv.pop("decode_dict")
             else:
-                decode_dict_sv = self.endecoder.decode(model_output_sv["pred_x"])  # (B, L, C) -> dict
-            outputs.update({"2d_model_output_sv": model_output_sv, "2d_decode_dict_sv": decode_dict_sv})
+                decode_dict_sv = self.endecoder.decode(
+                    model_output_sv["pred_x"]
+                )  # (B, L, C) -> dict
+            outputs.update(
+                {
+                    "2d_model_output_sv": model_output_sv,
+                    "2d_decode_dict_sv": decode_dict_sv,
+                }
+            )
 
         # ========== Compute Loss ========== #
         total_loss = 0
         mask = inputs["mask"]
-        
+
         if self.weights.get("sds", 0.0) > 0.0:
             kp2d = model_output["mv2d"]
             repeats = 4
             if self.weights.get("sds_exclude_first_view", True):
-                kp2d = kp2d[:, :, 1:]   # exclude first view
+                kp2d = kp2d[:, :, 1:]  # exclude first view
                 repeats = 3
             kp2d = kp2d.permute(0, 2, 1, 3, 4).reshape(-1, L, *kp2d.shape[3:])
-            min_step, max_step = self.weights.get("sds_min_step", 20), self.weights.get("sds_max_step", 980)
+            min_step, max_step = (
+                self.weights.get("sds_min_step", 20),
+                self.weights.get("sds_max_step", 980),
+            )
             noise = torch.randn_like(kp2d)
-            t = torch.randint(min_step, max_step + 1, [kp2d.shape[0]], dtype=torch.long, device=device)
+            t = torch.randint(
+                min_step, max_step + 1, [kp2d.shape[0]], dtype=torch.long, device=device
+            )
             x_t = diffusion.q_sample(kp2d, t, noise=noise)
             with torch.no_grad():
                 f_condition = {
-                    "f_imgseq": inputs.get("f_imgseq", torch.zeros(kp2d.shape[0], L, 1024).to(device)),
+                    "f_imgseq": inputs.get(
+                        "f_imgseq", torch.zeros(kp2d.shape[0], L, 1024).to(device)
+                    ),
                     "obs_x_t": x_t,
                     "t": t,
                 }
-                sds_model_output = self.denoiser3d.forward_singleview(length=length.repeat_interleave(repeats, dim=0), **f_condition)  # pred_x, pred_cam, static_conf_logits
+                sds_model_output = self.denoiser3d.forward_singleview(
+                    length=length.repeat_interleave(repeats, dim=0), **f_condition
+                )  # pred_x, pred_cam, static_conf_logits
                 singleview_2d = sds_model_output["singleview_2d"]
             sds_loss = F.mse_loss(singleview_2d, kp2d, reduction="none")
-            sds_loss = (sds_loss * mask.repeat_interleave(repeats, dim=0)[..., None, None]).mean()
+            sds_loss = (
+                sds_loss * mask.repeat_interleave(repeats, dim=0)[..., None, None]
+            ).mean()
             total_loss += self.weights.sds * sds_loss
             outputs["sds_loss"] = sds_loss
-            
-        
+
         if self.weights.get("recon2d", 0.0) > 0.0:
             input_target = inputs["orig_obs"]
             mv2d_fv = model_output["mv2d"][:, :, 0]
@@ -293,19 +356,20 @@ class Pipeline(nn.Module):
             recon2d_loss = (recon2d_loss * mask[..., None, None]).mean()
             total_loss += self.weights.recon2d * recon2d_loss
             outputs["recon2d_loss"] = recon2d_loss
-        
-        
+
         # 0. cycle input 2d loss
         if self.weights.cycle_in2d > 0.0:
             input_target = inputs["orig_obs"]
             mv2d_sv = model_output_sv["mv2d"]
             mv2d_sv_input_view = mv2d_sv[:, :, input_view_id]
-            cycle_in2d_loss = F.mse_loss(mv2d_sv_input_view, input_target[..., :2], reduction="none")
+            cycle_in2d_loss = F.mse_loss(
+                mv2d_sv_input_view, input_target[..., :2], reduction="none"
+            )
             cycle_in2d_loss *= input_target[..., [2]]
             cycle_in2d_loss = (cycle_in2d_loss * mask[..., None, None]).mean()
             total_loss += self.weights.cycle_in2d * cycle_in2d_loss
             outputs["cycle_in2d_loss"] = cycle_in2d_loss
-        
+
         # 1. cycle mv2d loss
         if self.weights.cycle_mv2d > 0.0:
             mv2d_sv_target = mv2d_shuffle
@@ -321,29 +385,33 @@ class Pipeline(nn.Module):
             body_pose_target = decode_dict["body_pose"]
             if self.weights.cycle_detach_body_pose_target:
                 body_pose_target = body_pose_target.detach()
-            pose_loss = F.mse_loss(decode_dict_sv["body_pose"], body_pose_target, reduction="none")
+            pose_loss = F.mse_loss(
+                decode_dict_sv["body_pose"], body_pose_target, reduction="none"
+            )
             pose_loss = (pose_loss * mask[..., None]).mean()
             total_loss += self.weights.cycle_pose * pose_loss
             outputs["cycle_pose_loss"] = pose_loss
-        
+
         # 3. cycle beta loss
         if self.weights.cycle_betas > 0.0:
             beta_target = decode_dict["betas"]
             if self.weights.cycle_detach_beta_target:
                 beta_target = beta_target.detach()
-            beta_loss = F.mse_loss(decode_dict_sv["betas"], beta_target, reduction="none")
+            beta_loss = F.mse_loss(
+                decode_dict_sv["betas"], beta_target, reduction="none"
+            )
             beta_loss = (beta_loss * mask[..., None]).mean()
             total_loss += self.weights.cycle_betas * beta_loss
             outputs["cycle_beta_loss"] = beta_loss
 
         outputs["loss_2d"] = total_loss
         return outputs
-    
+
     def forward_singleview_diffusion(self, inputs, train=False, global_step=0):
         length = inputs["length"]  # (B,) effective length of each sample
         device = inputs["obs_x_t"].device
         B, L = inputs["obs_x_t"].shape[:2]
-        outputs = {'batch_size': B}
+        outputs = {"batch_size": B}
 
         # input view generation
         f_condition = {
@@ -353,30 +421,36 @@ class Pipeline(nn.Module):
             f_condition = randomly_set_null_condition(f_condition, 0.1)
         f_condition["obs_x_t"] = inputs["obs_x_t"]  # (B, L, J, 3)
         f_condition["t"] = inputs["scaled_t"]  # (B, L, J, 3)
-        model_output = self.denoiser3d.forward_singleview(length=length, **f_condition)  # pred_x, pred_cam, static_conf_logits
+        model_output = self.denoiser3d.forward_singleview(
+            length=length, **f_condition
+        )  # pred_x, pred_cam, static_conf_logits
         outputs.update({"2d_model_output": model_output})
 
         # ========== Compute Loss ========== #
         total_loss = 0
         mask = inputs["mask"]
-        
+
         if self.weights.singleview_2d > 0.0:
             singleview_target = inputs["orig_obs"]
             singleview_pred = model_output["singleview_2d"]
-            singleview_2d_loss = F.mse_loss(singleview_pred, singleview_target[..., :2], reduction="none")
+            singleview_2d_loss = F.mse_loss(
+                singleview_pred, singleview_target[..., :2], reduction="none"
+            )
             singleview_2d_loss *= singleview_target[..., [2]]
             singleview_2d_loss = (singleview_2d_loss * mask[..., None, None]).mean()
             total_loss += self.weights.singleview_2d * singleview_2d_loss
             outputs["singleview_2d_loss"] = singleview_2d_loss
-        
+
         outputs["loss_2d"] = total_loss
         return outputs
-    
+
     def transfer_network_weights_to_copy(self):
         device = next(self.denoiser3d.parameters()).device
         if next(self.denoiser3d_copy[0].parameters()).device != device:
             self.denoiser3d_copy[0].to(device)
-        for parameter, parameter_copy in zip(self.denoiser3d.parameters(), self.denoiser3d_copy[0].parameters()):
+        for parameter, parameter_copy in zip(
+            self.denoiser3d.parameters(), self.denoiser3d_copy[0].parameters()
+        ):
             parameter_copy.data.copy_(parameter.data)
 
 
@@ -430,7 +504,9 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
         # Instead of supervising transl, we convert gt to pred_cam (prevent divide 0)
         pred_cam = model_output["pred_cam"]  # (B, L, 3)
         gt_transl = inputs["smpl_params_c"]["transl"]  # (B, L, 3)
-        gt_pred_cam = get_a_pred_cam(gt_transl, inputs["bbx_xys"], inputs["K_fullimg"])  # (B, L, 3)
+        gt_pred_cam = get_a_pred_cam(
+            gt_transl, inputs["bbx_xys"], inputs["K_fullimg"]
+        )  # (B, L, 3)
         gt_pred_cam[gt_pred_cam.isinf()] = -1  # this will be handled by valid_mask
         # (compute_transl_full_cam(gt_pred_cam, inputs["bbx_xys"], inputs["K_fullimg"]) - gt_transl).abs().max()
 
@@ -460,8 +536,12 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
         gt_c_j3d_z0_mask = gt_c_j3d[..., 2].abs() <= reproj_z_thr
         gt_c_j3d[gt_c_j3d_z0_mask] = reproj_z_thr
 
-        pred_j2d_01 = project_to_bi01(pred_c_j3d, inputs["bbx_xys"], inputs["K_fullimg"])
-        gt_j2d_01 = project_to_bi01(gt_c_j3d, inputs["bbx_xys"], inputs["K_fullimg"])  # (B, L, J, 2)
+        pred_j2d_01 = project_to_bi01(
+            pred_c_j3d, inputs["bbx_xys"], inputs["K_fullimg"]
+        )
+        gt_j2d_01 = project_to_bi01(
+            gt_c_j3d, inputs["bbx_xys"], inputs["K_fullimg"]
+        )  # (B, L, J, 2)
 
         valid_mask = (
             (gt_c_j3d[..., 2] > reproj_z_thr)
@@ -480,7 +560,9 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
 
     if weights.cr_verts > 0:
         # SMPL forward
-        pred_c_verts437, pred_c_j17 = endecoder.smplx_model(**outputs["pred_smpl_params_incam"])
+        pred_c_verts437, pred_c_j17 = endecoder.smplx_model(
+            **outputs["pred_smpl_params_incam"]
+        )
         root_ = pred_c_j17[:, :, [11, 12], :].mean(-2, keepdim=True)
         pred_cr_verts437 = pred_c_verts437 - root_
 
@@ -500,8 +582,12 @@ def compute_extra_incam_loss(inputs, outputs, ppl):
         gt_c_verts437_z0_mask = gt_c_verts437[..., 2].abs() <= reproj_z_thr
         gt_c_verts437[gt_c_verts437_z0_mask] = reproj_z_thr
 
-        pred_verts2d_01 = project_to_bi01(pred_c_verts437, inputs["bbx_xys"], inputs["K_fullimg"])
-        gt_verts2d_01 = project_to_bi01(gt_c_verts437, inputs["bbx_xys"], inputs["K_fullimg"])  # (B, L, 437, 2)
+        pred_verts2d_01 = project_to_bi01(
+            pred_c_verts437, inputs["bbx_xys"], inputs["K_fullimg"]
+        )
+        gt_verts2d_01 = project_to_bi01(
+            gt_c_verts437, inputs["bbx_xys"], inputs["K_fullimg"]
+        )  # (B, L, 437, 2)
 
         valid_mask = (
             (gt_c_verts437[..., 2] > reproj_z_thr)
@@ -537,7 +623,9 @@ def compute_extra_global_loss(inputs, outputs, ppl):
         gt_transl_w = inputs["smpl_params_w"]["transl"]
         gt_global_orient_w = inputs["smpl_params_w"]["global_orient"]
         local_transl_vel = decode_dict["local_transl_vel"]
-        pred_transl_w = rollout_local_transl_vel(local_transl_vel, gt_global_orient_w, gt_transl_w[:, [0]])
+        pred_transl_w = rollout_local_transl_vel(
+            local_transl_vel, gt_global_orient_w, gt_transl_w[:, [0]]
+        )
 
         trans_w_loss = F.l1_loss(pred_transl_w, gt_transl_w, reduction="none")
         trans_w_loss = (trans_w_loss * mask[..., None]).mean()
@@ -549,13 +637,24 @@ def compute_extra_global_loss(inputs, outputs, ppl):
         # Compute gt by thresholding velocity
         vel_thr = args.static_conf.vel_thr
         assert vel_thr > 0
-        joint_ids = [7, 10, 8, 11, 20, 21]  # [L_Ankle, L_foot, R_Ankle, R_foot, L_wrist, R_wrist]
+        joint_ids = [
+            7,
+            10,
+            8,
+            11,
+            20,
+            21,
+        ]  # [L_Ankle, L_foot, R_Ankle, R_foot, L_wrist, R_wrist]
         gt_w_j3d = endecoder.fk_v2(**inputs["smpl_params_w"])  # (B, L, J=22, 3)
-        static_gt = get_static_joint_mask(gt_w_j3d, vel_thr=vel_thr, repeat_last=True)  # (B, L, J)
+        static_gt = get_static_joint_mask(
+            gt_w_j3d, vel_thr=vel_thr, repeat_last=True
+        )  # (B, L, J)
         static_gt = static_gt[:, :, joint_ids].float()  # (B, L, J')
         pred_static_conf_logits = outputs["model_output"]["static_conf_logits"]
 
-        static_conf_loss = F.binary_cross_entropy_with_logits(pred_static_conf_logits, static_gt, reduction="none")
+        static_conf_loss = F.binary_cross_entropy_with_logits(
+            pred_static_conf_logits, static_gt, reduction="none"
+        )
         static_conf_loss = (static_conf_loss * mask[..., None]).mean()
         extra_loss += static_conf_loss * weights.static_conf_bce
         extra_loss_dict["static_conf_loss"] = static_conf_loss
@@ -591,7 +690,9 @@ def get_smpl_params_w_Rt_v2(
 
     # Camera view direction in GV coordinate: Rc2gv @ [0,0,1]
     R_c2gv = R_gv @ R_c.mT
-    view_axis_gv = R_c2gv[:, :, :, 2]  # (B, L, 3)  Rc2gv is estimated, so the x-axis is not accurate, i.e. != 0
+    view_axis_gv = R_c2gv[
+        :, :, :, 2
+    ]  # (B, L, 3)  Rc2gv is estimated, so the x-axis is not accurate, i.e. != 0
 
     # Rotate axis use camera relative rotation
     R_cnext2gv = R_c2gv @ R_t_to_tp1.mT
@@ -605,7 +706,9 @@ def get_smpl_params_w_Rt_v2(
     vec2_xyz = F.normalize(vec2_xyz, dim=-1)
 
     aa_tp1_to_t = vec2_xyz.cross(vec1_xyz, dim=-1)
-    aa_tp1_to_t_angle = torch.acos(torch.clamp((vec1_xyz * vec2_xyz).sum(dim=-1, keepdim=True), -1.0, 1.0))
+    aa_tp1_to_t_angle = torch.acos(
+        torch.clamp((vec1_xyz * vec2_xyz).sum(dim=-1, keepdim=True), -1.0, 1.0)
+    )
     aa_tp1_to_t = F.normalize(aa_tp1_to_t, dim=-1) * aa_tp1_to_t_angle
 
     aa_tp1_to_t = gaussian_smooth(aa_tp1_to_t, dim=-2)  # Smooth
@@ -623,7 +726,9 @@ def get_smpl_params_w_Rt_v2(
     # Rollout to global transl
     # Start from transl0, in gv0 -> flip y-axis of gv0
     transl = rollout_local_transl_vel(local_transl_vel, global_orient)
-    global_orient, transl, _ = get_tgtcoord_rootparam(global_orient, transl, tsf="any->ay")
+    global_orient, transl, _ = get_tgtcoord_rootparam(
+        global_orient, transl, tsf="any->ay"
+    )
 
     smpl_params_w_Rt = {"global_orient": global_orient, "transl": transl}
     return smpl_params_w_Rt

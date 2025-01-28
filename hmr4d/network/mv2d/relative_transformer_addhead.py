@@ -2,13 +2,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import einsum, rearrange, repeat
-from hmr4d.configs import MainStore, builds
+from timm.models.vision_transformer import Mlp
 
+from hmr4d.configs import MainStore, builds
 from hmr4d.network.base_arch.transformer.encoder_rope import EncoderRoPEBlock
 from hmr4d.network.base_arch.transformer.layer import zero_module
-
 from hmr4d.utils.net_utils import length_to_mask
-from timm.models.vision_transformer import Mlp
 
 
 class NetworkEncoderRoPE(nn.Module):
@@ -33,7 +32,7 @@ class NetworkEncoderRoPE(nn.Module):
         dropout=0.1,
         # other
         avgbeta=True,
-        num_views=4
+        num_views=4,
     ):
         super().__init__()
 
@@ -58,7 +57,10 @@ class NetworkEncoderRoPE(nn.Module):
         self.learned_pos_linear = nn.Linear(2, 32)
         self.learned_pos_params = nn.Parameter(torch.randn(17, 32), requires_grad=True)
         self.embed_noisyobs = Mlp(
-            17 * 32, hidden_features=self.latent_dim * 2, out_features=self.latent_dim, drop=dropout
+            17 * 32,
+            hidden_features=self.latent_dim * 2,
+            out_features=self.latent_dim,
+            drop=dropout,
         )
 
         self._build_condition_embedder()
@@ -66,22 +68,33 @@ class NetworkEncoderRoPE(nn.Module):
         # Transformer
         self.blocks = nn.ModuleList(
             [
-                EncoderRoPEBlock(self.latent_dim, self.num_heads, mlp_ratio=mlp_ratio, dropout=dropout)
+                EncoderRoPEBlock(
+                    self.latent_dim,
+                    self.num_heads,
+                    mlp_ratio=mlp_ratio,
+                    dropout=dropout,
+                )
                 for _ in range(self.num_layers)
             ]
         )
-        
+
         self.num_views = num_views
         self.mv2d_dim = num_views * 17 * 2
         self.mv2d_head = Mlp(self.latent_dim, out_features=self.mv2d_dim)
 
         # Output heads
         self.final_layer = Mlp(self.latent_dim, out_features=self.output_dim)
-        self.pred_cam_head = pred_cam_dim > 0  # keep extra_output for easy-loading old ckpt
+        self.pred_cam_head = (
+            pred_cam_dim > 0
+        )  # keep extra_output for easy-loading old ckpt
         if self.pred_cam_head:
             self.pred_cam_head = Mlp(self.latent_dim, out_features=pred_cam_dim)
-            self.register_buffer("pred_cam_mean", torch.tensor([1.0606, -0.0027, 0.2702]), False)
-            self.register_buffer("pred_cam_std", torch.tensor([0.1784, 0.0956, 0.0764]), False)
+            self.register_buffer(
+                "pred_cam_mean", torch.tensor([1.0606, -0.0027, 0.2702]), False
+            )
+            self.register_buffer(
+                "pred_cam_std", torch.tensor([0.1784, 0.0956, 0.0764]), False
+            )
 
         self.static_conf_head = static_conf_dim > 0
         if self.static_conf_head:
@@ -111,7 +124,15 @@ class NetworkEncoderRoPE(nn.Module):
                 zero_module(nn.Linear(self.imgseq_dim, latent_dim)),
             )
 
-    def forward(self, length, obs=None, f_cliffcam=None, f_cam_angvel=None, f_imgseq=None, **kwargs):
+    def forward(
+        self,
+        length,
+        obs=None,
+        f_cliffcam=None,
+        f_cam_angvel=None,
+        f_imgseq=None,
+        **kwargs,
+    ):
         """
         Args:
             x: None we do not use it
@@ -130,7 +151,10 @@ class NetworkEncoderRoPE(nn.Module):
         visible_mask = obs[..., [2]] > 0.5  # (B, L, J, 1)
         obs[~visible_mask[..., 0]] = 0  # set low-conf to all zeros
         f_obs = self.learned_pos_linear(obs[..., :2])  # (B, L, J, 32)
-        f_obs = f_obs * visible_mask + self.learned_pos_params.repeat(B, L, 1, 1) * ~visible_mask
+        f_obs = (
+            f_obs * visible_mask
+            + self.learned_pos_params.repeat(B, L, 1, 1) * ~visible_mask
+        )
         x = self.embed_noisyobs(f_obs.view(B, L, -1))  # (B, L, J*32) -> (B, L, C)
 
         # Condition
@@ -166,11 +190,13 @@ class NetworkEncoderRoPE(nn.Module):
         # MV2D
         mv2d = self.mv2d_head(x)
         mv2d = mv2d.view(B, L, self.num_views, 17, 2)
-        
+
         # Output
         sample = self.final_layer(x)  # (B, L, C)
         if self.avgbeta:
-            betas = (sample[..., 126:136] * (~pmask[..., None])).sum(1) / length[:, None]  # (B, C)
+            betas = (sample[..., 126:136] * (~pmask[..., None])).sum(1) / length[
+                :, None
+            ]  # (B, C)
             betas = repeat(betas, "b c -> b l c", l=L)
             sample = torch.cat([sample[..., :126], betas, sample[..., 136:]], dim=-1)
 
@@ -179,7 +205,9 @@ class NetworkEncoderRoPE(nn.Module):
         if self.pred_cam_head:
             pred_cam = self.pred_cam_head(x)
             pred_cam = pred_cam * self.pred_cam_std + self.pred_cam_mean
-            torch.clamp_min_(pred_cam[..., 0], 0.25)  # min_clamp s to 0.25 (prevent negative prediction)
+            torch.clamp_min_(
+                pred_cam[..., 0], 0.25
+            )  # min_clamp s to 0.25 (prevent negative prediction)
 
         static_conf_logits = None
         if self.static_conf_head:

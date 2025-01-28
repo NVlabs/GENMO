@@ -1,16 +1,17 @@
+import math
+import random
+
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
-from torch.utils.data import Dataset, DataLoader
 from pytorch_lightning.loggers import WandbLogger
+from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
+
 from hmr4d.network.mdm.mdm_denoiser_rope import PositionalEncoding, TimestepEmbedder
 from motiondiff.diffusion import gaussian_diffusion as gd
-from motiondiff.diffusion.respace import SpacedDiffusion, space_timesteps
 from motiondiff.diffusion.resample import create_named_schedule_sampler
-
-import random
-from tqdm import tqdm
-import math
+from motiondiff.diffusion.respace import SpacedDiffusion, space_timesteps
 
 
 class MLPModel(nn.Module):
@@ -29,7 +30,7 @@ class MLPModel(nn.Module):
         )
         sequence_time_encoder = PositionalEncoding(128, dropout=0.1)
         self.embed_timestep = TimestepEmbedder(128, sequence_time_encoder)
-    
+
     def forward(self, x, t, cond):
         emb = self.embed_timestep(t.long()).permute(1, 0, 2).squeeze(1)
         x = torch.cat([x, cond], dim=-1)
@@ -46,9 +47,8 @@ class RfDataset(Dataset):
 
     def __len__(self):
         return self.length
-    
-    def __getitem__(self, idx):
 
+    def __getitem__(self, idx):
         z0 = torch.randn(2)
         # if self.train:
         #     cond = torch.rand(2)
@@ -72,7 +72,8 @@ class RfDataset(Dataset):
         #     z1[0] = z1[0] - 5
         #     z1[1] = z1[1] + 5
 
-        return {'z0': z0, 'cond': cond, 'z1': z1}
+        return {"z0": z0, "cond": cond, "z1": z1}
+
 
 def _extract_into_tensor(arr, timesteps, broadcast_shape):
     """
@@ -137,26 +138,24 @@ if __name__ == "__main__":
     random.seed(42)
     np.random.seed(42)
     pred_mode = "z1"  # 'drift'
-    pred_mode = 'z1_abs'
+    pred_mode = "z1_abs"
     pred_mode = "drift"
     schedule_sampler_type = "uniform"
 
     train_cond = torch.randn(10000, 1)
     z1 = torch.randn(10000, 2)
     z1[:, :1] = train_cond * 5  # the first dimension is the condition * 5
-    torch.save(train_cond, 'rf_base_train_cond.pth')
-    torch.save(z1, 'rf_base_train_z1.pth')
+    torch.save(train_cond, "rf_base_train_cond.pth")
+    torch.save(z1, "rf_base_train_z1.pth")
 
     model = MLPModel()
     diffusion = create_gaussian_diffusion(training=True)
-    schedule_sampler = create_named_schedule_sampler(
-        schedule_sampler_type, diffusion
-    )
+    schedule_sampler = create_named_schedule_sampler(schedule_sampler_type, diffusion)
     test_diffusion = create_gaussian_diffusion(training=False)
     dataset = RfDataset(10000, cond=train_cond, z1=z1)
     dataloader = DataLoader(dataset, batch_size=256, shuffle=True)
 
-    device = 'cuda'
+    device = "cuda"
     num_epochs = 100
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -168,10 +167,18 @@ if __name__ == "__main__":
 
     # Training
     epoch = 0
-    pbar = tqdm(total=num_epochs * len(dataset), desc=f"Epoch {epoch}/{num_epochs}", dynamic_ncols=True)
+    pbar = tqdm(
+        total=num_epochs * len(dataset),
+        desc=f"Epoch {epoch}/{num_epochs}",
+        dynamic_ncols=True,
+    )
     for epoch in range(num_epochs):
         for batch in dataloader:
-            gt_z0, cond, z1 = batch['z0'].to(device), batch['cond'].to(device), batch['z1'].to(device)
+            gt_z0, cond, z1 = (
+                batch["z0"].to(device),
+                batch["cond"].to(device),
+                batch["z1"].to(device),
+            )
             z0 = torch.randn_like(gt_z0).to(device)
             t = (torch.rand(z0.shape[0], device=z0.device) * 1000).long()
             t_expand = t.view(-1, 1).repeat(1, z0.shape[1])
@@ -187,7 +194,7 @@ if __name__ == "__main__":
 
             pbar.set_description(f"Epoch {epoch}/{num_epochs} - Loss: {loss.item()}")
             pbar.update(z1.shape[0])
-    
+
     # Sampling
     # sample_N = 100
     model.eval()
@@ -201,11 +208,12 @@ if __name__ == "__main__":
         cond = torch.cat([cond1, cond2], dim=0)
         intermediate_z = [x.cpu().numpy()]
         for k, i in enumerate(indices):
-
             t = torch.tensor([i] * z0.shape[0], device=device)
 
             alpha_bar = _extract_into_tensor(test_diffusion.alphas_cumprod, t, z0.shape)
-            alpha_bar_prev = _extract_into_tensor(test_diffusion.alphas_cumprod_prev, t, z0.shape)
+            alpha_bar_prev = _extract_into_tensor(
+                test_diffusion.alphas_cumprod_prev, t, z0.shape
+            )
 
             out_orig = test_diffusion.p_mean_variance(
                 model,
@@ -213,8 +221,8 @@ if __name__ == "__main__":
                 t,
                 clip_denoised=False,
                 denoised_fn=None,
-                model_kwargs={'cond': cond.clone()},
-                model_output=None
+                model_kwargs={"cond": cond.clone()},
+                model_output=None,
             )
             eps = test_diffusion._predict_eps_from_xstart(x, t, out_orig["pred_xstart"])
             eta = 0.0
@@ -227,7 +235,7 @@ if __name__ == "__main__":
             noise = torch.randn_like(x)
             mean_pred = (
                 out_orig["pred_xstart"] * torch.sqrt(alpha_bar_prev)
-                + torch.sqrt(1 - alpha_bar_prev - sigma ** 2) * eps
+                + torch.sqrt(1 - alpha_bar_prev - sigma**2) * eps
             )
             nonzero_mask = (
                 (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
@@ -247,14 +255,20 @@ if __name__ == "__main__":
         # cond2 = torch.ones(noise.shape[0] // 2, 1).to(device) * -1
 
         # cond = torch.cat([cond1, cond2], dim=0)
-        cond = torch.arange(-1, 1, 1.0 / (noise.shape[0] // 2)).to(device).reshape(-1, 1)
+        cond = (
+            torch.arange(-1, 1, 1.0 / (noise.shape[0] // 2)).to(device).reshape(-1, 1)
+        )
         indices = list(range(test_diffusion.num_timesteps - 1))[::-1]
 
         for k, i in enumerate(indices):
             vec_t = torch.tensor([i] * noise.shape[0], device=device)
 
-            alpha_bar = _extract_into_tensor(test_diffusion.alphas_cumprod, vec_t, noise.shape)
-            alpha_bar_prev = _extract_into_tensor(test_diffusion.alphas_cumprod_prev, vec_t, noise.shape)
+            alpha_bar = _extract_into_tensor(
+                test_diffusion.alphas_cumprod, vec_t, noise.shape
+            )
+            alpha_bar_prev = _extract_into_tensor(
+                test_diffusion.alphas_cumprod_prev, vec_t, noise.shape
+            )
 
             out_orig = test_diffusion.p_mean_variance(
                 model,
@@ -262,10 +276,12 @@ if __name__ == "__main__":
                 vec_t,
                 clip_denoised=False,
                 denoised_fn=None,
-                model_kwargs={'cond': cond},
-                model_output=None
+                model_kwargs={"cond": cond},
+                model_output=None,
             )
-            eps = test_diffusion._predict_eps_from_xstart(x, vec_t, out_orig["pred_xstart"])
+            eps = test_diffusion._predict_eps_from_xstart(
+                x, vec_t, out_orig["pred_xstart"]
+            )
             eta = 0.0
             sigma = (
                 eta
@@ -276,7 +292,7 @@ if __name__ == "__main__":
             noise = torch.randn_like(x)
             mean_pred = (
                 out_orig["pred_xstart"] * torch.sqrt(alpha_bar_prev)
-                + torch.sqrt(1 - alpha_bar_prev - sigma ** 2) * eps
+                + torch.sqrt(1 - alpha_bar_prev - sigma**2) * eps
             )
             nonzero_mask = (
                 (vec_t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
@@ -284,19 +300,45 @@ if __name__ == "__main__":
             x = mean_pred + nonzero_mask * sigma * noise
 
         pred = x.cpu().numpy()
-        err = ((pred[:, :1] -  5 * cond.cpu().numpy()) ** 2).mean() * 1000
-        print(f'Error DM: {err}')
+        err = ((pred[:, :1] - 5 * cond.cpu().numpy()) ** 2).mean() * 1000
+        print(f"Error DM: {err}")
 
     # Visualization
     import matplotlib.pyplot as plt
-    for bid in range(0, len(intermediate_z), 10):
-        plt.plot(intermediate_z[bid][:, 0], intermediate_z[bid][:, 1], color='black', alpha=0.5)
 
-    plt.scatter(z0[z0.shape[0] // 2:, 0][::10], z0[z0.shape[0] // 2:, 1][::10], label='cond2_z0', color='red')
-    plt.scatter(z0[:z0.shape[0] // 2, 0][::10], z0[:z0.shape[0] // 2, 1][::10], label='cond1_z0', color='blue')
-    plt.scatter(z1[z1.shape[0] // 2:, 0][::10], z1[z1.shape[0] // 2:, 1][::10], label='cond2_z1', color='red')
-    plt.scatter(z1[:z1.shape[0] // 2, 0][::10], z1[:z1.shape[0] // 2, 1][::10], label='cond1_z1', color='blue')
+    for bid in range(0, len(intermediate_z), 10):
+        plt.plot(
+            intermediate_z[bid][:, 0],
+            intermediate_z[bid][:, 1],
+            color="black",
+            alpha=0.5,
+        )
+
+    plt.scatter(
+        z0[z0.shape[0] // 2 :, 0][::10],
+        z0[z0.shape[0] // 2 :, 1][::10],
+        label="cond2_z0",
+        color="red",
+    )
+    plt.scatter(
+        z0[: z0.shape[0] // 2, 0][::10],
+        z0[: z0.shape[0] // 2, 1][::10],
+        label="cond1_z0",
+        color="blue",
+    )
+    plt.scatter(
+        z1[z1.shape[0] // 2 :, 0][::10],
+        z1[z1.shape[0] // 2 :, 1][::10],
+        label="cond2_z1",
+        color="red",
+    )
+    plt.scatter(
+        z1[: z1.shape[0] // 2, 0][::10],
+        z1[: z1.shape[0] // 2, 1][::10],
+        label="cond1_z1",
+        color="blue",
+    )
     plt.legend()
-    plt.savefig('dm.png')
-    torch.save(model.state_dict(), 'dm.pth')
-    torch.save(cond, 'dm_cond.pth')
+    plt.savefig("dm.png")
+    torch.save(model.state_dict(), "dm.pth")
+    torch.save(cond, "dm_cond.pth")

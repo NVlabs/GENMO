@@ -1,13 +1,21 @@
 import torch
-from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix, matrix_to_axis_angle, matrix_to_quaternion, quaternion_to_matrix
+
 import hmr4d.utils.matrix as matrix
 from hmr4d.utils.net_utils import gaussian_smooth
+from motiondiff.models.mdm.rotation_conversions import (
+    axis_angle_to_matrix,
+    matrix_to_axis_angle,
+    matrix_to_quaternion,
+    quaternion_to_matrix,
+)
 
 
 class KalmanFilter:
     def __init__(self, initial_state, process_variance, measurement_variance, device):
         self.state_estimate = initial_state.to(device)
-        self.estimate_covariance = torch.tensor(1.0).to(device)  # Initial estimate covariance
+        self.estimate_covariance = torch.tensor(1.0).to(
+            device
+        )  # Initial estimate covariance
         self.process_variance = process_variance
         self.measurement_variance = measurement_variance
 
@@ -17,13 +25,15 @@ class KalmanFilter:
 
     def update(self, measurement):
         # Compute Kalman Gain
-        kalman_gain = self.estimate_covariance / (self.estimate_covariance + self.measurement_variance)
-        
+        kalman_gain = self.estimate_covariance / (
+            self.estimate_covariance + self.measurement_variance
+        )
+
         # Update the state estimate
         self.state_estimate += kalman_gain * (measurement - self.state_estimate)
-        
+
         # Update the estimate covariance
-        self.estimate_covariance *= (1 - kalman_gain)
+        self.estimate_covariance *= 1 - kalman_gain
 
     def get_state(self):
         return self.state_estimate
@@ -37,7 +47,9 @@ def get_R_c2gv(R_w2c, axis_gravity_in_w=[0, 0, -1]):
         R_c2gv: (*, 3, 3)
     """
     if isinstance(axis_gravity_in_w, list):
-        axis_gravity_in_w = torch.tensor(axis_gravity_in_w).float()  # gravity direction in world coord
+        axis_gravity_in_w = torch.tensor(
+            axis_gravity_in_w
+        ).float()  # gravity direction in world coord
     axis_z_in_c = torch.tensor([0, 0, 1]).float()
 
     # get gv-coord axes in in c-coord
@@ -46,10 +58,14 @@ def get_R_c2gv(R_w2c, axis_gravity_in_w=[0, 0, -1]):
     # normalize
     axis_x_of_gv_norm = axis_x_of_gv.norm(dim=-1, keepdim=True)
     axis_x_of_gv = axis_x_of_gv / (axis_x_of_gv_norm + 1e-5)
-    axis_x_of_gv[axis_x_of_gv_norm.squeeze(-1) < 1e-5] = torch.tensor([1.0, 0.0, 0.0])  # use cam x-axis as axis_x_of_gv
+    axis_x_of_gv[axis_x_of_gv_norm.squeeze(-1) < 1e-5] = torch.tensor(
+        [1.0, 0.0, 0.0]
+    )  # use cam x-axis as axis_x_of_gv
     axis_z_of_gv = axis_x_of_gv.cross(axis_y_of_gv, dim=-1)
 
-    R_gv2c = torch.stack([axis_x_of_gv, axis_y_of_gv, axis_z_of_gv], dim=-1)  # (*, 3, 3)
+    R_gv2c = torch.stack(
+        [axis_x_of_gv, axis_y_of_gv, axis_z_of_gv], dim=-1
+    )  # (*, 3, 3)
     R_c2gv = R_gv2c.transpose(-1, -2)  # (*, 3, 3)
     return R_c2gv
 
@@ -62,7 +78,9 @@ tsf_axisangle = {
 }
 
 
-def get_tgtcoord_rootparam(global_orient, transl, gravity_vec=None, tgt_gravity_vec=None, tsf="ay->ay"):
+def get_tgtcoord_rootparam(
+    global_orient, transl, gravity_vec=None, tgt_gravity_vec=None, tsf="ay->ay"
+):
     """Rotate around the origin center, to match the new gravity direction
     Args:
         global_orient: torch.tensor, (*, 3)
@@ -127,7 +145,9 @@ def get_c_rootparam(global_orient, transl, T_w2c, offset):
     return R_c, t_c
 
 
-def get_T_w2c_from_wcparams(global_orient_w, transl_w, global_orient_c, transl_c, offset):
+def get_T_w2c_from_wcparams(
+    global_orient_w, transl_w, global_orient_c, transl_c, offset
+):
     """
     Args:
         global_orient_w: torch.tensor, (F, 3)
@@ -148,7 +168,9 @@ def get_T_w2c_from_wcparams(global_orient_w, transl_w, global_orient_c, transl_c
 
     R_w2c = R_c @ R_w.transpose(-1, -2)  # (F, 3, 3)
     t_w2c = t_c + offset - torch.einsum("fij,fj->fi", R_w2c, t_w + offset)  # (F, 3)
-    T_w2c = torch.eye(4, device=global_orient_w.device).repeat(R_w.size(0), 1, 1)  # (F, 4, 4)
+    T_w2c = torch.eye(4, device=global_orient_w.device).repeat(
+        R_w.size(0), 1, 1
+    )  # (F, 4, 4)
     T_w2c[..., :3, :3] = R_w2c  # (F, 3, 3)
     T_w2c[..., :3, 3] = t_w2c  # (F, 3)
     return T_w2c
@@ -166,7 +188,9 @@ def get_local_transl_vel(transl, global_orient):
     assert len(transl.shape) == len(global_orient.shape)
     global_orient_R = axis_angle_to_matrix(global_orient)  # (B, L, 3, 3)
     transl_vel = transl[..., 1:, :] - transl[..., :-1, :]  # (B, L-1, 3)
-    transl_vel = torch.cat([transl_vel, transl_vel[..., [-1], :]], dim=-2)  # (B, L, 3)  last-padding
+    transl_vel = torch.cat(
+        [transl_vel, transl_vel[..., [-1], :]], dim=-2
+    )  # (B, L, 3)  last-padding
 
     # v_local = R^T @ v_global
     local_transl_vel = torch.einsum("...lij,...li->...lj", global_orient_R, transl_vel)
@@ -202,7 +226,9 @@ def get_local_transl_vel_alignhead(transl, global_orient):
     global_orient_quat = matrix_to_quaternion(global_orient_rot)  # (*, 4)
 
     global_orient_quat_xyzw = matrix.quat_wxyz2xyzw(global_orient_quat)  # (*, 4)
-    head_quat_xyzw = matrix.calc_heading_quat(global_orient_quat_xyzw, head_ind=2, gravity_axis="y")  # (*, 4)
+    head_quat_xyzw = matrix.calc_heading_quat(
+        global_orient_quat_xyzw, head_ind=2, gravity_axis="y"
+    )  # (*, 4)
     head_quat = matrix.quat_xyzw2wxyz(head_quat_xyzw)  # (*, 4)
     head_rot = quaternion_to_matrix(head_quat)
     head_aa = matrix_to_axis_angle(head_rot)
@@ -211,13 +237,17 @@ def get_local_transl_vel_alignhead(transl, global_orient):
     return local_transl_vel_alignhead
 
 
-def rollout_local_transl_vel_alignhead(local_transl_vel_alignhead, global_orient, transl_0=None):
+def rollout_local_transl_vel_alignhead(
+    local_transl_vel_alignhead, global_orient, transl_0=None
+):
     # assume global_orient is ay
     global_orient_rot = axis_angle_to_matrix(global_orient)  # (*, 3, 3)
     global_orient_quat = matrix_to_quaternion(global_orient_rot)  # (*, 4)
 
     global_orient_quat_xyzw = matrix.quat_wxyz2xyzw(global_orient_quat)  # (*, 4)
-    head_quat_xyzw = matrix.calc_heading_quat(global_orient_quat_xyzw, head_ind=2, gravity_axis="y")  # (*, 4)
+    head_quat_xyzw = matrix.calc_heading_quat(
+        global_orient_quat_xyzw, head_ind=2, gravity_axis="y"
+    )  # (*, 4)
     head_quat = matrix.quat_xyzw2wxyz(head_quat_xyzw)  # (*, 4)
     head_rot = quaternion_to_matrix(head_quat)
     head_aa = matrix_to_axis_angle(head_rot)
@@ -232,7 +262,9 @@ def get_local_transl_vel_alignhead_absy(transl, global_orient):
     global_orient_quat = matrix_to_quaternion(global_orient_rot)  # (*, 4)
 
     global_orient_quat_xyzw = matrix.quat_wxyz2xyzw(global_orient_quat)  # (*, 4)
-    head_quat_xyzw = matrix.calc_heading_quat(global_orient_quat_xyzw, head_ind=2, gravity_axis="y")  # (*, 4)
+    head_quat_xyzw = matrix.calc_heading_quat(
+        global_orient_quat_xyzw, head_ind=2, gravity_axis="y"
+    )  # (*, 4)
     head_quat = matrix.quat_xyzw2wxyz(head_quat_xyzw)  # (*, 4)
     head_rot = quaternion_to_matrix(head_quat)
     head_aa = matrix_to_axis_angle(head_rot)
@@ -240,28 +272,39 @@ def get_local_transl_vel_alignhead_absy(transl, global_orient):
     local_transl_vel_alignhead = get_local_transl_vel(transl, head_aa)
     abs_y = torch.cumsum(local_transl_vel_alignhead[..., [1]], dim=-2)  # (*, L, 1)
     local_transl_vel_alignhead_absy = torch.cat(
-        [local_transl_vel_alignhead[..., [0]], abs_y, local_transl_vel_alignhead[..., [2]]], dim=-1
+        [
+            local_transl_vel_alignhead[..., [0]],
+            abs_y,
+            local_transl_vel_alignhead[..., [2]],
+        ],
+        dim=-1,
     )
 
     return local_transl_vel_alignhead_absy
 
 
-def rollout_local_transl_vel_alignhead_absy(local_transl_vel_alignhead_absy, global_orient, transl_0=None):
+def rollout_local_transl_vel_alignhead_absy(
+    local_transl_vel_alignhead_absy, global_orient, transl_0=None
+):
     # assume global_orient is ay
     global_orient_rot = axis_angle_to_matrix(global_orient)  # (*, 3, 3)
     global_orient_quat = matrix_to_quaternion(global_orient_rot)  # (*, 4)
 
     global_orient_quat_xyzw = matrix.quat_wxyz2xyzw(global_orient_quat)  # (*, 4)
-    head_quat_xyzw = matrix.calc_heading_quat(global_orient_quat_xyzw, head_ind=2, gravity_axis="y")  # (*, 4)
+    head_quat_xyzw = matrix.calc_heading_quat(
+        global_orient_quat_xyzw, head_ind=2, gravity_axis="y"
+    )  # (*, 4)
     head_quat = matrix.quat_xyzw2wxyz(head_quat_xyzw)  # (*, 4)
     head_rot = quaternion_to_matrix(head_quat)
     head_aa = matrix_to_axis_angle(head_rot)
 
     local_transl_vel_alignhead_y = (
-        local_transl_vel_alignhead_absy[..., 1:, [1]] - local_transl_vel_alignhead_absy[..., :-1, [1]]
+        local_transl_vel_alignhead_absy[..., 1:, [1]]
+        - local_transl_vel_alignhead_absy[..., :-1, [1]]
     )
     local_transl_vel_alignhead_y = torch.cat(
-        [local_transl_vel_alignhead_absy[..., :1, [1]], local_transl_vel_alignhead_y], dim=-2
+        [local_transl_vel_alignhead_absy[..., :1, [1]], local_transl_vel_alignhead_y],
+        dim=-2,
     )
     local_transl_vel_alignhead = torch.cat(
         [
@@ -282,7 +325,9 @@ def get_local_transl_vel_alignhead_absgy(transl, global_orient):
     global_orient_quat = matrix_to_quaternion(global_orient_rot)  # (*, 4)
 
     global_orient_quat_xyzw = matrix.quat_wxyz2xyzw(global_orient_quat)  # (*, 4)
-    head_quat_xyzw = matrix.calc_heading_quat(global_orient_quat_xyzw, head_ind=2, gravity_axis="y")  # (*, 4)
+    head_quat_xyzw = matrix.calc_heading_quat(
+        global_orient_quat_xyzw, head_ind=2, gravity_axis="y"
+    )  # (*, 4)
     head_quat = matrix.quat_xyzw2wxyz(head_quat_xyzw)  # (*, 4)
     head_rot = quaternion_to_matrix(head_quat)
     head_aa = matrix_to_axis_angle(head_rot)
@@ -290,28 +335,39 @@ def get_local_transl_vel_alignhead_absgy(transl, global_orient):
     local_transl_vel_alignhead = get_local_transl_vel(transl, head_aa)
     abs_y = transl[..., [1]]  # (*, L, 1)
     local_transl_vel_alignhead_absy = torch.cat(
-        [local_transl_vel_alignhead[..., [0]], abs_y, local_transl_vel_alignhead[..., [2]]], dim=-1
+        [
+            local_transl_vel_alignhead[..., [0]],
+            abs_y,
+            local_transl_vel_alignhead[..., [2]],
+        ],
+        dim=-1,
     )
 
     return local_transl_vel_alignhead_absy
 
 
-def rollout_local_transl_vel_alignhead_absgy(local_transl_vel_alignhead_absgy, global_orient, transl_0=None):
+def rollout_local_transl_vel_alignhead_absgy(
+    local_transl_vel_alignhead_absgy, global_orient, transl_0=None
+):
     # assume global_orient is ay
     global_orient_rot = axis_angle_to_matrix(global_orient)  # (*, 3, 3)
     global_orient_quat = matrix_to_quaternion(global_orient_rot)  # (*, 4)
 
     global_orient_quat_xyzw = matrix.quat_wxyz2xyzw(global_orient_quat)  # (*, 4)
-    head_quat_xyzw = matrix.calc_heading_quat(global_orient_quat_xyzw, head_ind=2, gravity_axis="y")  # (*, 4)
+    head_quat_xyzw = matrix.calc_heading_quat(
+        global_orient_quat_xyzw, head_ind=2, gravity_axis="y"
+    )  # (*, 4)
     head_quat = matrix.quat_xyzw2wxyz(head_quat_xyzw)  # (*, 4)
     head_rot = quaternion_to_matrix(head_quat)
     head_aa = matrix_to_axis_angle(head_rot)
 
     local_transl_vel_alignhead_y = (
-        local_transl_vel_alignhead_absgy[..., 1:, [1]] - local_transl_vel_alignhead_absgy[..., :-1, [1]]
+        local_transl_vel_alignhead_absgy[..., 1:, [1]]
+        - local_transl_vel_alignhead_absgy[..., :-1, [1]]
     )
     local_transl_vel_alignhead_y = torch.cat(
-        [local_transl_vel_alignhead_y, local_transl_vel_alignhead_y[..., -1:, :]], dim=-2
+        [local_transl_vel_alignhead_y, local_transl_vel_alignhead_y[..., -1:, :]],
+        dim=-2,
     )
     if transl_0 is not None:
         transl_0 = transl_0.clone()
@@ -358,19 +414,25 @@ def get_static_joint_mask(w_j3d, vel_thr=0.25, smooth=False, repeat_last=False):
     w_j3d: (*, L, J, 3)
     vel_thr: HuMoR uses 0.15m/s
     """
-    joint_v_ = (w_j3d[..., 1:, :, :] - w_j3d[..., :-1, :, :]).pow(2).sum(-1).sqrt() / 0.033  # (*, L-1, J)
+    joint_v_ = (w_j3d[..., 1:, :, :] - w_j3d[..., :-1, :, :]).pow(2).sum(
+        -1
+    ).sqrt() / 0.033  # (*, L-1, J)
     if smooth:
         joint_v_ = gaussian_smooth(joint_v_, 3, -2)
 
     static_joint_mask = joint_v_ < vel_thr  # 1 as stable, 0 as moving
 
     if repeat_last:  # repeat the last frame, this makes the shape same as w_j3d
-        static_joint_mask = torch.cat([static_joint_mask, static_joint_mask[..., [-1], :]], dim=-2)
+        static_joint_mask = torch.cat(
+            [static_joint_mask, static_joint_mask[..., [-1], :]], dim=-2
+        )
 
     return static_joint_mask
 
 
-def estimate_camscale(smpl_param_c, smpl_param_w, T_w2c, offset, slam_scale, mean_scale):
+def estimate_camscale(
+    smpl_param_c, smpl_param_w, T_w2c, offset, slam_scale, mean_scale
+):
     bs = T_w2c.shape[0]
     device = T_w2c.device
     # 1. align the camera view direction
@@ -406,7 +468,9 @@ def estimate_camscale(smpl_param_c, smpl_param_w, T_w2c, offset, slam_scale, mea
 
     vel_est = est_t_c2w[1:] - est_t_c2w[:-1]
     vel_slam = slam_t_c2w[1:] - slam_t_c2w[:-1]
-    scale_hmr_c2w = torch.sum(vel_est * vel_slam, dim=-1) / (torch.norm(vel_slam, dim=-1) * torch.norm(vel_slam, dim=-1))
+    scale_hmr_c2w = torch.sum(vel_est * vel_slam, dim=-1) / (
+        torch.norm(vel_slam, dim=-1) * torch.norm(vel_slam, dim=-1)
+    )
     # norm_vel_est = torch.norm(vel_est, dim=-1)
     # norm_vel_slam = torch.norm(vel_slam, dim=-1)
     # scale_hmr_c2w = (norm_vel_est / norm_vel_slam) * torch.sign(torch.sum(vel_est * vel_slam, dim=-1))

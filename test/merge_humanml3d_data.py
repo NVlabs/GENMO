@@ -13,12 +13,14 @@ from motiondiff.models.mdm.rotation_conversions import (
 )
 from motiondiff.utils.vis_scenepic import ScenepicVisualizer
 
-device = 'cuda:0'
-split = 'test'
+device = "cuda:0"
+split = "test"
 data_file = f"/home/jiefengl/git/HumanML3D/HumanML3D/{split}.txt"
 text_dir = "/home/jiefengl/git/HumanML3D/HumanML3D/texts/"
 motion_dir = "/home/jiefengl/git/HumanML3D/pose_smplh_v2/"
-sp_visualizer = ScenepicVisualizer("/home/jiefengl/git/physdiff_megm/data/smpl_data", device=device)
+sp_visualizer = ScenepicVisualizer(
+    "/home/jiefengl/git/physdiff_megm/data/smpl_data", device=device
+)
 trans_matrix = torch.tensor(
     [
         [-1.0, 0.0, 0.0],
@@ -27,9 +29,9 @@ trans_matrix = torch.tensor(
     ]
 )
 smpl_dict = {
-    'male': make_smplx(type="supermotion_smpl24_male"),
-    'female': make_smplx(type="supermotion_smpl24_female"),
-    'neutral': make_smplx(type="supermotion_smpl24"),
+    "male": make_smplx(type="supermotion_smpl24_male"),
+    "female": make_smplx(type="supermotion_smpl24_female"),
+    "neutral": make_smplx(type="supermotion_smpl24"),
 }
 
 with open(data_file, "r") as f:
@@ -76,7 +78,7 @@ for line in tqdm(lines):
     with cs.open(text_file) as f:
         for caption_line in f.readlines():
             text_dict = {}
-            line_split = caption_line.split('#')
+            line_split = caption_line.split("#")
             caption = line_split[0]
             tokens = line_split[1:]
             f_tag = float(line_split[2])
@@ -84,21 +86,21 @@ for line in tqdm(lines):
             f_tag = 0.0 if np.isnan(f_tag) else f_tag
             to_tag = 0.0 if np.isnan(to_tag) else to_tag
 
-            text_dict['caption'] = caption
-            text_dict['tokens'] = tokens
+            text_dict["caption"] = caption
+            text_dict["tokens"] = tokens
             if f_tag == 0.0 and to_tag == 0.0:
                 flag = True
                 text_data.append(text_dict)
             else:
                 # try:
-                n_pose = pose[int(f_tag*20) : int(to_tag*20)]
-                n_trans = trans[int(f_tag*20) : int(to_tag*20)]
+                n_pose = pose[int(f_tag * 20) : int(to_tag * 20)]
+                n_trans = trans[int(f_tag * 20) : int(to_tag * 20)]
 
                 if (len(n_pose)) < 25 or (len(n_pose) >= 200):
                     continue
-                new_name = random.choice('ABCDEFGHIJKLMNOPQRSTUVW') + '_' + name
+                new_name = random.choice("ABCDEFGHIJKLMNOPQRSTUVW") + "_" + name
                 while new_name in db:
-                    new_name = random.choice('ABCDEFGHIJKLMNOPQRSTUVW') + '_' + name
+                    new_name = random.choice("ABCDEFGHIJKLMNOPQRSTUVW") + "_" + name
                 db[new_name] = {
                     "pose": n_pose,
                     "trans": n_trans,

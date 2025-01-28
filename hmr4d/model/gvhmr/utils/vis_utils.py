@@ -1,10 +1,10 @@
 import os
 
+import cv2
 import numpy as np
 import torch
 import wandb
 from einops import einsum, rearrange
-import cv2
 
 from hmr4d.utils.geo.hmr_cam import (
     convert_K_to_K4,
@@ -34,11 +34,42 @@ from motiondiff.models.mdm.rotation_conversions import (
 from motiondiff.utils.tools import wandb_run_exists
 from motiondiff.utils.vis_scenepic import ScenepicVisualizer
 
-sp_visualizer = ScenepicVisualizer("inputs/smpl_data", device='cuda')
+sp_visualizer = ScenepicVisualizer("inputs/smpl_data", device="cuda")
 
 CRF = 23  # 17 is lossless, every +6 halves the mp4 size
-color_sequences = ['Yellow', 'Green', 'Teal', 'Red', 'Blue', 'Purple', 'Orange', 'Pink', 'Brown', 'Gray', 'Black', 'White']
-color_rgb = np.array([[255, 255, 0], [0, 255, 0], [0, 255, 255], [255, 0, 0], [0, 0, 255], [255, 0, 255], [255, 165, 0], [255, 20, 147], [165, 42, 42], [169, 169, 169], [0, 0, 0], [255, 255, 255]]) / 255.0
+color_sequences = [
+    "Yellow",
+    "Green",
+    "Teal",
+    "Red",
+    "Blue",
+    "Purple",
+    "Orange",
+    "Pink",
+    "Brown",
+    "Gray",
+    "Black",
+    "White",
+]
+color_rgb = (
+    np.array(
+        [
+            [255, 255, 0],
+            [0, 255, 0],
+            [0, 255, 255],
+            [255, 0, 0],
+            [0, 0, 255],
+            [255, 0, 255],
+            [255, 165, 0],
+            [255, 20, 147],
+            [165, 42, 42],
+            [169, 169, 169],
+            [0, 0, 0],
+            [255, 255, 255],
+        ]
+    )
+    / 255.0
+)
 
 
 def move_to_start_point_face_z(verts, J_regressor):
@@ -49,18 +80,20 @@ def move_to_start_point_face_z(verts, J_regressor):
     offset[1] = verts[:, :, [1]].min()
     verts = verts - offset
     # face direction
-    T_ay2ayfz = compute_T_ayfz2ay(einsum(J_regressor, verts[[0]], "j v, l v i -> l j i"), inverse=True)
+    T_ay2ayfz = compute_T_ayfz2ay(
+        einsum(J_regressor, verts[[0]], "j v, l v i -> l j i"), inverse=True
+    )
     verts = apply_T_on_points(verts, T_ay2ayfz)
     return verts
 
 
 def visualize_smpl_scene(vis_type, index, vid, j3d, gt_j3d, transform_mode=None):
-    if transform_mode == 'global':
+    if transform_mode == "global":
         global_rot = axis_angle_to_matrix(torch.tensor([np.pi / 2, 0, 0])).cuda()
         j3d = (global_rot @ j3d.transpose(1, 2)).transpose(1, 2)
         if gt_j3d is not None:
             gt_j3d = (global_rot @ gt_j3d.transpose(1, 2)).transpose(1, 2)
-    elif transform_mode == 'local':
+    elif transform_mode == "local":
         global_rot = axis_angle_to_matrix(torch.tensor([-np.pi / 2, 0, 0])).cuda()
         j3d = (global_rot @ j3d.transpose(1, 2)).transpose(1, 2)
         j3d[..., 2] += 0.8
@@ -68,62 +101,67 @@ def visualize_smpl_scene(vis_type, index, vid, j3d, gt_j3d, transform_mode=None)
             gt_j3d = (global_rot @ gt_j3d.transpose(1, 2)).transpose(1, 2)
             gt_j3d[..., 2] += 0.8
     smpl_seq = {
-        'pred': {
-            'joints_pos': j3d,
+        "pred": {
+            "joints_pos": j3d,
         },
     }
     if gt_j3d is not None:
-        smpl_seq['gt'] = {
-            'joints_pos': gt_j3d,
+        smpl_seq["gt"] = {
+            "joints_pos": gt_j3d,
         }
     vid_ = vid.replace("/", "_")
-    fname = f'{index:03d}-{vid_}'
+    fname = f"{index:03d}-{vid_}"
     if len(fname) > 100:
         fname = fname[:100]
     html_file = f"out/{vis_type}/{fname}.html"
     os.makedirs(os.path.dirname(html_file), exist_ok=True)
     sp_visualizer.vis_smpl_scene(smpl_seq, html_file)
-    
+
     if wandb_run_exists():
         # pl_module.logger.log_metrics({f'{vis_type}/{fname}': wandb.Html(html_file)}, step=pl_module.global_step)
-        return {f'{vis_type}/{fname}': wandb.Html(html_file)}
-    return {}   
+        return {f"{vis_type}/{fname}": wandb.Html(html_file)}
+    return {}
 
 
-def visualize_intermediate_smpl_scene(vis_type, index, vid, j3d_list, gt_j3d, transform_mode=None):
-    if transform_mode == 'global':
+def visualize_intermediate_smpl_scene(
+    vis_type, index, vid, j3d_list, gt_j3d, transform_mode=None
+):
+    if transform_mode == "global":
         global_rot = axis_angle_to_matrix(torch.tensor([np.pi / 2, 0, 0])).cuda()
-        j3d_list = [(global_rot @ j3d.transpose(1, 2)).transpose(1, 2) for j3d in j3d_list]
+        j3d_list = [
+            (global_rot @ j3d.transpose(1, 2)).transpose(1, 2) for j3d in j3d_list
+        ]
         gt_j3d = (global_rot @ gt_j3d.transpose(1, 2)).transpose(1, 2)
-    elif transform_mode == 'local':
+    elif transform_mode == "local":
         global_rot = axis_angle_to_matrix(torch.tensor([-np.pi / 2, 0, 0])).cuda()
-        j3d_list = [(global_rot @ j3d.transpose(1, 2)).transpose(1, 2) for j3d in j3d_list]
+        j3d_list = [
+            (global_rot @ j3d.transpose(1, 2)).transpose(1, 2) for j3d in j3d_list
+        ]
         gt_j3d = (global_rot @ gt_j3d.transpose(1, 2)).transpose(1, 2)
         for i in range(len(j3d_list)):
             j3d_list[i][..., 2] = j3d_list[i][..., 2] + 0.8
         gt_j3d[..., 2] += 0.8
     smpl_seq = {}
     for i, j3d in enumerate(j3d_list):
-        smpl_seq[f'pred_{i}'] = {
-            'joints_pos': j3d,
+        smpl_seq[f"pred_{i}"] = {
+            "joints_pos": j3d,
         }
 
     vid_ = vid.replace("/", "_")
-    fname = f'{index:03d}-{vid_}'
+    fname = f"{index:03d}-{vid_}"
     html_file = f"out/{vis_type}/{fname}.html"
     os.makedirs(os.path.dirname(html_file), exist_ok=True)
     sp_visualizer.vis_smpl_scene(smpl_seq, html_file)
-    
+
     if wandb_run_exists():
         # pl_module.logger.log_metrics({f'{vis_type}/{fname}': wandb.Html(html_file)}, step=pl_module.global_step)
-        return {f'{vis_type}/{fname}': wandb.Html(html_file)}
+        return {f"{vis_type}/{fname}": wandb.Html(html_file)}
     return {}
 
 
 def visualize_smplmesh_scene(
     vis_type, index, vid, pred_ay_verts, gt_ay_verts, J_regressor, faces_smpl
 ):
-
     verts_glob = move_to_start_point_face_z(pred_ay_verts, J_regressor)
     joints_glob = einsum(J_regressor, verts_glob, "j v, l v i -> l j i")  # (L, J, 3)
     length = gt_ay_verts.shape[0]
@@ -163,13 +201,17 @@ def visualize_smplmesh_scene(
     writer.close()
 
 
-
 def visualize_intermediate_smplmesh_scene(
     vis_type, index, vid, pred_ay_verts_list, gt_ay_verts, J_regressor, faces_smpl
 ):
-
-    verts_glob_list = [move_to_start_point_face_z(pred_ay_verts, J_regressor) for pred_ay_verts in pred_ay_verts_list]
-    joints_glob_list = [einsum(J_regressor, verts_glob, "j v, l v i -> l j i") for verts_glob in verts_glob_list]
+    verts_glob_list = [
+        move_to_start_point_face_z(pred_ay_verts, J_regressor)
+        for pred_ay_verts in pred_ay_verts_list
+    ]
+    joints_glob_list = [
+        einsum(J_regressor, verts_glob, "j v, l v i -> l j i")
+        for verts_glob in verts_glob_list
+    ]
     length = gt_ay_verts.shape[0]
     render_length = min(length, 200)
     verts_glob_list = [verts_glob[:render_length] for verts_glob in verts_glob_list]
@@ -193,17 +235,25 @@ def visualize_intermediate_smplmesh_scene(
     renderer = Renderer(width, height, device="cuda", faces=faces_smpl, K=K, bin_size=0)
 
     # -- render mesh -- #
-    scale, cx, cz = get_ground_params_from_points(joints_glob_list[0][:, 0], verts_glob_list[0])
+    scale, cx, cz = get_ground_params_from_points(
+        joints_glob_list[0][:, 0], verts_glob_list[0]
+    )
     renderer.set_ground(scale * 1.5, cx, cz)
     # color = torch.ones(3).float().cuda() * 0.8
-    colors = torch.stack([torch.from_numpy(color_rgb[i % len(color_rgb)]).float().cuda() for i in range(len(verts_glob_list))], dim=0)
+    colors = torch.stack(
+        [
+            torch.from_numpy(color_rgb[i % len(color_rgb)]).float().cuda()
+            for i in range(len(verts_glob_list))
+        ],
+        dim=0,
+    )
 
     writer = get_writer(global_video_path, fps=30, crf=CRF)
     for i in range(render_length):
         cameras = renderer.create_camera(global_R[i], global_T[i])
         verts = torch.cat([verts_glob[[i]] for verts_glob in verts_glob_list], dim=0)
         img = renderer.render_with_ground(
-            verts, colors, cameras, global_lights, opacity=float(i/render_length)
+            verts, colors, cameras, global_lights, opacity=float(i / render_length)
         )
         writer.write_frame(img)
     writer.close()
@@ -213,15 +263,25 @@ def visualize_intermediate_smplmesh_scene_img(
     vis_type, index, vid, pred_ay_verts_list, gt_ay_verts, J_regressor, faces_smpl
 ):
     import open3d as o3d
-    from hmr4d.utils.vis.o3d_render import get_ground, create_meshes, Settings
 
+    from hmr4d.utils.vis.o3d_render import Settings, create_meshes, get_ground
 
-    verts_glob_list = [move_to_start_point_face_z(pred_ay_verts, J_regressor) for pred_ay_verts in pred_ay_verts_list]
-    joints_glob_list = [einsum(J_regressor, verts_glob, "j v, l v i -> l j i") for verts_glob in verts_glob_list]
+    verts_glob_list = [
+        move_to_start_point_face_z(pred_ay_verts, J_regressor)
+        for pred_ay_verts in pred_ay_verts_list
+    ]
+    joints_glob_list = [
+        einsum(J_regressor, verts_glob, "j v, l v i -> l j i")
+        for verts_glob in verts_glob_list
+    ]
     length = verts_glob_list[0].shape[0]
     render_length = min(length, 200)
-    verts_glob_list = [verts_glob[:render_length] for verts_glob in verts_glob_list]    # (N, T, V, 3)
-    joints_glob_list = [joints_glob[:render_length] for joints_glob in joints_glob_list]    # (N, T, J, 3)
+    verts_glob_list = [
+        verts_glob[:render_length] for verts_glob in verts_glob_list
+    ]  # (N, T, V, 3)
+    joints_glob_list = [
+        joints_glob[:render_length] for joints_glob in joints_glob_list
+    ]  # (N, T, J, 3)
 
     device = verts_glob_list[0].device
 
@@ -241,12 +301,22 @@ def visualize_intermediate_smplmesh_scene_img(
     color_light_purple = torch.tensor([1.0, 0.65490196, 0.95294118]).to(device)
 
     # -- render mesh -- #
-    scale, cx, cz = get_ground_params_from_points(joints_glob_list[0][:, 0], verts_glob_list[0])
+    scale, cx, cz = get_ground_params_from_points(
+        joints_glob_list[0][:, 0], verts_glob_list[0]
+    )
     ground_geometry = get_ground(scale * 1.5, cx, cz)
     # color = torch.ones(3).float().cuda() * 0.8
-    colors = torch.stack([torch.from_numpy(color_rgb[i % len(color_rgb)]).float().cuda() for i in range(len(verts_glob_list))], dim=0)
+    colors = torch.stack(
+        [
+            torch.from_numpy(color_rgb[i % len(color_rgb)]).float().cuda()
+            for i in range(len(verts_glob_list))
+        ],
+        dim=0,
+    )
 
-    verts_glob_list = torch.stack(verts_glob_list, dim=0).transpose(1, 0)  # (T, N, V, 3)
+    verts_glob_list = torch.stack(verts_glob_list, dim=0).transpose(
+        1, 0
+    )  # (T, N, V, 3)
     T, N, V, _ = verts_glob_list.shape
 
     position, target, up = get_global_cameras_static_v2(
@@ -277,7 +347,12 @@ def visualize_intermediate_smplmesh_scene_img(
     colors_trans[:, 0] = torch.linspace(color_green[0], color_light_purple[0], T)
     colors_trans[:, 1] = torch.linspace(color_green[1], color_light_purple[1], T)
     colors_trans[:, 2] = torch.linspace(color_green[2], color_light_purple[2], T)
-    faces = torch.from_numpy(faces_smpl.astype('int')).unsqueeze(0).to(device).expand(N, -1, -1)
+    faces = (
+        torch.from_numpy(faces_smpl.astype("int"))
+        .unsqueeze(0)
+        .to(device)
+        .expand(N, -1, -1)
+    )
 
     # colors = torch.stack([torch.from_numpy(color_rgb[i % len(color_rgb)]).float().cuda() for i in range(len(verts_glob_list))], dim=0)
 

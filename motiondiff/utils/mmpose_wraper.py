@@ -15,21 +15,18 @@ import numpy as np
 from tqdm import tqdm
 
 RTMLIB_SETTINGS = {
-    'opencv': {
-        'cpu': (cv2.dnn.DNN_BACKEND_OPENCV, cv2.dnn.DNN_TARGET_CPU),
-
+    "opencv": {
+        "cpu": (cv2.dnn.DNN_BACKEND_OPENCV, cv2.dnn.DNN_TARGET_CPU),
         # You need to manually build OpenCV through cmake
-        'cuda': (cv2.dnn.DNN_BACKEND_CUDA, cv2.dnn.DNN_TARGET_CUDA)
+        "cuda": (cv2.dnn.DNN_BACKEND_CUDA, cv2.dnn.DNN_TARGET_CUDA),
     },
-    'onnxruntime': {
-        'cpu': 'CPUExecutionProvider',
-        'cuda': 'CUDAExecutionProvider'
-    },
+    "onnxruntime": {"cpu": "CPUExecutionProvider", "cuda": "CUDAExecutionProvider"},
 }
 
 
-def bbox_xyxy2cs(bbox: np.ndarray,
-                 padding: float = 1.) -> Tuple[np.ndarray, np.ndarray]:
+def bbox_xyxy2cs(
+    bbox: np.ndarray, padding: float = 1.0
+) -> Tuple[np.ndarray, np.ndarray]:
     """Transform the bbox format from (x,y,w,h) into (center, scale)
 
     Args:
@@ -96,12 +93,14 @@ def _get_3rd_point(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return c
 
 
-def get_warp_matrix(center: np.ndarray,
-                    scale: np.ndarray,
-                    rot: float,
-                    output_size: Tuple[int, int],
-                    shift: Tuple[float, float] = (0., 0.),
-                    inv: bool = False) -> np.ndarray:
+def get_warp_matrix(
+    center: np.ndarray,
+    scale: np.ndarray,
+    rot: float,
+    output_size: Tuple[int, int],
+    shift: Tuple[float, float] = (0.0, 0.0),
+    inv: bool = False,
+) -> np.ndarray:
     """Calculate the affine transformation matrix that can warp the bbox area
     in the input image to the output size.
 
@@ -128,8 +127,8 @@ def get_warp_matrix(center: np.ndarray,
 
     # compute transformation matrix
     rot_rad = np.deg2rad(rot)
-    src_dir = _rotate_point(np.array([0., src_w * -0.5]), rot_rad)
-    dst_dir = np.array([0., dst_w * -0.5])
+    src_dir = _rotate_point(np.array([0.0, src_w * -0.5]), rot_rad)
+    dst_dir = np.array([0.0, dst_w * -0.5])
 
     # get four corners of the src rectangle in the original image
     src = np.zeros((3, 2), dtype=np.float32)
@@ -152,8 +151,9 @@ def get_warp_matrix(center: np.ndarray,
     return warp_mat
 
 
-def top_down_affine(input_size: dict, bbox_scale: dict, bbox_center: dict,
-                    img: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def top_down_affine(
+    input_size: dict, bbox_scale: dict, bbox_center: dict, img: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray]:
     """Get the bbox image as the model input by affine transform.
 
     Args:
@@ -173,9 +173,11 @@ def top_down_affine(input_size: dict, bbox_scale: dict, bbox_center: dict,
     # reshape bbox to fixed aspect ratio
     aspect_ratio = w / h
     b_w, b_h = np.hsplit(bbox_scale, [1])
-    bbox_scale = np.where(b_w > b_h * aspect_ratio,
-                          np.hstack([b_w, b_w / aspect_ratio]),
-                          np.hstack([b_h * aspect_ratio, b_h]))
+    bbox_scale = np.where(
+        b_w > b_h * aspect_ratio,
+        np.hstack([b_w, b_w / aspect_ratio]),
+        np.hstack([b_h * aspect_ratio, b_h]),
+    )
 
     # get the affine matrix
     center = bbox_center
@@ -238,7 +240,8 @@ def multiclass_nms(boxes, scores, nms_thr, score_thr):
             if len(keep) > 0:
                 cls_inds = np.ones((len(keep), 1)) * cls_ind
                 dets = np.concatenate(
-                    [valid_boxes[keep], valid_scores[keep, None], cls_inds], 1)
+                    [valid_boxes[keep], valid_scores[keep, None], cls_inds], 1
+                )
                 final_dets.append(dets)
     if len(final_dets) == 0:
         return None
@@ -248,9 +251,11 @@ def multiclass_nms(boxes, scores, nms_thr, score_thr):
 def _get_rtmhub_dir():
     torch_home = os.path.expanduser(
         os.getenv(
-            'TORCH_HOME',
-            os.path.join(os.getenv('XDG_CACHE_HOME', '~/.cache'), 'rtmlib')))
-    return os.path.join(torch_home, 'hub')
+            "TORCH_HOME",
+            os.path.join(os.getenv("XDG_CACHE_HOME", "~/.cache"), "rtmlib"),
+        )
+    )
+    return os.path.join(torch_home, "hub")
 
 
 def download_url_to_file(url, dst, hash_prefix=None, progress=True):
@@ -268,13 +273,13 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
             bar to stderr Defaults to True.
     """
     file_size = None
-    req = Request(url, headers={'User-Agent': 'mmlmtools'})
+    req = Request(url, headers={"User-Agent": "mmlmtools"})
     u = urlopen(req)
     meta = u.info()
-    if hasattr(meta, 'getheaders'):
-        content_length = meta.getheaders('Content-Length')
+    if hasattr(meta, "getheaders"):
+        content_length = meta.getheaders("Content-Length")
     else:
-        content_length = meta.get_all('Content-Length')
+        content_length = meta.get_all("Content-Length")
     if content_length is not None and len(content_length) > 0:
         file_size = int(content_length[0])
 
@@ -287,11 +292,13 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
     try:
         if hash_prefix is not None:
             sha256 = hashlib.sha256()
-        with tqdm(total=file_size,
-                  disable=not progress,
-                  unit='B',
-                  unit_scale=True,
-                  unit_divisor=1024) as pbar:
+        with tqdm(
+            total=file_size,
+            disable=not progress,
+            unit="B",
+            unit_scale=True,
+            unit_divisor=1024,
+        ) as pbar:
             while True:
                 buffer = u.read(8192)
                 if len(buffer) == 0:
@@ -304,10 +311,12 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
         f.close()
         if hash_prefix is not None:
             digest = sha256.hexdigest()
-            if digest[:len(hash_prefix)] != hash_prefix:
+            if digest[: len(hash_prefix)] != hash_prefix:
                 raise RuntimeError(
                     'invalid hash value (expected "{}", got "{}")'.format(
-                        hash_prefix, digest))
+                        hash_prefix, digest
+                    )
+                )
         Path(f.name).rename(dst)
     finally:
         f.close()
@@ -315,11 +324,13 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
             os.remove(f.name)
 
 
-def download_checkpoint(url: str,
-                        dst_dir: Optional[str] = None,
-                        progress: bool = True,
-                        check_hash: bool = False,
-                        filename: Optional[str] = None) -> str:
+def download_checkpoint(
+    url: str,
+    dst_dir: Optional[str] = None,
+    progress: bool = True,
+    check_hash: bool = False,
+    filename: Optional[str] = None,
+) -> str:
     """Download the checkpoint from the given URL.
 
     Modified from `torch.hub.load_state_dict_from_url`.
@@ -346,7 +357,7 @@ def download_checkpoint(url: str,
         str: The path of the downloaded file.
     """
     if dst_dir is None:
-        dst_dir = os.path.join(_get_rtmhub_dir(), 'checkpoints')
+        dst_dir = os.path.join(_get_rtmhub_dir(), "checkpoints")
 
     dst_dir = Path(dst_dir)
     dst_dir.mkdir(parents=True, exist_ok=True)
@@ -363,41 +374,41 @@ def download_checkpoint(url: str,
         sys.stderr.write('Downloading: "{}" to {}\n'.format(url, cached_file))
         hash_prefix = None
         if check_hash:
-            HASH_REGEX = re.compile(r'-([a-f0-9]*)\.')
+            HASH_REGEX = re.compile(r"-([a-f0-9]*)\.")
             r = HASH_REGEX.search(filename)  # r is Optional[Match[str]]
             hash_prefix = r.group(1) if r else None
         download_url_to_file(url, cached_file, hash_prefix, progress=progress)
 
-    if str(cached_file).split('.')[-1] == 'zip':
-        os.system(f'unzip -d {dst_dir}/tmp {cached_file}')
-        cached_list = glob(f'{dst_dir}/**', recursive=True)
+    if str(cached_file).split(".")[-1] == "zip":
+        os.system(f"unzip -d {dst_dir}/tmp {cached_file}")
+        cached_list = glob(f"{dst_dir}/**", recursive=True)
 
         for each in cached_list:
-            if each[-12:] == 'end2end.onnx':
+            if each[-12:] == "end2end.onnx":
                 cached_onnx = each
                 break
-        os.system(f'mv {cached_onnx} {onnx_name}')
-        os.system(f'rm -rf {cached_file}')
-        os.system(f'rm -rf {dst_dir}/tmp')
+        os.system(f"mv {cached_onnx} {onnx_name}")
+        os.system(f"rm -rf {cached_file}")
+        os.system(f"rm -rf {dst_dir}/tmp")
         cached_file = onnx_name
 
     return str(cached_file)
 
 
 class BaseTool(metaclass=ABCMeta):
-
-    def __init__(self,
-                 onnx_model: str = None,
-                 model_input_size: tuple = None,
-                 mean: tuple = None,
-                 std: tuple = None,
-                 backend: str = 'opencv',
-                 device: str = 'cpu'):
-
+    def __init__(
+        self,
+        onnx_model: str = None,
+        model_input_size: tuple = None,
+        mean: tuple = None,
+        std: tuple = None,
+        backend: str = "opencv",
+        device: str = "cpu",
+    ):
         if not os.path.exists(onnx_model):
             onnx_model = download_checkpoint(onnx_model)
 
-        if backend == 'opencv':
+        if backend == "opencv":
             try:
                 providers = RTMLIB_SETTINGS[backend][device]
 
@@ -407,32 +418,39 @@ class BaseTool(metaclass=ABCMeta):
                 self.session = session
             except Exception:
                 raise RuntimeError(
-                    'This model is not supported by OpenCV'
-                    ' backend, please use `pip install'
-                    ' onnxruntime` or `pip install'
-                    ' onnxruntime-gpu` to install onnxruntime'
-                    ' backend. Then specify `backend=onnxruntime`.')  # noqa
+                    "This model is not supported by OpenCV"
+                    " backend, please use `pip install"
+                    " onnxruntime` or `pip install"
+                    " onnxruntime-gpu` to install onnxruntime"
+                    " backend. Then specify `backend=onnxruntime`."
+                )  # noqa
 
-        elif backend == 'onnxruntime':
+        elif backend == "onnxruntime":
             import onnxruntime as ort
+
             providers = RTMLIB_SETTINGS[backend][device]
 
-            self.session = ort.InferenceSession(path_or_bytes=onnx_model,
-                                                providers=[providers])
+            self.session = ort.InferenceSession(
+                path_or_bytes=onnx_model, providers=[providers]
+            )
 
-        elif backend == 'openvino':
+        elif backend == "openvino":
             from openvino.runtime import Core
+
             core = Core()
             model_onnx = core.read_model(model=onnx_model)
 
-            if device != 'cpu':
-                print('OpenVINO only supports CPU backend, automatically'
-                      ' switched to CPU backend.')
+            if device != "cpu":
+                print(
+                    "OpenVINO only supports CPU backend, automatically"
+                    " switched to CPU backend."
+                )
 
             self.compiled_model = core.compile_model(
                 model=model_onnx,
-                device_name='CPU',
-                config={'PERFORMANCE_HINT': 'LATENCY'})
+                device_name="CPU",
+                config={"PERFORMANCE_HINT": "LATENCY"},
+            )
             self.input_layer = self.compiled_model.input(0)
             self.output_layer0 = self.compiled_model.output(0)
             self.output_layer1 = self.compiled_model.output(1)
@@ -440,7 +458,7 @@ class BaseTool(metaclass=ABCMeta):
         else:
             raise NotImplementedError
 
-        print(f'load {onnx_model} with {backend} backend')
+        print(f"load {onnx_model} with {backend} backend")
 
         self.onnx_model = onnx_model
         self.model_input_size = model_input_size
@@ -469,18 +487,18 @@ class BaseTool(metaclass=ABCMeta):
         input = img[None, :, :, :]
 
         # run model
-        if self.backend == 'opencv':
+        if self.backend == "opencv":
             outNames = self.session.getUnconnectedOutLayersNames()
             self.session.setInput(input)
             outputs = self.session.forward(outNames)
-        elif self.backend == 'onnxruntime':
+        elif self.backend == "onnxruntime":
             sess_input = {self.session.get_inputs()[0].name: input}
             sess_output = []
             for out in self.session.get_outputs():
                 sess_output.append(out.name)
 
             outputs = self.session.run(sess_output, sess_input)
-        elif self.backend == 'openvino':
+        elif self.backend == "openvino":
             results = self.compiled_model(input)
             output0 = results[self.output_layer0]
             output1 = results[self.output_layer1]
@@ -489,8 +507,9 @@ class BaseTool(metaclass=ABCMeta):
         return outputs
 
 
-def get_simcc_maximum(simcc_x: np.ndarray,
-                      simcc_y: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def get_simcc_maximum(
+    simcc_x: np.ndarray, simcc_y: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray]:
     """Get maximum response location and value from simcc representations.
 
     Note:
@@ -525,7 +544,7 @@ def get_simcc_maximum(simcc_x: np.ndarray,
     # mask = max_val_x > max_val_y
     # max_val_x[mask] = max_val_y[mask]
     vals = 0.5 * (max_val_x + max_val_y)
-    locs[vals <= 0.] = -1
+    locs[vals <= 0.0] = -1
 
     # reshape
     locs = locs.reshape(N, K, 2)
@@ -541,15 +560,16 @@ def convert_coco_to_openpose(keypoints, scores):
     neck = np.mean(keypoints_info[:, [5, 6]], axis=1)
 
     # neck score when visualizing pred
-    neck[:,
-         2:3] = np.where(keypoints_info[:, 5, 2:3] > keypoints_info[:, 6, 2:3],
-                         keypoints_info[:, 6, 2:3], keypoints_info[:, 5, 2:3])
+    neck[:, 2:3] = np.where(
+        keypoints_info[:, 5, 2:3] > keypoints_info[:, 6, 2:3],
+        keypoints_info[:, 6, 2:3],
+        keypoints_info[:, 5, 2:3],
+    )
     new_keypoints_info = np.insert(keypoints_info, 17, neck, axis=1)
 
     mmpose_idx = [17, 6, 8, 10, 7, 9, 12, 14, 16, 13, 15, 2, 1, 4, 3]
     openpose_idx = [1, 2, 3, 4, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17]
-    new_keypoints_info[:, openpose_idx] = \
-        new_keypoints_info[:, mmpose_idx]
+    new_keypoints_info[:, openpose_idx] = new_keypoints_info[:, mmpose_idx]
     keypoints_info = new_keypoints_info
 
     keypoints, scores = keypoints_info[..., :2], keypoints_info[..., 2]
@@ -557,18 +577,16 @@ def convert_coco_to_openpose(keypoints, scores):
 
 
 class YOLOX(BaseTool):
-
-    def __init__(self,
-                 onnx_model: str,
-                 model_input_size: tuple = (640, 640),
-                 nms_thr=0.45,
-                 score_thr=0.7,
-                 backend: str = 'onnxruntime',
-                 device: str = 'cpu'):
-        super().__init__(onnx_model,
-                         model_input_size,
-                         backend=backend,
-                         device=device)
+    def __init__(
+        self,
+        onnx_model: str,
+        model_input_size: tuple = (640, 640),
+        nms_thr=0.45,
+        score_thr=0.7,
+        backend: str = "onnxruntime",
+        device: str = "cpu",
+    ):
+        super().__init__(onnx_model, model_input_size, backend=backend, device=device)
         self.nms_thr = nms_thr
         self.score_thr = score_thr
 
@@ -591,28 +609,34 @@ class YOLOX(BaseTool):
             - scale (np.ndarray): Scale of image.
         """
         if len(img.shape) == 3:
-            padded_img = np.ones(
-                (self.model_input_size[0], self.model_input_size[1], 3),
-                dtype=np.uint8) * 114
+            padded_img = (
+                np.ones(
+                    (self.model_input_size[0], self.model_input_size[1], 3),
+                    dtype=np.uint8,
+                )
+                * 114
+            )
         else:
             padded_img = np.ones(self.model_input_size, dtype=np.uint8) * 114
 
-        ratio = min(self.model_input_size[0] / img.shape[0],
-                    self.model_input_size[1] / img.shape[1])
+        ratio = min(
+            self.model_input_size[0] / img.shape[0],
+            self.model_input_size[1] / img.shape[1],
+        )
         resized_img = cv2.resize(
             img,
             (int(img.shape[1] * ratio), int(img.shape[0] * ratio)),
             interpolation=cv2.INTER_LINEAR,
         ).astype(np.uint8)
         padded_shape = (int(img.shape[0] * ratio), int(img.shape[1] * ratio))
-        padded_img[:padded_shape[0], :padded_shape[1]] = resized_img
+        padded_img[: padded_shape[0], : padded_shape[1]] = resized_img
 
         return padded_img, ratio
 
     def postprocess(
         self,
         outputs: List[np.ndarray],
-        ratio: float = 1.,
+        ratio: float = 1.0,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Do postprocessing for RTMPose model inference.
 
@@ -652,15 +676,14 @@ class YOLOX(BaseTool):
             scores = predictions[:, 4:5] * predictions[:, 5:]
 
             boxes_xyxy = np.ones_like(boxes)
-            boxes_xyxy[:, 0] = boxes[:, 0] - boxes[:, 2] / 2.
-            boxes_xyxy[:, 1] = boxes[:, 1] - boxes[:, 3] / 2.
-            boxes_xyxy[:, 2] = boxes[:, 0] + boxes[:, 2] / 2.
-            boxes_xyxy[:, 3] = boxes[:, 1] + boxes[:, 3] / 2.
+            boxes_xyxy[:, 0] = boxes[:, 0] - boxes[:, 2] / 2.0
+            boxes_xyxy[:, 1] = boxes[:, 1] - boxes[:, 3] / 2.0
+            boxes_xyxy[:, 2] = boxes[:, 0] + boxes[:, 2] / 2.0
+            boxes_xyxy[:, 3] = boxes[:, 1] + boxes[:, 3] / 2.0
             boxes_xyxy /= ratio
-            dets = multiclass_nms(boxes_xyxy,
-                                  scores,
-                                  nms_thr=self.nms_thr,
-                                  score_thr=self.score_thr)
+            dets = multiclass_nms(
+                boxes_xyxy, scores, nms_thr=self.nms_thr, score_thr=self.score_thr
+            )
             if dets is not None:
                 pack_dets = (dets[:, :4], dets[:, 4], dets[:, 5])
                 final_boxes, final_scores, final_cls_inds = pack_dets
@@ -683,16 +706,16 @@ class YOLOX(BaseTool):
 
 
 class RTMPose(BaseTool):
-
-    def __init__(self,
-                 onnx_model: str,
-                 model_input_size: tuple = (288, 384),
-                 mean: tuple = (123.675, 116.28, 103.53),
-                 std: tuple = (58.395, 57.12, 57.375),
-                 backend: str = 'onnxruntime',
-                 device: str = 'cpu'):
-        super().__init__(onnx_model, model_input_size, mean, std, backend,
-                         device)
+    def __init__(
+        self,
+        onnx_model: str,
+        model_input_size: tuple = (288, 384),
+        mean: tuple = (123.675, 116.28, 103.53),
+        std: tuple = (58.395, 57.12, 57.375),
+        backend: str = "onnxruntime",
+        device: str = "cpu",
+    ):
+        super().__init__(onnx_model, model_input_size, mean, std, backend, device)
 
     def __call__(self, image: np.ndarray, bboxes: list = []):
         if len(bboxes) == 0:
@@ -734,8 +757,7 @@ class RTMPose(BaseTool):
         center, scale = bbox_xyxy2cs(bbox, padding=1.25)
 
         # do affine transformation
-        resized_img, scale = top_down_affine(self.model_input_size, scale,
-                                             center, img)
+        resized_img, scale = top_down_affine(self.model_input_size, scale, center, img)
         # normalize image
         if self.mean is not None:
             self.mean = np.array(self.mean)
@@ -745,11 +767,12 @@ class RTMPose(BaseTool):
         return resized_img, center, scale
 
     def postprocess(
-            self,
-            outputs: List[np.ndarray],
-            center: Tuple[int, int],
-            scale: Tuple[int, int],
-            simcc_split_ratio: float = 2.0) -> Tuple[np.ndarray, np.ndarray]:
+        self,
+        outputs: List[np.ndarray],
+        center: Tuple[int, int],
+        scale: Tuple[int, int],
+        simcc_split_ratio: float = 2.0,
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """Postprocess for RTMPose model output.
 
         Args:
@@ -777,7 +800,7 @@ class RTMPose(BaseTool):
 
 
 class BodyPose(object):
-    DET = 'https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/yolox_x_8xb8-300e_humanart-a39d44ed.zip'
+    DET = "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/yolox_x_8xb8-300e_humanart-a39d44ed.zip"
     DET_SIZE = (640, 640)
     POSE = "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-x_simcc-body7_pt-body7_700e-384x288-71d7b7e9_20230629.zip"
     POSE_SIZE = (288, 384)
@@ -788,10 +811,9 @@ class BodyPose(object):
         det_size=None,
         pose=None,
         pose_size=None,
-        backend='onnxruntime',
-        device='cuda'
+        backend="onnxruntime",
+        device="cuda",
     ):
-
         det = det if det else self.DET
         det_size = det_size if det_size else self.DET_SIZE
 
@@ -811,41 +833,47 @@ class BodyPose(object):
         return keypoints, scores
 
 
-def draw_mmpose(img,
-                keypoints,
-                scores,
-                keypoint_info,
-                skeleton_info,
-                kpt_thr=0.5,
-                radius=2,
-                line_width=2):
+def draw_mmpose(
+    img,
+    keypoints,
+    scores,
+    keypoint_info,
+    skeleton_info,
+    kpt_thr=0.5,
+    radius=2,
+    line_width=2,
+):
     assert len(keypoints.shape) == 2
 
     vis_kpt = [s >= kpt_thr for s in scores]
 
     link_dict = {}
     for i, kpt_info in keypoint_info.items():
-        kpt_color = tuple(kpt_info['color'])
-        link_dict[kpt_info['name']] = kpt_info['id']
+        kpt_color = tuple(kpt_info["color"])
+        link_dict[kpt_info["name"]] = kpt_info["id"]
 
         kpt = keypoints[i]
 
         if vis_kpt[i]:
-            img = cv2.circle(img, (int(kpt[0]), int(kpt[1])), int(radius),
-                             kpt_color, -1)
+            img = cv2.circle(
+                img, (int(kpt[0]), int(kpt[1])), int(radius), kpt_color, -1
+            )
 
     for i, ske_info in skeleton_info.items():
-        link = ske_info['link']
+        link = ske_info["link"]
         pt0, pt1 = link_dict[link[0]], link_dict[link[1]]
 
         if vis_kpt[pt0] and vis_kpt[pt1]:
-            link_color = ske_info['color']
+            link_color = ske_info["color"]
             kpt0 = keypoints[pt0]
             kpt1 = keypoints[pt1]
 
-            img = cv2.line(img, (int(kpt0[0]), int(kpt0[1])),
-                           (int(kpt1[0]), int(kpt1[1])),
-                           link_color,
-                           thickness=line_width)
+            img = cv2.line(
+                img,
+                (int(kpt0[0]), int(kpt0[1])),
+                (int(kpt1[0]), int(kpt1[1])),
+                link_color,
+                thickness=line_width,
+            )
 
     return img

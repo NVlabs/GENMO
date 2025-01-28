@@ -1,13 +1,15 @@
-import torch
-from tqdm import tqdm
 import glob
+import os
+import random
+import time
+
 import cv2
 import numpy as np
-import time
-import os
+import torch
 from occ_utils import rand_img_clip_transforms2
-from hmr4d.utils.preproc import Tracker, Extractor, VitPoseExtractor, SLAMModel
-import random
+from tqdm import tqdm
+
+from hmr4d.utils.preproc import Extractor, SLAMModel, Tracker, VitPoseExtractor
 
 rich_root = "/mnt/disk1/RICH/"
 
@@ -42,9 +44,14 @@ def draw_kpt(img, kp2d):
 
 def draw_bbox(img, bbx_xys):
     x, y, s = bbx_xys
-    cv2.rectangle(img, (int(x-s/2), int(y-s/2)), (int(x+s/2), int(y+s/2)), (0, 0, 255), 2)
+    cv2.rectangle(
+        img,
+        (int(x - s / 2), int(y - s / 2)),
+        (int(x + s / 2), int(y + s / 2)),
+        (0, 0, 255),
+        2,
+    )
     return img
-
 
 
 def get_cam_key_wham_vid(vid):
@@ -57,15 +64,17 @@ def get_cam_key_wham_vid(vid):
 
 if __name__ == "__main__":
     labels = torch.load("inputs/RICH/hmr4d_support/rich_test_preproc.pt")
-    data = torch.load('/home/jiefengl/git/GVHMR/inputs/RICH/hmr4d_support/rich_test_labels.pt')
+    data = torch.load(
+        "/home/jiefengl/git/GVHMR/inputs/RICH/hmr4d_support/rich_test_labels.pt"
+    )
     occ_labels = {}
     device = "cuda:0"
     tic = time.time()
     feat_extractor = Extractor(device=device, tqdm_leave=True)
-    print('Finished loading features extractor:', time.time() - tic)
+    print("Finished loading features extractor:", time.time() - tic)
     tic = time.time()
     vitpose_extractor = VitPoseExtractor(device=device, tqdm_leave=True)
-    print('Finished loading pose extractor:', time.time() - tic)
+    print("Finished loading pose extractor:", time.time() - tic)
     os.makedirs("outputs/tmp_rich_occ", exist_ok=True)
 
     keys = list(labels.keys())
@@ -76,16 +85,16 @@ if __name__ == "__main__":
             label_occ = torch.load(f"outputs/tmp_rich_occ/{vid.replace('/', '_')}.pt")
             occ_labels[vid] = label_occ
             continue
-        bar.set_description(f'Processing {vid}:')
+        bar.set_description(f"Processing {vid}:")
         label = labels[vid]
         label_occ = {
-            'vid': label['vid'],
-            'img_wh': label['img_wh'],
+            "vid": label["vid"],
+            "img_wh": label["img_wh"],
         }
         bbx_xys = label["bbx_xys"]
         kp2d = label["kp2d"]
-        img_dir = f'{rich_root}/{vid}'
-        cam_id = vid.split('/')[-1].split('_')[1]
+        img_dir = f"{rich_root}/{vid}"
+        cam_id = vid.split("/")[-1].split("_")[1]
 
         img_files_glob = sorted(glob.glob(f"{img_dir}/*.jpeg"))
 
@@ -104,16 +113,21 @@ if __name__ == "__main__":
         imgscale = min(height, width)
 
         occ_bbx_xys = []
-        bbx_cx = torch.cat([bbx_xys[:, :2].clone(), bbx_xys[:, [2]].clone(), bbx_xys[:, [2]].clone()], dim=1)
+        bbx_cx = torch.cat(
+            [bbx_xys[:, :2].clone(), bbx_xys[:, [2]].clone(), bbx_xys[:, [2]].clone()],
+            dim=1,
+        )
         for i in range(len(bbx_xys)):
             center, scale = rand_img_clip_transforms2(
                 i, i, len(bbx_xys), kp2d.numpy(), bbx_cx.numpy(), 1, imgscale=imgscale
             )
-            occ_bbx_xys_i = torch.from_numpy(np.concatenate([center, scale[:1]], axis=0)).float()
+            occ_bbx_xys_i = torch.from_numpy(
+                np.concatenate([center, scale[:1]], axis=0)
+            ).float()
             occ_bbx_xys.append(occ_bbx_xys_i)
         occ_bbx_xys = torch.stack(occ_bbx_xys)
         assert occ_bbx_xys.shape == bbx_xys.shape, (occ_bbx_xys.shape, bbx_xys.shape)
-        label_occ['bbx_xys'] = occ_bbx_xys
+        label_occ["bbx_xys"] = occ_bbx_xys
 
         # out = cv2.VideoWriter(f"outputs/vis_rich_occ_{vid.replace('/', '_')}.mp4", fourcc, 30, (width, height))
 
@@ -125,14 +139,26 @@ if __name__ == "__main__":
         # out.release()
         # import ipdb; ipdb.set_trace()
 
-        vitpose, imgs_dict = vitpose_extractor.extract(imgnames, occ_bbx_xys, img_ds=0.5, batch_size=32, path_type="image_list")
-        assert vitpose.shape == label['kp2d'].shape, (vitpose.shape, label['kp2d'].shape)
+        vitpose, imgs_dict = vitpose_extractor.extract(
+            imgnames, occ_bbx_xys, img_ds=0.5, batch_size=32, path_type="image_list"
+        )
+        assert vitpose.shape == label["kp2d"].shape, (
+            vitpose.shape,
+            label["kp2d"].shape,
+        )
         label_occ["kp2d"] = vitpose.cpu().float()
 
         vit_features = feat_extractor.extract_video_features(
-            imgnames, bbx_xys, batch_size=32, path_type="image_list", imgs_dict=imgs_dict
+            imgnames,
+            bbx_xys,
+            batch_size=32,
+            path_type="image_list",
+            imgs_dict=imgs_dict,
         )
-        assert vit_features.shape == label['f_imgseq'].shape, (vit_features.shape, label['f_imgseq'].shape)
+        assert vit_features.shape == label["f_imgseq"].shape, (
+            vit_features.shape,
+            label["f_imgseq"].shape,
+        )
         label_occ["f_imgseq"] = vit_features.cpu().float()
 
         occ_labels[vid] = label_occ

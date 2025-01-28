@@ -14,8 +14,8 @@ defaults:
       # - metric_3dpw
   - _self_
 
-text_feats_dir: 'text_feats'
-text_data_name: 'motionx'
+text_feats_dir: "text_feats"
+text_data_name: "motionx"
 trial_ind: 0
 
 pipeline:
@@ -29,8 +29,8 @@ callbacks:
     text_len: ${pipeline.args.test_motion_len}
     endecoder:
       _target_: hmr4d.model.gvhmr.utils.endecoder.EnDecoder
-      stats_name: 'DEFAULT_01'
-      encode_type: 'humanml3d'
+      stats_name: "DEFAULT_01"
+      encode_type: "humanml3d"
     save_dir: ${output_dir}/${text_feats_dir}_${text_data_name}
 
 seed: ${trial_ind}
@@ -44,12 +44,12 @@ pl_trainer:
   devices: 1
 
 logger:
-    _target_: pytorch_lightning.loggers.WandbLogger
-    project: 'mfm-hmr-test'
-    entity: 'nvr-lpr'
-    save_dir: "/tmp" # /save_dir/name/version/sub_dir
-    name: ""
-    version: ""
-    resume: 'allow'
-    dir: "/tmp"
-    id: null
+  _target_: pytorch_lightning.loggers.WandbLogger
+  project: "mfm-hmr-test"
+  entity: "nvr-lpr"
+  save_dir: "/tmp" # /save_dir/name/version/sub_dir
+  name: ""
+  version: ""
+  resume: "allow"
+  dir: "/tmp"
+  id: null

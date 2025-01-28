@@ -7,15 +7,17 @@ from ..builder import BACKBONES
 from .base_backbone import BaseBackbone
 
 
-def make_vgg_layer(in_channels,
-                   out_channels,
-                   num_blocks,
-                   conv_cfg=None,
-                   norm_cfg=None,
-                   act_cfg=dict(type='ReLU'),
-                   dilation=1,
-                   with_norm=False,
-                   ceil_mode=False):
+def make_vgg_layer(
+    in_channels,
+    out_channels,
+    num_blocks,
+    conv_cfg=None,
+    norm_cfg=None,
+    act_cfg=dict(type="ReLU"),
+    dilation=1,
+    with_norm=False,
+    ceil_mode=False,
+):
     layers = []
     for _ in range(num_blocks):
         layer = ConvModule(
@@ -27,7 +29,8 @@ def make_vgg_layer(in_channels,
             bias=True,
             conv_cfg=conv_cfg,
             norm_cfg=norm_cfg,
-            act_cfg=act_cfg)
+            act_cfg=act_cfg,
+        )
         layers.append(layer)
         in_channels = out_channels
     layers.append(nn.MaxPool2d(kernel_size=2, stride=2, ceil_mode=ceil_mode))
@@ -71,25 +74,27 @@ class VGG(BaseBackbone):
         11: (1, 1, 2, 2, 2),
         13: (2, 2, 2, 2, 2),
         16: (2, 2, 3, 3, 3),
-        19: (2, 2, 4, 4, 4)
+        19: (2, 2, 4, 4, 4),
     }
 
-    def __init__(self,
-                 depth,
-                 num_classes=-1,
-                 num_stages=5,
-                 dilations=(1, 1, 1, 1, 1),
-                 out_indices=None,
-                 frozen_stages=-1,
-                 conv_cfg=None,
-                 norm_cfg=None,
-                 act_cfg=dict(type='ReLU'),
-                 norm_eval=False,
-                 ceil_mode=False,
-                 with_last_pool=True):
+    def __init__(
+        self,
+        depth,
+        num_classes=-1,
+        num_stages=5,
+        dilations=(1, 1, 1, 1, 1),
+        out_indices=None,
+        frozen_stages=-1,
+        conv_cfg=None,
+        norm_cfg=None,
+        act_cfg=dict(type="ReLU"),
+        norm_eval=False,
+        ceil_mode=False,
+        with_last_pool=True,
+    ):
         super().__init__()
         if depth not in self.arch_settings:
-            raise KeyError(f'invalid depth {depth} for vgg')
+            raise KeyError(f"invalid depth {depth} for vgg")
         assert num_stages >= 1 and num_stages <= 5
         stage_blocks = self.arch_settings[depth]
         self.stage_blocks = stage_blocks[:num_stages]
@@ -101,7 +106,7 @@ class VGG(BaseBackbone):
         with_norm = norm_cfg is not None
 
         if out_indices is None:
-            out_indices = (5, ) if num_classes > 0 else (4, )
+            out_indices = (5,) if num_classes > 0 else (4,)
         assert max(out_indices) <= num_stages
         self.out_indices = out_indices
 
@@ -123,7 +128,8 @@ class VGG(BaseBackbone):
                 act_cfg=act_cfg,
                 dilation=dilation,
                 with_norm=with_norm,
-                ceil_mode=ceil_mode)
+                ceil_mode=ceil_mode,
+            )
             vgg_layers.extend(vgg_layer)
             self.in_channels = out_channels
             self.range_sub_modules.append([start_idx, end_idx])
@@ -131,7 +137,7 @@ class VGG(BaseBackbone):
         if not with_last_pool:
             vgg_layers.pop(-1)
             self.range_sub_modules[-1][1] -= 1
-        self.module_name = 'features'
+        self.module_name = "features"
         self.add_module(self.module_name, nn.Sequential(*vgg_layers))
 
         if self.num_classes > 0:

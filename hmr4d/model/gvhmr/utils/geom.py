@@ -1,6 +1,5 @@
-import torch
 import numpy as np
-
+import torch
 
 
 def norm_np_arr(arr):
@@ -11,13 +10,15 @@ def lookat_correct(eye, at, up):
     zaxis = norm_np_arr(at - eye)
     xaxis = norm_np_arr(np.cross(up, zaxis))
     yaxis = np.cross(zaxis, xaxis)
-    
-    _viewMatrix = np.array([
-        [xaxis[0], yaxis[0], zaxis[0], eye[0]],
-        [xaxis[1], yaxis[1], zaxis[1], eye[1]],
-        [xaxis[2], yaxis[2], zaxis[2], eye[2]],
-        [0       , 0       , 0       , 1     ]
-    ])
+
+    _viewMatrix = np.array(
+        [
+            [xaxis[0], yaxis[0], zaxis[0], eye[0]],
+            [xaxis[1], yaxis[1], zaxis[1], eye[1]],
+            [xaxis[2], yaxis[2], zaxis[2], eye[2]],
+            [0, 0, 0, 1],
+        ]
+    )
     return _viewMatrix
 
 
@@ -25,18 +26,18 @@ def spherical_to_cartesian(r, azimuth, elevation):
     # Convert degrees to radians
     azimuth = np.radians(azimuth)
     elevation = np.radians(elevation)
-    
+
     x = r * np.cos(elevation) * np.cos(azimuth)
     y = r * np.cos(elevation) * np.sin(azimuth)
     z = r * np.sin(elevation)
-    
+
     return np.array([x, y, z])
 
 
-def safe_inverse(x, epsilon=1E-12):
-    return x/(x**2 + epsilon)
+def safe_inverse(x, epsilon=1e-12):
+    return x / (x**2 + epsilon)
 
-    
+
 class SVD(torch.autograd.Function):
     @staticmethod
     def forward(self, A):
@@ -53,11 +54,11 @@ class SVD(torch.autograd.Function):
         N = V.size(-1)
         NS = S.size(-1)
 
-        F = (S.unsqueeze(-1) - S.unsqueeze(-2))
+        F = S.unsqueeze(-1) - S.unsqueeze(-2)
         F = safe_inverse(F)
         F.diagonal(dim1=-2, dim2=-1).fill_(0)
 
-        G = (S.unsqueeze(-1) + S.unsqueeze(-2))
+        G = S.unsqueeze(-1) + S.unsqueeze(-2)
         G.diagonal(dim1=-2, dim2=-1).fill_(np.inf)
         G = 1 / G
 
@@ -67,13 +68,17 @@ class SVD(torch.autograd.Function):
         Su = (F + G) * (UdU - UdU.transpose(-2, -1)) / 2
         Sv = (F - G) * (VdV - VdV.transpose(-2, -1)) / 2
 
-        dA = U @ (Su + Sv + torch.diag_embed(dS)) @ Vt 
-        if (M>NS):
-            eye_M = torch.eye(M, dtype=dU.dtype, device=dU.device).expand(*dA.shape[:-2], M, M)
-            dA = dA + (eye_M - U@Ut) @ (dU/S.unsqueeze(-2)) @ Vt 
-        if (N>NS):
-            eye_N = torch.eye(N, dtype=dU.dtype, device=dU.device).expand(*dA.shape[:-2], N, N)
-            dA = dA + (U/S.unsqueeze(-2)) @ dV.transpose(-2, -1) @ (eye_N - V@Vt)
+        dA = U @ (Su + Sv + torch.diag_embed(dS)) @ Vt
+        if M > NS:
+            eye_M = torch.eye(M, dtype=dU.dtype, device=dU.device).expand(
+                *dA.shape[:-2], M, M
+            )
+            dA = dA + (eye_M - U @ Ut) @ (dU / S.unsqueeze(-2)) @ Vt
+        if N > NS:
+            eye_N = torch.eye(N, dtype=dU.dtype, device=dU.device).expand(
+                *dA.shape[:-2], N, N
+            )
+            dA = dA + (U / S.unsqueeze(-2)) @ dV.transpose(-2, -1) @ (eye_N - V @ Vt)
         return dA
 
 
@@ -84,7 +89,7 @@ def perspective_projection(points, cam_intrinsics, rotation=None, translation=No
     if translation is not None:
         points = points + translation.unsqueeze(1)
     projected_points = points / points[:, :, -1].unsqueeze(-1)
-    projected_points = torch.einsum('bij,bkj->bki', K, projected_points.float())
+    projected_points = torch.einsum("bij,bkj->bki", K, projected_points.float())
     return projected_points[:, :, :-1]
 
 
@@ -93,11 +98,14 @@ def batch_triangulate(keypoints_, Pall, keypoints_pre=None, lamb=1e3):
     # Pall: (nViews, 3, 4)
     # A: (nJoints, nViewsx2, 4), x: (nJoints, 4, 1); b: (nJoints, nViewsx2, 1)
     if keypoints_.shape[-1] == 2:
-        keypoints_ = np.concatenate([keypoints_, np.ones((keypoints_.shape[0], keypoints_.shape[1], 1))], axis=-1)
-    v = (keypoints_[:, :, -1]>0).sum(axis=0)
+        keypoints_ = np.concatenate(
+            [keypoints_, np.ones((keypoints_.shape[0], keypoints_.shape[1], 1))],
+            axis=-1,
+        )
+    v = (keypoints_[:, :, -1] > 0).sum(axis=0)
     valid_joint = np.where(v > 1)[0]
     keypoints = keypoints_[:, valid_joint]
-    conf3d = keypoints[:, :, -1].sum(axis=0)/v[valid_joint]
+    conf3d = keypoints[:, :, -1].sum(axis=0) / v[valid_joint]
     # P2: P矩阵的最后一行：(1, nViews, 1, 4)
     P0 = Pall[None, :, 0, :]
     P1 = Pall[None, :, 1, :]
@@ -136,7 +144,16 @@ def batch_triangulate_torch_single(keypoints_, Pall, keypoints_pre=None, lamb=1e
     # Pall: (nViews, 3, 4)
     # A: (nJoints, nViewsx2, 4), x: (nJoints, 4, 1); b: (nJoints, nViewsx2, 1)
     if keypoints_.shape[-1] == 2:
-        keypoints_ = torch.cat([keypoints_, torch.ones((keypoints_.shape[0], keypoints_.shape[1], 1), device=keypoints_.device)], dim=-1)
+        keypoints_ = torch.cat(
+            [
+                keypoints_,
+                torch.ones(
+                    (keypoints_.shape[0], keypoints_.shape[1], 1),
+                    device=keypoints_.device,
+                ),
+            ],
+            dim=-1,
+        )
     v = (keypoints_[:, :, -1] > 0).sum(dim=0)
     valid_joint = torch.where(v > 1)[0]
     keypoints = keypoints_[:, valid_joint]
@@ -174,13 +191,24 @@ def batch_triangulate_torch_single(keypoints_, Pall, keypoints_pre=None, lamb=1e
     return result
 
 
-def batch_triangulate_torch(keypoints_, Pall, keypoints_pre=None, lamb=1e3, use_custom_svd='default'):
+def batch_triangulate_torch(
+    keypoints_, Pall, keypoints_pre=None, lamb=1e3, use_custom_svd="default"
+):
     # keypoints: (batch_size, nViews, nJoints, 3)
     # Pall: (batch_size, nViews, 3, 4)
     # A: (batch_size, nJoints, nViewsx2, 4), x: (batch_size, nJoints, 4, 1); b: (batch_size, nJoints, nViewsx2, 1)
     batch_size = keypoints_.shape[0]
     if keypoints_.shape[-1] == 2:
-        keypoints_ = torch.cat([keypoints_, torch.ones((batch_size, keypoints_.shape[1], keypoints_.shape[2], 1), device=keypoints_.device)], dim=-1)
+        keypoints_ = torch.cat(
+            [
+                keypoints_,
+                torch.ones(
+                    (batch_size, keypoints_.shape[1], keypoints_.shape[2], 1),
+                    device=keypoints_.device,
+                ),
+            ],
+            dim=-1,
+        )
     valid_joint = keypoints_[:, :, :, -1].mean((0, 1)) > 0
     keypoints = keypoints_[:, :, valid_joint]
     conf3d = keypoints[:, :, :, -1].sum(dim=1) / keypoints.shape[1]
@@ -197,7 +225,9 @@ def batch_triangulate_torch(keypoints_, Pall, keypoints_pre=None, lamb=1e3, use_
     A = torch.cat([Au, Av], dim=2)
     if keypoints_pre is not None:
         # keypoints_pre: (batch_size, nJoints, 4)
-        B = torch.eye(4, device=keypoints_.device)[None, None, :, :].repeat(batch_size, A.shape[1], 1, 1)
+        B = torch.eye(4, device=keypoints_.device)[None, None, :, :].repeat(
+            batch_size, A.shape[1], 1, 1
+        )
         B[:, :, :3, 3] = -keypoints_pre[:, valid_joint, :3]
         confpre = lamb * keypoints_pre[:, valid_joint, 3]
         # 1, 0, 0, -x0
@@ -207,9 +237,9 @@ def batch_triangulate_torch(keypoints_, Pall, keypoints_pre=None, lamb=1e3, use_
         B[:, :, 3, 3] = 0
         B = B * confpre[:, :, None, None]
         A = torch.cat((A, B), dim=2)
-    if use_custom_svd == 'custom':
+    if use_custom_svd == "custom":
         u, s, v = SVD.apply(A)
-    elif use_custom_svd in {'gesvd'}:
+    elif use_custom_svd in {"gesvd"}:
         u, s, v = torch.linalg.svd(A, driver=use_custom_svd)
     else:
         u, s, v = torch.linalg.svd(A)

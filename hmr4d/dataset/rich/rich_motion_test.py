@@ -1,25 +1,32 @@
 from pathlib import Path
+
 import numpy as np
 import torch
 from torch.utils import data
+
+from hmr4d.configs import MainStore, builds
+from hmr4d.utils.geo.hmr_cam import resize_K
+from hmr4d.utils.geo_transform import (
+    apply_T_on_points,
+    compute_cam_angvel,
+    compute_cam_tvel,
+    normalize_T_w2c,
+    transform_mat,
+)
 from hmr4d.utils.pylogger import Log
+from hmr4d.utils.smplx_utils import make_smplx
+from hmr4d.utils.wis3d_utils import add_motion_as_lines, make_wis3d
+from motiondiff.models.mdm.rotation_conversions import (
+    axis_angle_to_matrix,
+    matrix_to_axis_angle,
+)
 
 from .rich_utils import (
     get_cam2params,
+    get_cam_key_wham_vid,
     get_w2az_sahmr,
     parse_seqname_info,
-    get_cam_key_wham_vid,
 )
-from hmr4d.utils.geo_transform import apply_T_on_points, transform_mat, compute_cam_angvel, compute_cam_tvel
-from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
-from hmr4d.utils.smplx_utils import make_smplx
-from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix, matrix_to_axis_angle
-from hmr4d.utils.geo.hmr_cam import resize_K
-from hmr4d.utils.geo_transform import normalize_T_w2c
-
-
-from hmr4d.configs import MainStore, builds
-
 
 VID_PRESETS = {
     "easytohard": [
@@ -60,12 +67,18 @@ class RichSmplFullSeqDataset(data.Dataset):
         # print(sum([end - start for _, _, start, end in self.idx2meta]))
 
         # Prepare ground truth motion in ay-coordinate
-        self.w2az = get_w2az_sahmr()  # scan_name -> T_w2az, w-coordinate refers to cam-1-coordinate
+        self.w2az = (
+            get_w2az_sahmr()
+        )  # scan_name -> T_w2az, w-coordinate refers to cam-1-coordinate
         self.cam2params = get_cam2params()  # cam_key -> (T_w2c, K)
-        seqname_info = parse_seqname_info(skip_multi_persons=True)  # {k: (scan_name, subject_id, gender, cam_ids)}
+        seqname_info = parse_seqname_info(
+            skip_multi_persons=True
+        )  # {k: (scan_name, subject_id, gender, cam_ids)}
         self.seqname_to_scanname = {k: v[0] for k, v in seqname_info.items()}
 
-        Log.info(f"[RICH] {len(self.idx2meta)} sequences. Elapsed: {Log.time() - tic:.2f}s")
+        Log.info(
+            f"[RICH] {len(self.idx2meta)} sequences. Elapsed: {Log.time() - tic:.2f}s"
+        )
 
     def __len__(self):
         return len(self.idx2meta)
@@ -85,7 +98,9 @@ class RichSmplFullSeqDataset(data.Dataset):
         data.update({"meta": meta, "length": length})
 
         # SMPLX
-        data.update({"gt_smpl_params": label["gt_smplx_params"], "gender": label["gender"]})
+        data.update(
+            {"gt_smpl_params": label["gt_smplx_params"], "gender": label["gender"]}
+        )
         vimo_smpl_params = {
             "pred_cam": vimo_label["vimo_params"]["pred_cam"],
             "pred_pose": vimo_label["vimo_params"]["pred_pose"],
@@ -130,8 +145,12 @@ class RichSmplFullSeqDataset(data.Dataset):
 
     def _process_data(self, data):
         # T_w2az is pre-computed by using floor clue. az2zy uses a rotation along x-axis.
-        R_az2ay = axis_angle_to_matrix(torch.tensor([1.0, 0.0, 0.0]) * -torch.pi / 2)  # (3, 3)
-        T_w2ay = transform_mat(R_az2ay, R_az2ay.new([0, 0, 0])) @ data["T_w2az"]  # (4, 4)
+        R_az2ay = axis_angle_to_matrix(
+            torch.tensor([1.0, 0.0, 0.0]) * -torch.pi / 2
+        )  # (3, 3)
+        T_w2ay = (
+            transform_mat(R_az2ay, R_az2ay.new([0, 0, 0])) @ data["T_w2az"]
+        )  # (4, 4)
 
         vimo_label = data["vimo_label"]
         if False:  #  Visualize groundtruth and observation
@@ -145,8 +164,12 @@ class RichSmplFullSeqDataset(data.Dataset):
             smplx_verts_ay = apply_T_on_points(smplx_out.vertices, T_w2ay)
             for i in range(400):
                 wis3d.set_scene_id(i)
-                wis3d.add_mesh(smplx_out.vertices[i], rich_smplx.bm.faces, name=f"gt-smplx")
-                wis3d.add_mesh(smplx_verts_ay[i], rich_smplx.bm.faces, name=f"gt-smplx-ay")
+                wis3d.add_mesh(
+                    smplx_out.vertices[i], rich_smplx.bm.faces, name=f"gt-smplx"
+                )
+                wis3d.add_mesh(
+                    smplx_verts_ay[i], rich_smplx.bm.faces, name=f"gt-smplx-ay"
+                )
 
         # process img feature with xys
         length = data["length"]
@@ -221,7 +244,13 @@ def select_subset(labels, vid_presets):
 
 #
 group_name = "test_datasets/rich"
-base_node = builds(RichSmplFullSeqDataset, vid_presets=None, populate_full_signature=True)
+base_node = builds(
+    RichSmplFullSeqDataset, vid_presets=None, populate_full_signature=True
+)
 MainStore.store(name="all", node=base_node, group=group_name)
-MainStore.store(name="easy_to_hard", node=base_node(vid_presets="easytohard"), group=group_name)
-MainStore.store(name="postproc", node=base_node(vid_presets="postproc"), group=group_name)
+MainStore.store(
+    name="easy_to_hard", node=base_node(vid_presets="easytohard"), group=group_name
+)
+MainStore.store(
+    name="postproc", node=base_node(vid_presets="postproc"), group=group_name
+)

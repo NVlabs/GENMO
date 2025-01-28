@@ -1,16 +1,16 @@
-from pathlib import Path
-import torch
-import pytorch_lightning as pl
 import os
+from copy import deepcopy
+from pathlib import Path
+from typing import Any, Dict, Optional, Set
+
+import pytorch_lightning as pl
+import torch
 from pytorch_lightning.callbacks.checkpoint import Checkpoint
 from pytorch_lightning.utilities import rank_zero_only
-
-from hmr4d.utils.pylogger import Log
-from hmr4d.configs import MainStore, builds
-from copy import deepcopy
-
-from typing import Any, Dict, Optional, Set
 from torch import Tensor
+
+from hmr4d.configs import MainStore, builds
+from hmr4d.utils.pylogger import Log
 
 
 class SimpleCkptSaver(Checkpoint):
@@ -48,9 +48,17 @@ class SimpleCkptSaver(Checkpoint):
         # cast to int if necessary because `self.log("epoch", 123)` will convert it to float. if it's not a tensor
         # or does not exist we overwrite it as it's likely an error
         epoch = monitor_candidates.get("epoch")
-        monitor_candidates["epoch"] = epoch.int() if isinstance(epoch, Tensor) else torch.tensor(trainer.current_epoch)
+        monitor_candidates["epoch"] = (
+            epoch.int()
+            if isinstance(epoch, Tensor)
+            else torch.tensor(trainer.current_epoch)
+        )
         step = monitor_candidates.get("step")
-        monitor_candidates["step"] = step.int() if isinstance(step, Tensor) else torch.tensor(trainer.global_step)
+        monitor_candidates["step"] = (
+            step.int()
+            if isinstance(step, Tensor)
+            else torch.tensor(trainer.global_step)
+        )
         return monitor_candidates
 
     # def _save_last_checkpoint(self, trainer, pl_module, monitor_candidates) -> None:
@@ -127,46 +135,56 @@ class SimpleCkptSaver(Checkpoint):
     #         # Remove the earliest checkpoint
     #         if model_to_remove:
     #             trainer.strategy.remove_checkpoint(model_paths[0])
-    
-        
+
     def _save_last_checkpoint(self, trainer, pl_module, monitor_candidates) -> None:
-        lastpath = self.output_dir / 'last.ckpt'
+        lastpath = self.output_dir / "last.ckpt"
         checkpoint = trainer._checkpoint_connector.dump_checkpoint()
         trainer.strategy.save_checkpoint(checkpoint, lastpath)
         os.chmod(lastpath, 0o755)
-        
+
     @rank_zero_only
     def on_train_epoch_end(self, trainer, pl_module):
         """Save a checkpoint at the end of the training epoch."""
-        if self.every_n_epochs is not None and (trainer.current_epoch + 1) % self.every_n_epochs == 0:
+        if (
+            self.every_n_epochs is not None
+            and (trainer.current_epoch + 1) % self.every_n_epochs == 0
+        ):
             if self.save_top_k == 0:
                 return
 
             # Save cureent checkpoint
-            filepath = self.output_dir / self.filename.format(epoch=trainer.current_epoch, step=trainer.global_step)
-            lastpath = self.output_dir / 'last.ckpt'
+            filepath = self.output_dir / self.filename.format(
+                epoch=trainer.current_epoch, step=trainer.global_step
+            )
+            lastpath = self.output_dir / "last.ckpt"
             checkpoint = trainer._checkpoint_connector.dump_checkpoint()
             trainer.strategy.save_checkpoint(checkpoint, filepath)
             trainer.strategy.save_checkpoint(checkpoint, lastpath)
             os.chmod(filepath, 0o755)
             os.chmod(lastpath, 0o755)
-            
+
     @rank_zero_only
-    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx: int) -> None:
+    def on_train_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx: int
+    ) -> None:
         """Save a checkpoint at the end of the training epoch."""
-        if self.every_n_steps is not None and trainer.global_step % self.every_n_steps == 0:
+        if (
+            self.every_n_steps is not None
+            and trainer.global_step % self.every_n_steps == 0
+        ):
             if self.save_top_k == 0:
                 return
 
             # Save cureent checkpoint
-            filepath = self.output_dir / "s{step:06d}.ckpt".format(epoch=trainer.current_epoch, step=trainer.global_step)
-            lastpath = self.output_dir / 'last.ckpt'
+            filepath = self.output_dir / "s{step:06d}.ckpt".format(
+                epoch=trainer.current_epoch, step=trainer.global_step
+            )
+            lastpath = self.output_dir / "last.ckpt"
             checkpoint = trainer._checkpoint_connector.dump_checkpoint()
             trainer.strategy.save_checkpoint(checkpoint, filepath)
             trainer.strategy.save_checkpoint(checkpoint, lastpath)
             os.chmod(filepath, 0o755)
             os.chmod(lastpath, 0o755)
-
 
     # def on_train_batch_end(
     #     self,
@@ -180,15 +198,41 @@ class SimpleCkptSaver(Checkpoint):
 
 
 group_name = "callbacks/simple_ckpt_saver"
-base = builds(SimpleCkptSaver, output_dir="${output_dir}/checkpoints/", populate_full_signature=True)
+base = builds(
+    SimpleCkptSaver,
+    output_dir="${output_dir}/checkpoints/",
+    populate_full_signature=True,
+)
 MainStore.store(name="base", node=base, group=group_name)
 MainStore.store(name="every1e", node=base, group=group_name)
 MainStore.store(name="every2e", node=base(every_n_epochs=2), group=group_name)
 MainStore.store(name="every5e", node=base(every_n_epochs=5), group=group_name)
-MainStore.store(name="every5e_top100", node=base(every_n_epochs=5, save_top_k=100), group=group_name)
+MainStore.store(
+    name="every5e_top100", node=base(every_n_epochs=5, save_top_k=100), group=group_name
+)
 MainStore.store(name="every10e", node=base(every_n_epochs=10), group=group_name)
-MainStore.store(name="every10e_top100", node=base(every_n_epochs=10, save_top_k=100), group=group_name)
-MainStore.store(name="every100e_top100", node=base(every_n_epochs=100, save_top_k=100), group=group_name)
-MainStore.store(name="every1000e_top100", node=base(every_n_epochs=1000, save_top_k=100), group=group_name)
-MainStore.store(name="every3000s_top100", node=base(every_n_steps=3000, save_top_k=100), group=group_name)
-MainStore.store(name="every10000s_top100", node=base(every_n_steps=10000, save_top_k=100), group=group_name)
+MainStore.store(
+    name="every10e_top100",
+    node=base(every_n_epochs=10, save_top_k=100),
+    group=group_name,
+)
+MainStore.store(
+    name="every100e_top100",
+    node=base(every_n_epochs=100, save_top_k=100),
+    group=group_name,
+)
+MainStore.store(
+    name="every1000e_top100",
+    node=base(every_n_epochs=1000, save_top_k=100),
+    group=group_name,
+)
+MainStore.store(
+    name="every3000s_top100",
+    node=base(every_n_steps=3000, save_top_k=100),
+    group=group_name,
+)
+MainStore.store(
+    name="every10000s_top100",
+    node=base(every_n_steps=10000, save_top_k=100),
+    group=group_name,
+)

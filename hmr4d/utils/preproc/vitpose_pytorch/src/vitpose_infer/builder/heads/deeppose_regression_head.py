@@ -2,9 +2,7 @@
 import numpy as np
 import torch.nn as nn
 from mmcv.cnn import normal_init
-
-from mmpose.core.evaluation import (keypoint_pck_accuracy,
-                                    keypoints_from_regression)
+from mmpose.core.evaluation import keypoint_pck_accuracy, keypoints_from_regression
 from mmpose.core.post_processing import fliplr_regression
 from mmpose.models.builder import HEADS, build_loss
 
@@ -21,12 +19,9 @@ class DeepposeRegressionHead(nn.Module):
         loss_keypoint (dict): Config for keypoint loss. Default: None.
     """
 
-    def __init__(self,
-                 in_channels,
-                 num_joints,
-                 loss_keypoint=None,
-                 train_cfg=None,
-                 test_cfg=None):
+    def __init__(
+        self, in_channels, num_joints, loss_keypoint=None, train_cfg=None, test_cfg=None
+    ):
         super().__init__()
 
         self.in_channels = in_channels
@@ -62,7 +57,7 @@ class DeepposeRegressionHead(nn.Module):
         losses = dict()
         assert not isinstance(self.loss, nn.Sequential)
         assert target.dim() == 3 and target_weight.dim() == 3
-        losses['reg_loss'] = self.loss(output, target, target_weight)
+        losses["reg_loss"] = self.loss(output, target, target_weight)
 
         return losses
 
@@ -89,8 +84,9 @@ class DeepposeRegressionHead(nn.Module):
             target.detach().cpu().numpy(),
             target_weight[:, :, 0].detach().cpu().numpy() > 0,
             thr=0.05,
-            normalize=np.ones((N, 2), dtype=np.float32))
-        accuracy['acc_pose'] = avg_acc
+            normalize=np.ones((N, 2), dtype=np.float32),
+        )
+        accuracy["acc_pose"] = avg_acc
 
         return accuracy
 
@@ -109,7 +105,8 @@ class DeepposeRegressionHead(nn.Module):
 
         if flip_pairs is not None:
             output_regression = fliplr_regression(
-                output.detach().cpu().numpy(), flip_pairs)
+                output.detach().cpu().numpy(), flip_pairs
+            )
         else:
             output_regression = output.detach().cpu().numpy()
         return output_regression
@@ -132,7 +129,7 @@ class DeepposeRegressionHead(nn.Module):
         """
         batch_size = len(img_metas)
 
-        if 'bbox_id' in img_metas[0]:
+        if "bbox_id" in img_metas[0]:
             bbox_ids = []
         else:
             bbox_ids = None
@@ -142,17 +139,16 @@ class DeepposeRegressionHead(nn.Module):
         image_paths = []
         score = np.ones(batch_size)
         for i in range(batch_size):
-            c[i, :] = img_metas[i]['center']
-            s[i, :] = img_metas[i]['scale']
-            image_paths.append(img_metas[i]['image_file'])
+            c[i, :] = img_metas[i]["center"]
+            s[i, :] = img_metas[i]["scale"]
+            image_paths.append(img_metas[i]["image_file"])
 
-            if 'bbox_score' in img_metas[i]:
-                score[i] = np.array(img_metas[i]['bbox_score']).reshape(-1)
+            if "bbox_score" in img_metas[i]:
+                score[i] = np.array(img_metas[i]["bbox_score"]).reshape(-1)
             if bbox_ids is not None:
-                bbox_ids.append(img_metas[i]['bbox_id'])
+                bbox_ids.append(img_metas[i]["bbox_id"])
 
-        preds, maxvals = keypoints_from_regression(output, c, s,
-                                                   kwargs['img_size'])
+        preds, maxvals = keypoints_from_regression(output, c, s, kwargs["img_size"])
 
         all_preds = np.zeros((batch_size, preds.shape[1], 3), dtype=np.float32)
         all_boxes = np.zeros((batch_size, 6), dtype=np.float32)
@@ -165,10 +161,10 @@ class DeepposeRegressionHead(nn.Module):
 
         result = {}
 
-        result['preds'] = all_preds
-        result['boxes'] = all_boxes
-        result['image_paths'] = image_paths
-        result['bbox_ids'] = bbox_ids
+        result["preds"] = all_preds
+        result["boxes"] = all_boxes
+        result["image_paths"] = image_paths
+        result["bbox_ids"] = bbox_ids
 
         return result
 

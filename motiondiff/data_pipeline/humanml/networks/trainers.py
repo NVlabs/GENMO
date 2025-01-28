@@ -1,26 +1,29 @@
-import torch
-import torch.nn.functional as F
+import codecs as cs
 import random
-from data_loaders.humanml.networks.modules import *
-from torch.utils.data import DataLoader
-import torch.optim as optim
-from torch.nn.utils import clip_grad_norm_
+
 # import tensorflow as tf
 from collections import OrderedDict
-from data_loaders.humanml.utils.utils import *
 from os.path import join as pjoin
+
+import torch
+import torch.nn.functional as F
+import torch.optim as optim
 from data_loaders.humanml.data.dataset import collate_fn
-import codecs as cs
+from data_loaders.humanml.networks.modules import *
+from data_loaders.humanml.utils.utils import *
+from torch.nn.utils import clip_grad_norm_
+from torch.utils.data import DataLoader
 
 
 class Logger(object):
-  def __init__(self, log_dir):
-    self.writer = tf.summary.create_file_writer(log_dir)
+    def __init__(self, log_dir):
+        self.writer = tf.summary.create_file_writer(log_dir)
 
-  def scalar_summary(self, tag, value, step):
-      with self.writer.as_default():
-          tf.summary.scalar(tag, value, step=step)
-          self.writer.flush()
+    def scalar_summary(self, tag, value, step):
+        with self.writer.as_default():
+            tf.summary.scalar(tag, value, step=step)
+            self.writer.flush()
+
 
 class DecompTrainerV3(object):
     def __init__(self, args, movement_enc, movement_dec):
@@ -34,7 +37,6 @@ class DecompTrainerV3(object):
             self.sml1_criterion = torch.nn.SmoothL1Loss()
             self.l1_criterion = torch.nn.L1Loss()
             self.mse_criterion = torch.nn.MSELoss()
-
 
     @staticmethod
     def zero_grad(opt_list):
@@ -59,12 +61,15 @@ class DecompTrainerV3(object):
 
     def backward(self):
         self.loss_rec = self.l1_criterion(self.recon_motions, self.motions)
-                        # self.sml1_criterion(self.recon_motions[:, 1:] - self.recon_motions[:, :-1],
-                        #                     self.motions[:, 1:] - self.recon_motions[:, :-1])
+        # self.sml1_criterion(self.recon_motions[:, 1:] - self.recon_motions[:, :-1],
+        #                     self.motions[:, 1:] - self.recon_motions[:, :-1])
         self.loss_sparsity = torch.mean(torch.abs(self.latents))
         self.loss_smooth = self.l1_criterion(self.latents[:, 1:], self.latents[:, :-1])
-        self.loss = self.loss_rec + self.loss_sparsity * self.opt.lambda_sparsity +\
-                    self.loss_smooth*self.opt.lambda_smooth
+        self.loss = (
+            self.loss_rec
+            + self.loss_sparsity * self.opt.lambda_sparsity
+            + self.loss_smooth * self.opt.lambda_smooth
+        )
 
     def update(self):
         # time0 = time.time()
@@ -85,22 +90,20 @@ class DecompTrainerV3(object):
         # print('\t Step Time: %.5f s' % (time5 - time4))
 
         loss_logs = OrderedDict({})
-        loss_logs['loss'] = self.loss_rec.item()
-        loss_logs['loss_rec'] = self.loss_rec.item()
-        loss_logs['loss_sparsity'] = self.loss_sparsity.item()
-        loss_logs['loss_smooth'] = self.loss_smooth.item()
+        loss_logs["loss"] = self.loss_rec.item()
+        loss_logs["loss_rec"] = self.loss_rec.item()
+        loss_logs["loss_sparsity"] = self.loss_sparsity.item()
+        loss_logs["loss_smooth"] = self.loss_smooth.item()
         return loss_logs
 
     def save(self, file_name, ep, total_it):
         state = {
-            'movement_enc': self.movement_enc.state_dict(),
-            'movement_dec': self.movement_dec.state_dict(),
-
-            'opt_movement_enc': self.opt_movement_enc.state_dict(),
-            'opt_movement_dec': self.opt_movement_dec.state_dict(),
-
-            'ep': ep,
-            'total_it': total_it,
+            "movement_enc": self.movement_enc.state_dict(),
+            "movement_dec": self.movement_dec.state_dict(),
+            "opt_movement_enc": self.opt_movement_enc.state_dict(),
+            "opt_movement_dec": self.opt_movement_dec.state_dict(),
+            "ep": ep,
+            "total_it": total_it,
         }
         torch.save(state, file_name)
         return
@@ -108,31 +111,38 @@ class DecompTrainerV3(object):
     def resume(self, model_dir):
         checkpoint = torch.load(model_dir, map_location=self.device)
 
-        self.movement_dec.load_state_dict(checkpoint['movement_dec'])
-        self.movement_enc.load_state_dict(checkpoint['movement_enc'])
+        self.movement_dec.load_state_dict(checkpoint["movement_dec"])
+        self.movement_enc.load_state_dict(checkpoint["movement_enc"])
 
-        self.opt_movement_enc.load_state_dict(checkpoint['opt_movement_enc'])
-        self.opt_movement_dec.load_state_dict(checkpoint['opt_movement_dec'])
+        self.opt_movement_enc.load_state_dict(checkpoint["opt_movement_enc"])
+        self.opt_movement_dec.load_state_dict(checkpoint["opt_movement_dec"])
 
-        return checkpoint['ep'], checkpoint['total_it']
+        return checkpoint["ep"], checkpoint["total_it"]
 
     def train(self, train_dataloader, val_dataloader, plot_eval):
         self.movement_enc.to(self.device)
         self.movement_dec.to(self.device)
 
-        self.opt_movement_enc = optim.Adam(self.movement_enc.parameters(), lr=self.opt.lr)
-        self.opt_movement_dec = optim.Adam(self.movement_dec.parameters(), lr=self.opt.lr)
+        self.opt_movement_enc = optim.Adam(
+            self.movement_enc.parameters(), lr=self.opt.lr
+        )
+        self.opt_movement_dec = optim.Adam(
+            self.movement_dec.parameters(), lr=self.opt.lr
+        )
 
         epoch = 0
         it = 0
 
         if self.opt.is_continue:
-            model_dir = pjoin(self.opt.model_dir, 'latest.tar')
+            model_dir = pjoin(self.opt.model_dir, "latest.tar")
             epoch, it = self.resume(model_dir)
 
         start_time = time.time()
         total_iters = self.opt.max_epoch * len(train_dataloader)
-        print('Iters Per Epoch, Training: %04d, Validation: %03d' % (len(train_dataloader), len(val_dataloader)))
+        print(
+            "Iters Per Epoch, Training: %04d, Validation: %03d"
+            % (len(train_dataloader), len(val_dataloader))
+        )
         val_loss = 0
         logs = OrderedDict()
         while epoch < self.opt.max_epoch:
@@ -158,25 +168,29 @@ class DecompTrainerV3(object):
 
                 it += 1
                 if it % self.opt.log_every == 0:
-                    mean_loss = OrderedDict({'val_loss': val_loss})
-                    self.logger.scalar_summary('val_loss', val_loss, it)
+                    mean_loss = OrderedDict({"val_loss": val_loss})
+                    self.logger.scalar_summary("val_loss", val_loss, it)
 
                     for tag, value in logs.items():
                         self.logger.scalar_summary(tag, value / self.opt.log_every, it)
                         mean_loss[tag] = value / self.opt.log_every
                     logs = OrderedDict()
-                    print_current_loss_decomp(start_time, it, total_iters, mean_loss, epoch, i)
+                    print_current_loss_decomp(
+                        start_time, it, total_iters, mean_loss, epoch, i
+                    )
 
                     if it % self.opt.save_latest == 0:
-                        self.save(pjoin(self.opt.model_dir, 'latest.tar'), epoch, it)
+                        self.save(pjoin(self.opt.model_dir, "latest.tar"), epoch, it)
 
-            self.save(pjoin(self.opt.model_dir, 'latest.tar'), epoch, it)
+            self.save(pjoin(self.opt.model_dir, "latest.tar"), epoch, it)
 
             epoch += 1
             if epoch % self.opt.save_every_e == 0:
-                self.save(pjoin(self.opt.model_dir, 'E%04d.tar' % (epoch)), epoch, total_it=it)
+                self.save(
+                    pjoin(self.opt.model_dir, "E%04d.tar" % (epoch)), epoch, total_it=it
+                )
 
-            print('Validation time:')
+            print("Validation time:")
 
             val_loss = 0
             val_rec_loss = 0
@@ -196,21 +210,37 @@ class DecompTrainerV3(object):
             val_rec_loss = val_rec_loss / (len(val_dataloader) + 1)
             val_sparcity_loss = val_sparcity_loss / (len(val_dataloader) + 1)
             val_smooth_loss = val_smooth_loss / (len(val_dataloader) + 1)
-            print('Validation Loss: %.5f Reconstruction Loss: %.5f '
-                  'Sparsity Loss: %.5f Smooth Loss: %.5f' % (val_loss, val_rec_loss, val_sparcity_loss, \
-                                                             val_smooth_loss))
+            print(
+                "Validation Loss: %.5f Reconstruction Loss: %.5f "
+                "Sparsity Loss: %.5f Smooth Loss: %.5f"
+                % (val_loss, val_rec_loss, val_sparcity_loss, val_smooth_loss)
+            )
 
             if epoch % self.opt.eval_every_e == 0:
-                data = torch.cat([self.recon_motions[:4], self.motions[:4]], dim=0).detach().cpu().numpy()
-                save_dir = pjoin(self.opt.eval_dir, 'E%04d' % (epoch))
+                data = (
+                    torch.cat([self.recon_motions[:4], self.motions[:4]], dim=0)
+                    .detach()
+                    .cpu()
+                    .numpy()
+                )
+                save_dir = pjoin(self.opt.eval_dir, "E%04d" % (epoch))
                 os.makedirs(save_dir, exist_ok=True)
                 plot_eval(data, save_dir)
 
 
 # VAE Sequence Decoder/Prior/Posterior latent by latent
 class CompTrainerV6(object):
-
-    def __init__(self, args, text_enc, seq_pri, seq_dec, att_layer, mov_dec, mov_enc=None, seq_post=None):
+    def __init__(
+        self,
+        args,
+        text_enc,
+        seq_pri,
+        seq_dec,
+        att_layer,
+        mov_dec,
+        mov_enc=None,
+        seq_post=None,
+    ):
         self.opt = args
         self.text_enc = text_enc
         self.seq_pri = seq_pri
@@ -235,12 +265,22 @@ class CompTrainerV6(object):
         return eps.mul(s_var).add_(mu)
 
     @staticmethod
-    def ones_like(tensor, val=1.):
-        return torch.FloatTensor(tensor.size()).fill_(val).to(tensor.device).requires_grad_(False)
+    def ones_like(tensor, val=1.0):
+        return (
+            torch.FloatTensor(tensor.size())
+            .fill_(val)
+            .to(tensor.device)
+            .requires_grad_(False)
+        )
 
     @staticmethod
-    def zeros_like(tensor, val=0.):
-        return torch.FloatTensor(tensor.size()).fill_(val).to(tensor.device).requires_grad_(False)
+    def zeros_like(tensor, val=0.0):
+        return (
+            torch.FloatTensor(tensor.size())
+            .fill_(val)
+            .to(tensor.device)
+            .requires_grad_(False)
+        )
 
     @staticmethod
     def zero_grad(opt_list):
@@ -263,15 +303,18 @@ class CompTrainerV6(object):
         # loss = log(sigma2/sigma1) + (sigma1^2 + (mu1 - mu2)^2)/(2*sigma2^2) - 1/2
         sigma1 = logvar1.mul(0.5).exp()
         sigma2 = logvar2.mul(0.5).exp()
-        kld = torch.log(sigma2 / sigma1) + (torch.exp(logvar1) + (mu1 - mu2) ** 2) / (
-                2 * torch.exp(logvar2)) - 1 / 2
+        kld = (
+            torch.log(sigma2 / sigma1)
+            + (torch.exp(logvar1) + (mu1 - mu2) ** 2) / (2 * torch.exp(logvar2))
+            - 1 / 2
+        )
         return kld.sum() / mu1.shape[0]
 
     @staticmethod
     def kl_criterion_unit(mu, logvar):
         # KL( N(mu1, sigma2_1) || N(mu_2, sigma2_2))
         # loss = log(sigma2/sigma1) + (sigma1^2 + (mu1 - mu2)^2)/(2*sigma2^2) - 1/2
-        kld = ((torch.exp(logvar) + mu ** 2)  - logvar  - 1) / 2
+        kld = ((torch.exp(logvar) + mu**2) - logvar - 1) / 2
         return kld.sum() / mu.shape[0]
 
     def forward(self, batch_data, tf_ratio, mov_len, eval_mode=False):
@@ -286,27 +329,38 @@ class CompTrainerV6(object):
         # (batch_size, motion_len, pose_dim)
         self.motions = motions
 
-        '''Movement Encoding'''
+        """Movement Encoding"""
         self.movements = self.mov_enc(self.motions[..., :-4]).detach()
         # Initially input a mean vector
-        mov_in = self.mov_enc(
-            torch.zeros((self.motions.shape[0], self.opt.unit_length, self.motions.shape[-1] - 4), device=self.device)
-        ).squeeze(1).detach()
+        mov_in = (
+            self.mov_enc(
+                torch.zeros(
+                    (
+                        self.motions.shape[0],
+                        self.opt.unit_length,
+                        self.motions.shape[-1] - 4,
+                    ),
+                    device=self.device,
+                )
+            )
+            .squeeze(1)
+            .detach()
+        )
         assert self.movements.shape[1] == mov_len
 
         teacher_force = True if random.random() < tf_ratio else False
 
-        '''Text Encoding'''
+        """Text Encoding"""
         # time0 = time.time()
         # text_input = torch.cat([word_emb, pos_ohot], dim=-1)
         word_hids, hidden = self.text_enc(word_emb, pos_ohot, cap_lens)
         # print(word_hids.shape, hidden.shape)
 
-        if self.opt.text_enc_mod == 'bigru':
+        if self.opt.text_enc_mod == "bigru":
             hidden_pos = self.seq_post.get_init_hidden(hidden)
             hidden_pri = self.seq_pri.get_init_hidden(hidden)
             hidden_dec = self.seq_dec.get_init_hidden(hidden)
-        elif self.opt.text_enc_mod == 'transformer':
+        elif self.opt.text_enc_mod == "transformer":
             hidden_pos = self.seq_post.get_init_hidden(hidden.detach())
             hidden_pri = self.seq_pri.get_init_hidden(hidden.detach())
             hidden_dec = self.seq_dec.get_init_hidden(hidden)
@@ -327,27 +381,31 @@ class CompTrainerV6(object):
             # print("\t Sequence Measure")
             # print(mov_in.shape)
             mov_tgt = self.movements[:, i]
-            '''Local Attention Vector'''
+            """Local Attention Vector"""
             att_vec, _ = self.att_layer(hidden_dec[-1], word_hids)
             query_input.append(hidden_dec[-1])
 
             tta = m_lens // self.opt.unit_length - i
 
-            if self.opt.text_enc_mod == 'bigru':
+            if self.opt.text_enc_mod == "bigru":
                 pos_in = torch.cat([mov_in, mov_tgt, att_vec], dim=-1)
                 pri_in = torch.cat([mov_in, att_vec], dim=-1)
 
-            elif self.opt.text_enc_mod == 'transformer':
+            elif self.opt.text_enc_mod == "transformer":
                 pos_in = torch.cat([mov_in, mov_tgt, att_vec.detach()], dim=-1)
                 pri_in = torch.cat([mov_in, att_vec.detach()], dim=-1)
 
-            '''Posterior'''
-            z_pos, mu_pos, logvar_pos, hidden_pos = self.seq_post(pos_in, hidden_pos, tta)
+            """Posterior"""
+            z_pos, mu_pos, logvar_pos, hidden_pos = self.seq_post(
+                pos_in, hidden_pos, tta
+            )
 
-            '''Prior'''
-            z_pri, mu_pri, logvar_pri, hidden_pri = self.seq_pri(pri_in, hidden_pri, tta)
+            """Prior"""
+            z_pri, mu_pri, logvar_pri, hidden_pri = self.seq_pri(
+                pri_in, hidden_pri, tta
+            )
 
-            '''Decoder'''
+            """Decoder"""
             if eval_mode:
                 dec_in = torch.cat([mov_in, att_vec, z_pri], dim=-1)
             else:
@@ -366,7 +424,6 @@ class CompTrainerV6(object):
                 mov_in = self.movements[:, i].detach()
             else:
                 mov_in = fake_mov.detach()
-
 
         self.fake_movements = torch.cat(fake_mov_batch, dim=1)
 
@@ -387,13 +444,20 @@ class CompTrainerV6(object):
         # print(motions.shape)
         # (batch_size, motion_len, pose_dim)
 
-        '''Movement Encoding'''
+        """Movement Encoding"""
         # Initially input a mean vector
-        mov_in = self.mov_enc(
-            torch.zeros((word_emb.shape[0], self.opt.unit_length, dim_pose - 4), device=self.device)
-        ).squeeze(1).detach()
+        mov_in = (
+            self.mov_enc(
+                torch.zeros(
+                    (word_emb.shape[0], self.opt.unit_length, dim_pose - 4),
+                    device=self.device,
+                )
+            )
+            .squeeze(1)
+            .detach()
+        )
 
-        '''Text Encoding'''
+        """Text Encoding"""
         # time0 = time.time()
         # text_input = torch.cat([word_emb, pos_ohot], dim=-1)
         word_hids, hidden = self.text_enc(word_emb, pos_ohot, cap_lens)
@@ -414,19 +478,21 @@ class CompTrainerV6(object):
         for i in range(mov_len):
             # print("\t Sequence Measure")
             # print(mov_in.shape)
-            '''Local Attention Vector'''
+            """Local Attention Vector"""
             att_vec, co_weights = self.att_layer(hidden_dec[-1], word_hids)
 
             tta = m_lens // self.opt.unit_length - i
             # tta = m_lens - i
 
-            '''Prior'''
+            """Prior"""
             pri_in = torch.cat([mov_in, att_vec], dim=-1)
-            z_pri, mu_pri, logvar_pri, hidden_pri = self.seq_pri(pri_in, hidden_pri, tta)
+            z_pri, mu_pri, logvar_pri, hidden_pri = self.seq_pri(
+                pri_in, hidden_pri, tta
+            )
 
-            '''Decoder'''
+            """Decoder"""
             dec_in = torch.cat([mov_in, att_vec, z_pri], dim=-1)
-            
+
             fake_mov, hidden_dec = self.seq_dec(dec_in, mov_in, hidden_dec, tta)
 
             # print(fake_mov.shape)
@@ -453,15 +519,20 @@ class CompTrainerV6(object):
         self.loss_mot_rec = self.l1_criterion(self.fake_motions, self.motions)
         self.loss_mov_rec = self.l1_criterion(self.fake_movements, self.movements)
 
-        self.loss_kld = self.kl_criterion(self.mus_post, self.logvars_post, self.mus_pri, self.logvars_pri)
+        self.loss_kld = self.kl_criterion(
+            self.mus_post, self.logvars_post, self.mus_pri, self.logvars_pri
+        )
 
-        self.loss_gen = self.loss_mot_rec * self.opt.lambda_rec_mov + self.loss_mov_rec * self.opt.lambda_rec_mot + \
-                        self.loss_kld * self.opt.lambda_kld
+        self.loss_gen = (
+            self.loss_mot_rec * self.opt.lambda_rec_mov
+            + self.loss_mov_rec * self.opt.lambda_rec_mot
+            + self.loss_kld * self.opt.lambda_kld
+        )
         loss_logs = OrderedDict({})
-        loss_logs['loss_gen'] = self.loss_gen.item()
-        loss_logs['loss_mot_rec'] = self.loss_mot_rec.item()
-        loss_logs['loss_mov_rec'] = self.loss_mov_rec.item()
-        loss_logs['loss_kld'] = self.loss_kld.item()
+        loss_logs["loss_gen"] = self.loss_gen.item()
+        loss_logs["loss_mot_rec"] = self.loss_mot_rec.item()
+        loss_logs["loss_mov_rec"] = self.loss_mov_rec.item()
+        loss_logs["loss_kld"] = self.loss_kld.item()
 
         return loss_logs
         # self.loss_gen = self.loss_rec_mov
@@ -470,11 +541,17 @@ class CompTrainerV6(object):
         #                 self.loss_kld * self.opt.lambda_kld + \
         #                 self.loss_mtgan_G * self.opt.lambda_gan_mt + self.loss_mvgan_G * self.opt.lambda_gan_mv
 
-
     def update(self):
-
-        self.zero_grad([self.opt_text_enc, self.opt_seq_dec, self.opt_seq_post,
-                        self.opt_seq_pri, self.opt_att_layer, self.opt_mov_dec])
+        self.zero_grad(
+            [
+                self.opt_text_enc,
+                self.opt_seq_dec,
+                self.opt_seq_post,
+                self.opt_seq_pri,
+                self.opt_att_layer,
+                self.opt_mov_dec,
+            ]
+        )
         # time2_0 = time.time()
         # print("\t\t Zero Grad:%5f" % (time2_0 - time1))
         loss_logs = self.backward_G()
@@ -485,13 +562,29 @@ class CompTrainerV6(object):
 
         # time2_2 = time.time()
         # print("\t\t Backward :%5f" % (time2_2 - time2_1))
-        self.clip_norm([self.text_enc, self.seq_dec, self.seq_post, self.seq_pri,
-                        self.att_layer, self.mov_dec])
+        self.clip_norm(
+            [
+                self.text_enc,
+                self.seq_dec,
+                self.seq_post,
+                self.seq_pri,
+                self.att_layer,
+                self.mov_dec,
+            ]
+        )
 
         # time2_3 = time.time()
         # print("\t\t Clip Norm :%5f" % (time2_3 - time2_2))
-        self.step([self.opt_text_enc, self.opt_seq_dec, self.opt_seq_post,
-                        self.opt_seq_pri, self.opt_att_layer, self.opt_mov_dec])
+        self.step(
+            [
+                self.opt_text_enc,
+                self.opt_seq_dec,
+                self.opt_seq_post,
+                self.opt_seq_pri,
+                self.opt_att_layer,
+                self.opt_mov_dec,
+            ]
+        )
 
         # time2_4 = time.time()
         # print("\t\t Step :%5f" % (time2_4 - time2_3))
@@ -528,53 +621,49 @@ class CompTrainerV6(object):
         if self.opt.is_train:
             self.seq_post.train()
         self.mov_enc.eval()
-            # self.motion_dis.train()
-            # self.movement_dis.train()
+        # self.motion_dis.train()
+        # self.movement_dis.train()
         self.mov_dec.train()
         self.text_enc.train()
         self.seq_pri.train()
         self.att_layer.train()
         self.seq_dec.train()
 
-
     def eval_mode(self):
         if self.opt.is_train:
             self.seq_post.eval()
         self.mov_enc.eval()
-            # self.motion_dis.train()
-            # self.movement_dis.train()
+        # self.motion_dis.train()
+        # self.movement_dis.train()
         self.mov_dec.eval()
         self.text_enc.eval()
         self.seq_pri.eval()
         self.att_layer.eval()
         self.seq_dec.eval()
 
-
     def save(self, file_name, ep, total_it, sub_ep, sl_len):
         state = {
             # 'latent_dis': self.latent_dis.state_dict(),
             # 'motion_dis': self.motion_dis.state_dict(),
-            'text_enc': self.text_enc.state_dict(),
-            'seq_post': self.seq_post.state_dict(),
-            'att_layer': self.att_layer.state_dict(),
-            'seq_dec': self.seq_dec.state_dict(),
-            'seq_pri': self.seq_pri.state_dict(),
-            'mov_enc': self.mov_enc.state_dict(),
-            'mov_dec': self.mov_dec.state_dict(),
-
+            "text_enc": self.text_enc.state_dict(),
+            "seq_post": self.seq_post.state_dict(),
+            "att_layer": self.att_layer.state_dict(),
+            "seq_dec": self.seq_dec.state_dict(),
+            "seq_pri": self.seq_pri.state_dict(),
+            "mov_enc": self.mov_enc.state_dict(),
+            "mov_dec": self.mov_dec.state_dict(),
             # 'opt_motion_dis': self.opt_motion_dis.state_dict(),
-            'opt_mov_dec': self.opt_mov_dec.state_dict(),
-            'opt_text_enc': self.opt_text_enc.state_dict(),
-            'opt_seq_pri': self.opt_seq_pri.state_dict(),
-            'opt_att_layer': self.opt_att_layer.state_dict(),
-            'opt_seq_post': self.opt_seq_post.state_dict(),
-            'opt_seq_dec': self.opt_seq_dec.state_dict(),
+            "opt_mov_dec": self.opt_mov_dec.state_dict(),
+            "opt_text_enc": self.opt_text_enc.state_dict(),
+            "opt_seq_pri": self.opt_seq_pri.state_dict(),
+            "opt_att_layer": self.opt_att_layer.state_dict(),
+            "opt_seq_post": self.opt_seq_post.state_dict(),
+            "opt_seq_dec": self.opt_seq_dec.state_dict(),
             # 'opt_movement_dis': self.opt_movement_dis.state_dict(),
-
-            'ep': ep,
-            'total_it': total_it,
-            'sub_ep': sub_ep,
-            'sl_len': sl_len
+            "ep": ep,
+            "total_it": total_it,
+            "sub_ep": sub_ep,
+            "sl_len": sl_len,
         }
         torch.save(state, file_name)
         return
@@ -582,24 +671,29 @@ class CompTrainerV6(object):
     def load(self, model_dir):
         checkpoint = torch.load(model_dir, map_location=self.device)
         if self.opt.is_train:
-            self.seq_post.load_state_dict(checkpoint['seq_post'])
+            self.seq_post.load_state_dict(checkpoint["seq_post"])
             # self.opt_latent_dis.load_state_dict(checkpoint['opt_latent_dis'])
 
-            self.opt_text_enc.load_state_dict(checkpoint['opt_text_enc'])
-            self.opt_seq_post.load_state_dict(checkpoint['opt_seq_post'])
-            self.opt_att_layer.load_state_dict(checkpoint['opt_att_layer'])
-            self.opt_seq_pri.load_state_dict(checkpoint['opt_seq_pri'])
-            self.opt_seq_dec.load_state_dict(checkpoint['opt_seq_dec'])
-            self.opt_mov_dec.load_state_dict(checkpoint['opt_mov_dec'])
+            self.opt_text_enc.load_state_dict(checkpoint["opt_text_enc"])
+            self.opt_seq_post.load_state_dict(checkpoint["opt_seq_post"])
+            self.opt_att_layer.load_state_dict(checkpoint["opt_att_layer"])
+            self.opt_seq_pri.load_state_dict(checkpoint["opt_seq_pri"])
+            self.opt_seq_dec.load_state_dict(checkpoint["opt_seq_dec"])
+            self.opt_mov_dec.load_state_dict(checkpoint["opt_mov_dec"])
 
-        self.text_enc.load_state_dict(checkpoint['text_enc'])
-        self.mov_dec.load_state_dict(checkpoint['mov_dec'])
-        self.seq_pri.load_state_dict(checkpoint['seq_pri'])
-        self.att_layer.load_state_dict(checkpoint['att_layer'])
-        self.seq_dec.load_state_dict(checkpoint['seq_dec'])
-        self.mov_enc.load_state_dict(checkpoint['mov_enc'])
+        self.text_enc.load_state_dict(checkpoint["text_enc"])
+        self.mov_dec.load_state_dict(checkpoint["mov_dec"])
+        self.seq_pri.load_state_dict(checkpoint["seq_pri"])
+        self.att_layer.load_state_dict(checkpoint["att_layer"])
+        self.seq_dec.load_state_dict(checkpoint["seq_dec"])
+        self.mov_enc.load_state_dict(checkpoint["mov_enc"])
 
-        return checkpoint['ep'], checkpoint['total_it'], checkpoint['sub_ep'], checkpoint['sl_len']
+        return (
+            checkpoint["ep"],
+            checkpoint["total_it"],
+            checkpoint["sub_ep"],
+            checkpoint["sl_len"],
+        )
 
     def train(self, train_dataset, val_dataset, plot_eval):
         self.to(self.device)
@@ -610,18 +704,18 @@ class CompTrainerV6(object):
         self.opt_att_layer = optim.Adam(self.att_layer.parameters(), lr=self.opt.lr)
         self.opt_seq_dec = optim.Adam(self.seq_dec.parameters(), lr=self.opt.lr)
 
-        self.opt_mov_dec = optim.Adam(self.mov_dec.parameters(), lr=self.opt.lr*0.1)
+        self.opt_mov_dec = optim.Adam(self.mov_dec.parameters(), lr=self.opt.lr * 0.1)
 
         epoch = 0
         it = 0
-        if self.opt.dataset_name == 't2m':
+        if self.opt.dataset_name == "t2m":
             schedule_len = 10
-        elif self.opt.dataset_name == 'kit':
+        elif self.opt.dataset_name == "kit":
             schedule_len = 6
         sub_ep = 0
 
         if self.opt.is_continue:
-            model_dir = pjoin(self.opt.model_dir, 'latest.tar')
+            model_dir = pjoin(self.opt.model_dir, "latest.tar")
             epoch, it, sub_ep, schedule_len = self.load(model_dir)
 
         invalid = True
@@ -632,11 +726,28 @@ class CompTrainerV6(object):
             train_dataset.reset_max_len(schedule_len * self.opt.unit_length)
             val_dataset.reset_max_len(schedule_len * self.opt.unit_length)
 
-            train_loader = DataLoader(train_dataset, batch_size=self.opt.batch_size, drop_last=True, num_workers=4,
-                                      shuffle=True, collate_fn=collate_fn, pin_memory=True)
-            val_loader = DataLoader(val_dataset, batch_size=self.opt.batch_size, drop_last=True, num_workers=4,
-                                      shuffle=True, collate_fn=collate_fn, pin_memory=True)
-            print("Max_Length:%03d Training Split:%05d Validation Split:%04d" % (schedule_len, len(train_loader), len(val_loader)))
+            train_loader = DataLoader(
+                train_dataset,
+                batch_size=self.opt.batch_size,
+                drop_last=True,
+                num_workers=4,
+                shuffle=True,
+                collate_fn=collate_fn,
+                pin_memory=True,
+            )
+            val_loader = DataLoader(
+                val_dataset,
+                batch_size=self.opt.batch_size,
+                drop_last=True,
+                num_workers=4,
+                shuffle=True,
+                collate_fn=collate_fn,
+                pin_memory=True,
+            )
+            print(
+                "Max_Length:%03d Training Split:%05d Validation Split:%04d"
+                % (schedule_len, len(train_loader), len(val_loader))
+            )
 
             min_val_loss = np.inf
             stop_cnt = 0
@@ -663,22 +774,37 @@ class CompTrainerV6(object):
                             logs[k] += v
                     time4 = time.time()
 
-
                     it += 1
                     if it % self.opt.log_every == 0:
-                        mean_loss = OrderedDict({'val_loss': val_loss})
-                        self.logger.scalar_summary('val_loss', val_loss, it)
-                        self.logger.scalar_summary('scheduled_length', schedule_len, it)
+                        mean_loss = OrderedDict({"val_loss": val_loss})
+                        self.logger.scalar_summary("val_loss", val_loss, it)
+                        self.logger.scalar_summary("scheduled_length", schedule_len, it)
 
                         for tag, value in logs.items():
-                            self.logger.scalar_summary(tag, value/self.opt.log_every, it)
+                            self.logger.scalar_summary(
+                                tag, value / self.opt.log_every, it
+                            )
                             mean_loss[tag] = value / self.opt.log_every
                         logs = OrderedDict()
-                        print_current_loss(start_time, it, mean_loss, epoch, sub_epoch=sub_epoch, inner_iter=i,
-                                           tf_ratio=tf_ratio, sl_steps=schedule_len)
+                        print_current_loss(
+                            start_time,
+                            it,
+                            mean_loss,
+                            epoch,
+                            sub_epoch=sub_epoch,
+                            inner_iter=i,
+                            tf_ratio=tf_ratio,
+                            sl_steps=schedule_len,
+                        )
 
                     if it % self.opt.save_latest == 0:
-                        self.save(pjoin(self.opt.model_dir, 'latest.tar'), epoch, it, sub_epoch, schedule_len)
+                        self.save(
+                            pjoin(self.opt.model_dir, "latest.tar"),
+                            epoch,
+                            it,
+                            sub_epoch,
+                            schedule_len,
+                        )
 
                     time5 = time.time()
                     # print("Data Loader Time: %5f s" % ((time2 - time1)))
@@ -687,14 +813,29 @@ class CompTrainerV6(object):
                     # print('Per Iteration: %5f s' % ((time5 -  time1)))
                     time1 = time5
 
-                self.save(pjoin(self.opt.model_dir, 'latest.tar'), epoch, it, sub_epoch, schedule_len)
+                self.save(
+                    pjoin(self.opt.model_dir, "latest.tar"),
+                    epoch,
+                    it,
+                    sub_epoch,
+                    schedule_len,
+                )
 
                 epoch += 1
                 if epoch % self.opt.save_every_e == 0:
-                    self.save(pjoin(self.opt.model_dir, 'E%03d_SE%02d_SL%02d.tar'%(epoch, sub_epoch, schedule_len)),
-                              epoch, total_it=it, sub_ep=sub_epoch, sl_len=schedule_len)
+                    self.save(
+                        pjoin(
+                            self.opt.model_dir,
+                            "E%03d_SE%02d_SL%02d.tar"
+                            % (epoch, sub_epoch, schedule_len),
+                        ),
+                        epoch,
+                        total_it=it,
+                        sub_ep=sub_epoch,
+                        sl_len=schedule_len,
+                    )
 
-                print('Validation time:')
+                print("Validation time:")
 
                 loss_mot_rec = 0
                 loss_mov_rec = 0
@@ -713,8 +854,10 @@ class CompTrainerV6(object):
                 loss_mov_rec /= len(val_loader) + 1
                 loss_kld /= len(val_loader) + 1
                 val_loss /= len(val_loader) + 1
-                print('Validation Loss: %.5f Movement Recon Loss: %.5f Motion Recon Loss: %.5f KLD Loss: %.5f:' %
-                      (val_loss, loss_mov_rec, loss_mot_rec, loss_kld))
+                print(
+                    "Validation Loss: %.5f Movement Recon Loss: %.5f Motion Recon Loss: %.5f KLD Loss: %.5f:"
+                    % (val_loss, loss_mov_rec, loss_mot_rec, loss_kld)
+                )
 
                 if epoch % self.opt.eval_every_e == 0:
                     reco_data = self.fake_motions[:4]
@@ -722,9 +865,14 @@ class CompTrainerV6(object):
                         self.forward(batch_data, 0, schedule_len, eval_mode=True)
                     fake_data = self.fake_motions[:4]
                     gt_data = self.motions[:4]
-                    data = torch.cat([fake_data, reco_data, gt_data], dim=0).cpu().numpy()
+                    data = (
+                        torch.cat([fake_data, reco_data, gt_data], dim=0).cpu().numpy()
+                    )
                     captions = self.caption[:4] * 3
-                    save_dir = pjoin(self.opt.eval_dir, 'E%03d_SE%02d_SL%02d'%(epoch, sub_epoch, schedule_len))
+                    save_dir = pjoin(
+                        self.opt.eval_dir,
+                        "E%03d_SE%02d_SL%02d" % (epoch, sub_epoch, schedule_len),
+                    )
                     os.makedirs(save_dir, exist_ok=True)
                     plot_eval(data, save_dir, captions)
 
@@ -746,7 +894,6 @@ class CompTrainerV6(object):
 
 
 class LengthEstTrainer(object):
-
     def __init__(self, args, estimator):
         self.opt = args
         self.estimator = estimator
@@ -759,16 +906,16 @@ class LengthEstTrainer(object):
 
     def resume(self, model_dir):
         checkpoints = torch.load(model_dir, map_location=self.device)
-        self.estimator.load_state_dict(checkpoints['estimator'])
-        self.opt_estimator.load_state_dict(checkpoints['opt_estimator'])
-        return checkpoints['epoch'], checkpoints['iter']
+        self.estimator.load_state_dict(checkpoints["estimator"])
+        self.opt_estimator.load_state_dict(checkpoints["opt_estimator"])
+        return checkpoints["epoch"], checkpoints["iter"]
 
     def save(self, model_dir, epoch, niter):
         state = {
-            'estimator': self.estimator.state_dict(),
-            'opt_estimator': self.opt_estimator.state_dict(),
-            'epoch': epoch,
-            'niter': niter,
+            "estimator": self.estimator.state_dict(),
+            "opt_estimator": self.opt_estimator.state_dict(),
+            "epoch": epoch,
+            "niter": niter,
         }
         torch.save(state, model_dir)
 
@@ -796,15 +943,18 @@ class LengthEstTrainer(object):
         it = 0
 
         if self.opt.is_continue:
-            model_dir = pjoin(self.opt.model_dir, 'latest.tar')
+            model_dir = pjoin(self.opt.model_dir, "latest.tar")
             epoch, it = self.resume(model_dir)
 
         start_time = time.time()
         total_iters = self.opt.max_epoch * len(train_dataloader)
-        print('Iters Per Epoch, Training: %04d, Validation: %03d' % (len(train_dataloader), len(val_dataloader)))
+        print(
+            "Iters Per Epoch, Training: %04d, Validation: %03d"
+            % (len(train_dataloader), len(val_dataloader))
+        )
         val_loss = 0
         min_val_loss = np.inf
-        logs = OrderedDict({'loss': 0})
+        logs = OrderedDict({"loss": 0})
         while epoch < self.opt.max_epoch:
             # time0 = time.time()
             for i, batch_data in enumerate(train_dataloader):
@@ -829,29 +979,31 @@ class LengthEstTrainer(object):
                 self.clip_norm([self.estimator])
                 self.step([self.opt_estimator])
 
-                logs['loss'] += loss.item()
+                logs["loss"] += loss.item()
 
                 it += 1
                 if it % self.opt.log_every == 0:
-                    mean_loss = OrderedDict({'val_loss': val_loss})
-                    self.logger.scalar_summary('val_loss', val_loss, it)
+                    mean_loss = OrderedDict({"val_loss": val_loss})
+                    self.logger.scalar_summary("val_loss", val_loss, it)
 
                     for tag, value in logs.items():
                         self.logger.scalar_summary(tag, value / self.opt.log_every, it)
                         mean_loss[tag] = value / self.opt.log_every
-                    logs = OrderedDict({'loss': 0})
-                    print_current_loss_decomp(start_time, it, total_iters, mean_loss, epoch, i)
+                    logs = OrderedDict({"loss": 0})
+                    print_current_loss_decomp(
+                        start_time, it, total_iters, mean_loss, epoch, i
+                    )
 
                     if it % self.opt.save_latest == 0:
-                        self.save(pjoin(self.opt.model_dir, 'latest.tar'), epoch, it)
+                        self.save(pjoin(self.opt.model_dir, "latest.tar"), epoch, it)
 
-            self.save(pjoin(self.opt.model_dir, 'latest.tar'), epoch, it)
+            self.save(pjoin(self.opt.model_dir, "latest.tar"), epoch, it)
 
             epoch += 1
             if epoch % self.opt.save_every_e == 0:
-                self.save(pjoin(self.opt.model_dir, 'E%04d.tar' % (epoch)), epoch, it)
+                self.save(pjoin(self.opt.model_dir, "E%04d.tar" % (epoch)), epoch, it)
 
-            print('Validation time:')
+            print("Validation time:")
 
             val_loss = 0
             with torch.no_grad():
@@ -869,15 +1021,14 @@ class LengthEstTrainer(object):
                     val_loss += loss.item()
 
             val_loss = val_loss / (len(val_dataloader) + 1)
-            print('Validation Loss: %.5f' % (val_loss))
+            print("Validation Loss: %.5f" % (val_loss))
 
             if val_loss < min_val_loss:
-                self.save(pjoin(self.opt.model_dir, 'finest.tar'), epoch, it)
+                self.save(pjoin(self.opt.model_dir, "finest.tar"), epoch, it)
                 min_val_loss = val_loss
 
 
 class TextMotionMatchTrainer(object):
-
     def __init__(self, args, text_encoder, motion_encoder, movement_encoder):
         self.opt = args
         self.text_encoder = text_encoder
@@ -892,24 +1043,23 @@ class TextMotionMatchTrainer(object):
 
     def resume(self, model_dir):
         checkpoints = torch.load(model_dir, map_location=self.device)
-        self.text_encoder.load_state_dict(checkpoints['text_encoder'])
-        self.motion_encoder.load_state_dict(checkpoints['motion_encoder'])
-        self.movement_encoder.load_state_dict(checkpoints['movement_encoder'])
+        self.text_encoder.load_state_dict(checkpoints["text_encoder"])
+        self.motion_encoder.load_state_dict(checkpoints["motion_encoder"])
+        self.movement_encoder.load_state_dict(checkpoints["movement_encoder"])
 
-        self.opt_text_encoder.load_state_dict(checkpoints['opt_text_encoder'])
-        self.opt_motion_encoder.load_state_dict(checkpoints['opt_motion_encoder'])
-        return checkpoints['epoch'], checkpoints['iter']
+        self.opt_text_encoder.load_state_dict(checkpoints["opt_text_encoder"])
+        self.opt_motion_encoder.load_state_dict(checkpoints["opt_motion_encoder"])
+        return checkpoints["epoch"], checkpoints["iter"]
 
     def save(self, model_dir, epoch, niter):
         state = {
-            'text_encoder': self.text_encoder.state_dict(),
-            'motion_encoder': self.motion_encoder.state_dict(),
-            'movement_encoder': self.movement_encoder.state_dict(),
-
-            'opt_text_encoder': self.opt_text_encoder.state_dict(),
-            'opt_motion_encoder': self.opt_motion_encoder.state_dict(),
-            'epoch': epoch,
-            'iter': niter,
+            "text_encoder": self.text_encoder.state_dict(),
+            "motion_encoder": self.motion_encoder.state_dict(),
+            "movement_encoder": self.movement_encoder.state_dict(),
+            "opt_text_encoder": self.opt_text_encoder.state_dict(),
+            "opt_motion_encoder": self.opt_motion_encoder.state_dict(),
+            "epoch": epoch,
+            "iter": niter,
         }
         torch.save(state, model_dir)
 
@@ -951,42 +1101,42 @@ class TextMotionMatchTrainer(object):
         motions = motions[self.align_idx]
         m_lens = m_lens[self.align_idx]
 
-        '''Movement Encoding'''
+        """Movement Encoding"""
         movements = self.movement_encoder(motions[..., :-4]).detach()
         m_lens = m_lens // self.opt.unit_length
         self.motion_embedding = self.motion_encoder(movements, m_lens)
 
-        '''Text Encoding'''
+        """Text Encoding"""
         # time0 = time.time()
         # text_input = torch.cat([word_emb, pos_ohot], dim=-1)
         self.text_embedding = self.text_encoder(word_emb, pos_ohot, cap_lens)
         self.text_embedding = self.text_embedding.clone()[self.align_idx]
 
-
     def backward(self):
-
         batch_size = self.text_embedding.shape[0]
-        '''Positive pairs'''
+        """Positive pairs"""
         pos_labels = torch.zeros(batch_size).to(self.text_embedding.device)
-        self.loss_pos = self.contrastive_loss(self.text_embedding, self.motion_embedding, pos_labels)
+        self.loss_pos = self.contrastive_loss(
+            self.text_embedding, self.motion_embedding, pos_labels
+        )
 
-        '''Negative Pairs, shifting index'''
+        """Negative Pairs, shifting index"""
         neg_labels = torch.ones(batch_size).to(self.text_embedding.device)
-        shift = np.random.randint(0, batch_size-1)
+        shift = np.random.randint(0, batch_size - 1)
         new_idx = np.arange(shift, batch_size + shift) % batch_size
         self.mis_motion_embedding = self.motion_embedding.clone()[new_idx]
-        self.loss_neg = self.contrastive_loss(self.text_embedding, self.mis_motion_embedding, neg_labels)
+        self.loss_neg = self.contrastive_loss(
+            self.text_embedding, self.mis_motion_embedding, neg_labels
+        )
         self.loss = self.loss_pos + self.loss_neg
 
         loss_logs = OrderedDict({})
-        loss_logs['loss'] = self.loss.item()
-        loss_logs['loss_pos'] = self.loss_pos.item()
-        loss_logs['loss_neg'] = self.loss_neg.item()
+        loss_logs["loss"] = self.loss.item()
+        loss_logs["loss_pos"] = self.loss_pos.item()
+        loss_logs["loss_neg"] = self.loss_neg.item()
         return loss_logs
 
-
     def update(self):
-
         self.zero_grad([self.opt_motion_encoder, self.opt_text_encoder])
         loss_logs = self.backward()
         self.loss.backward()
@@ -995,23 +1145,29 @@ class TextMotionMatchTrainer(object):
 
         return loss_logs
 
-
     def train(self, train_dataloader, val_dataloader):
         self.to(self.device)
 
-        self.opt_motion_encoder = optim.Adam(self.motion_encoder.parameters(), lr=self.opt.lr)
-        self.opt_text_encoder = optim.Adam(self.text_encoder.parameters(), lr=self.opt.lr)
+        self.opt_motion_encoder = optim.Adam(
+            self.motion_encoder.parameters(), lr=self.opt.lr
+        )
+        self.opt_text_encoder = optim.Adam(
+            self.text_encoder.parameters(), lr=self.opt.lr
+        )
 
         epoch = 0
         it = 0
 
         if self.opt.is_continue:
-            model_dir = pjoin(self.opt.model_dir, 'latest.tar')
+            model_dir = pjoin(self.opt.model_dir, "latest.tar")
             epoch, it = self.resume(model_dir)
 
         start_time = time.time()
         total_iters = self.opt.max_epoch * len(train_dataloader)
-        print('Iters Per Epoch, Training: %04d, Validation: %03d' % (len(train_dataloader), len(val_dataloader)))
+        print(
+            "Iters Per Epoch, Training: %04d, Validation: %03d"
+            % (len(train_dataloader), len(val_dataloader))
+        )
         val_loss = 0
         logs = OrderedDict()
 
@@ -1030,28 +1186,29 @@ class TextMotionMatchTrainer(object):
                     else:
                         logs[k] += v
 
-
                 it += 1
                 if it % self.opt.log_every == 0:
-                    mean_loss = OrderedDict({'val_loss': val_loss})
-                    self.logger.scalar_summary('val_loss', val_loss, it)
+                    mean_loss = OrderedDict({"val_loss": val_loss})
+                    self.logger.scalar_summary("val_loss", val_loss, it)
 
                     for tag, value in logs.items():
                         self.logger.scalar_summary(tag, value / self.opt.log_every, it)
                         mean_loss[tag] = value / self.opt.log_every
                     logs = OrderedDict()
-                    print_current_loss_decomp(start_time, it, total_iters, mean_loss, epoch, i)
+                    print_current_loss_decomp(
+                        start_time, it, total_iters, mean_loss, epoch, i
+                    )
 
                     if it % self.opt.save_latest == 0:
-                        self.save(pjoin(self.opt.model_dir, 'latest.tar'), epoch, it)
+                        self.save(pjoin(self.opt.model_dir, "latest.tar"), epoch, it)
 
-            self.save(pjoin(self.opt.model_dir, 'latest.tar'), epoch, it)
+            self.save(pjoin(self.opt.model_dir, "latest.tar"), epoch, it)
 
             epoch += 1
             if epoch % self.opt.save_every_e == 0:
-                self.save(pjoin(self.opt.model_dir, 'E%04d.tar' % (epoch)), epoch, it)
+                self.save(pjoin(self.opt.model_dir, "E%04d.tar" % (epoch)), epoch, it)
 
-            print('Validation time:')
+            print("Validation time:")
 
             loss_pos_pair = 0
             loss_neg_pair = 0
@@ -1067,23 +1224,33 @@ class TextMotionMatchTrainer(object):
             loss_pos_pair /= len(val_dataloader) + 1
             loss_neg_pair /= len(val_dataloader) + 1
             val_loss /= len(val_dataloader) + 1
-            print('Validation Loss: %.5f Positive Loss: %.5f Negative Loss: %.5f' %
-                  (val_loss, loss_pos_pair, loss_neg_pair))
+            print(
+                "Validation Loss: %.5f Positive Loss: %.5f Negative Loss: %.5f"
+                % (val_loss, loss_pos_pair, loss_neg_pair)
+            )
 
             if val_loss < min_val_loss:
-                self.save(pjoin(self.opt.model_dir, 'finest.tar'), epoch, it)
+                self.save(pjoin(self.opt.model_dir, "finest.tar"), epoch, it)
                 min_val_loss = val_loss
 
             if epoch % self.opt.eval_every_e == 0:
-                pos_dist = F.pairwise_distance(self.text_embedding, self.motion_embedding)
-                neg_dist = F.pairwise_distance(self.text_embedding, self.mis_motion_embedding)
+                pos_dist = F.pairwise_distance(
+                    self.text_embedding, self.motion_embedding
+                )
+                neg_dist = F.pairwise_distance(
+                    self.text_embedding, self.mis_motion_embedding
+                )
 
-                pos_str = ' '.join(['%.3f' % (pos_dist[i]) for i in range(pos_dist.shape[0])])
-                neg_str = ' '.join(['%.3f' % (neg_dist[i]) for i in range(neg_dist.shape[0])])
+                pos_str = " ".join(
+                    ["%.3f" % (pos_dist[i]) for i in range(pos_dist.shape[0])]
+                )
+                neg_str = " ".join(
+                    ["%.3f" % (neg_dist[i]) for i in range(neg_dist.shape[0])]
+                )
 
-                save_path = pjoin(self.opt.eval_dir, 'E%03d.txt' % (epoch))
-                with cs.open(save_path, 'w') as f:
-                    f.write('Positive Pairs Distance\n')
-                    f.write(pos_str + '\n')
-                    f.write('Negative Pairs Distance\n')
-                    f.write(neg_str + '\n')
+                save_path = pjoin(self.opt.eval_dir, "E%03d.txt" % (epoch))
+                with cs.open(save_path, "w") as f:
+                    f.write("Positive Pairs Distance\n")
+                    f.write(pos_str + "\n")
+                    f.write("Negative Pairs Distance\n")
+                    f.write(neg_str + "\n")

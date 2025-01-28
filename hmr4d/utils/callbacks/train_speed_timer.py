@@ -1,7 +1,8 @@
+from collections import deque
+from time import time
+
 import pytorch_lightning as pl
 from pytorch_lightning.utilities import rank_zero_only
-from time import time
-from collections import deque
 
 from hmr4d.configs import MainStore, builds
 
@@ -30,11 +31,18 @@ class TrainSpeedTimer(pl.Callback):
 
             # Average the time
             self.data_waiting_time_queue.append(data_waiting)
-            average_time = sum(self.data_waiting_time_queue) / len(self.data_waiting_time_queue)
+            average_time = sum(self.data_waiting_time_queue) / len(
+                self.data_waiting_time_queue
+            )
 
             # Log to prog-bar
             pl_module.log(
-                "train_timer/data_waiting", average_time, on_step=True, on_epoch=False, prog_bar=True, logger=True
+                "train_timer/data_waiting",
+                average_time,
+                on_step=True,
+                on_epoch=False,
+                prog_bar=True,
+                logger=True,
             )
 
         self.this_batch_start = time()
@@ -46,11 +54,18 @@ class TrainSpeedTimer(pl.Callback):
 
         # Average the time
         self.single_batch_time_queue.append(single_batch)
-        average_time = sum(self.single_batch_time_queue) / len(self.single_batch_time_queue)
+        average_time = sum(self.single_batch_time_queue) / len(
+            self.single_batch_time_queue
+        )
 
         # Log iter time
         pl_module.log(
-            "train_timer/single_batch", average_time, on_step=True, on_epoch=False, prog_bar=False, logger=True
+            "train_timer/single_batch",
+            average_time,
+            on_step=True,
+            on_epoch=False,
+            prog_bar=False,
+            logger=True,
         )
 
         # Set timer for counting data waiting

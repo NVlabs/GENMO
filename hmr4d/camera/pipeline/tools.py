@@ -1,37 +1,42 @@
 import cv2
-from tqdm import tqdm
 import numpy as np
 import torch
 import torchvision
-
-from segment_anything import SamPredictor, sam_model_registry
-from pycocotools import mask as masktool
-
-from hmr4d.utils.utils_detectron2 import DefaultPredictor_Lazy
 from detectron2.config import LazyConfig
-from hmr4d.camera.pipeline.deva_track import get_deva_tracker, track_with_mask, flush_buffer
+from pycocotools import mask as masktool
+from segment_anything import SamPredictor, sam_model_registry
+from tqdm import tqdm
 
+from hmr4d.camera.pipeline.deva_track import (
+    flush_buffer,
+    get_deva_tracker,
+    track_with_mask,
+)
+from hmr4d.utils.utils_detectron2 import DefaultPredictor_Lazy
 
 if torch.cuda.is_available():
     autocast = torch.cuda.amp.autocast
 else:
+
     class autocast:
         def __init__(self, enabled=True):
             pass
+
         def __enter__(self):
             pass
+
         def __exit__(self, *args):
             pass
 
 
 def video2frames(vidfile, save_folder):
-    """ Convert input video to images """
+    """Convert input video to images"""
     count = 0
     cap = cv2.VideoCapture(vidfile)
-    while(cap.isOpened()):
+    while cap.isOpened():
         ret, frame = cap.read()
         if ret == True:
-            cv2.imwrite(f'{save_folder}/{count:04d}.jpg', frame)
+            cv2.imwrite(f"{save_folder}/{count:04d}.jpg", frame)
             count += 1
         else:
             break
@@ -39,12 +44,13 @@ def video2frames(vidfile, save_folder):
     return count
 
 
-def detect_segment_track(imgfiles, out_path, thresh=0.5, min_size=None, 
-                         device='cuda', save_vos=True):
-    """ A simple pipeline for human detection, segmentation, and tracking. Mainly as input for TRAM.
+def detect_segment_track(
+    imgfiles, out_path, thresh=0.5, min_size=None, device="cuda", save_vos=True
+):
+    """A simple pipeline for human detection, segmentation, and tracking. Mainly as input for TRAM.
     Detection: ViTDet.
     Segmentation: SAM.
-    Tracking: DEVA-Track-Anything. 
+    Tracking: DEVA-Track-Anything.
     """
     # ViTDet
     cfg_path = "inputs/checkpoints/vitdet/cascade_mask_rcnn_vitdet_h_75ep.py"
@@ -55,7 +61,9 @@ def detect_segment_track(imgfiles, out_path, thresh=0.5, min_size=None,
     detector = DefaultPredictor_Lazy(detectron2_cfg)
 
     # SAM
-    sam = sam_model_registry["vit_h"](checkpoint="inputs/checkpoints/sam/sam_vit_h_4b8939.pth")
+    sam = sam_model_registry["vit_h"](
+        checkpoint="inputs/checkpoints/sam/sam_vit_h_4b8939.pth"
+    )
     _ = sam.to(device)
     predictor = SamPredictor(sam)
 
@@ -73,27 +81,29 @@ def detect_segment_track(imgfiles, out_path, thresh=0.5, min_size=None,
         with torch.no_grad():
             with autocast():
                 det_out = detector(img_cv2)
-                det_instances = det_out['instances']
-                valid_idx = (det_instances.pred_classes==0) & (det_instances.scores > thresh)
+                det_instances = det_out["instances"]
+                valid_idx = (det_instances.pred_classes == 0) & (
+                    det_instances.scores > thresh
+                )
                 boxes = det_instances.pred_boxes.tensor[valid_idx].cpu().numpy()
                 confs = det_instances.scores[valid_idx].cpu().numpy()
 
                 boxes = np.hstack([boxes, confs[:, None]])
-                boxes = arrange_boxes(boxes, mode='size', min_size=min_size)
+                boxes = arrange_boxes(boxes, mode="size", min_size=min_size)
 
-        ### --- SAM --- 
-        if len(boxes)>0:
+        ### --- SAM ---
+        if len(boxes) > 0:
             with autocast():
-                predictor.set_image(img_cv2, image_format='BGR')
+                predictor.set_image(img_cv2, image_format="BGR")
 
                 # multiple boxes
                 bb = torch.tensor(boxes[:, :4]).cuda()
-                bb = predictor.transform.apply_boxes_torch(bb, img_cv2.shape[:2])  
+                bb = predictor.transform.apply_boxes_torch(bb, img_cv2.shape[:2])
                 masks, scores, _ = predictor.predict_torch(
                     point_coords=None,
                     point_labels=None,
                     boxes=bb,
-                    multimask_output=False
+                    multimask_output=False,
                 )
                 scores = scores.cpu()
                 masks = masks.cpu().squeeze(1)
@@ -102,19 +112,27 @@ def detect_segment_track(imgfiles, out_path, thresh=0.5, min_size=None,
             mask = np.zeros_like(mask)
 
         ### --- DEVA ---
-        if len(boxes)>0 and (boxes[:, -1] > 0.80).sum()>0:
-            track_valid = boxes[:, -1] > 0.80    # only use high-confident
+        if len(boxes) > 0 and (boxes[:, -1] > 0.80).sum() > 0:
+            track_valid = boxes[:, -1] > 0.80  # only use high-confident
             masks_track = masks[track_valid]
             scores_track = scores[track_valid]
         else:
-            masks_track = torch.zeros([1,img_cv2.shape[0],img_cv2.shape[1]])
+            masks_track = torch.zeros([1, img_cv2.shape[0], img_cv2.shape[1]])
             scores_track = torch.zeros([1])
 
         with autocast():
             img_rgb = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB)
-            track_with_mask(deva, masks_track, scores_track, img_rgb, 
-                            imgpath, result_saver, t, save_vos)
-            
+            track_with_mask(
+                deva,
+                masks_track,
+                scores_track,
+                img_rgb,
+                imgpath,
+                result_saver,
+                t,
+                save_vos,
+            )
+
         ### Record full mask and boxes
         mask_bit = masktool.encode(np.asfortranarray(mask > 0))
         masks_.append(mask_bit)
@@ -126,26 +144,26 @@ def detect_segment_track(imgfiles, out_path, thresh=0.5, min_size=None,
 
     ### --- Adapt tracks data structure ---
     vjson = result_saver.video_json
-    ann = vjson['annotations']
+    ann = vjson["annotations"]
     iou_thresh = 0.5
     conf_thresh = 0.5
 
     tracks = {}
-    for frame in ann:         
-        seg = frame['segmentations']
-        file = frame['file_name']
+    for frame in ann:
+        seg = frame["segmentations"]
+        file = frame["file_name"]
         try:
-            frame = int(file.split('.')[0])
+            frame = int(file.split(".")[0])
         except ValueError:
-            frame = int(file.split('.')[0].split('_')[-1])
-        for subj in seg:  
-            idx = subj['id']
-            msk = subj['rle']
+            frame = int(file.split(".")[0].split("_")[-1])
+        for subj in seg:
+            idx = subj["id"]
+            msk = subj["rle"]
             msk = torch.from_numpy(masktool.decode(msk))[None]
-            
+
             # match tracked segment to detections
             det_boxes = boxes_[frame]
-            if len(det_boxes)>0:
+            if len(det_boxes) > 0:
                 seg_box = torchvision.ops.masks_to_boxes(msk)
                 iou = box_iou(det_boxes, seg_box)
                 max_iou, max_id = iou.max(), iou.argmax()
@@ -153,7 +171,7 @@ def detect_segment_track(imgfiles, out_path, thresh=0.5, min_size=None,
             else:
                 max_iou = max_conf = 0
 
-            if max_iou>iou_thresh and max_conf>conf_thresh:
+            if max_iou > iou_thresh and max_conf > conf_thresh:
                 det = True
                 det_box = det_boxes[[max_id]]
             else:
@@ -161,11 +179,11 @@ def detect_segment_track(imgfiles, out_path, thresh=0.5, min_size=None,
                 det_box = np.zeros([1, 5])
 
             # add fields
-            subj['frame'] = frame 
-            subj['det'] = det
-            subj['det_box'] = det_box
-            subj['seg_box'] = seg_box.numpy()
-            
+            subj["frame"] = frame
+            subj["det"] = det
+            subj["det_box"] = det_box
+            subj["seg_box"] = seg_box.numpy()
+
             if idx in tracks:
                 tracks[idx].append(subj)
             else:
@@ -179,10 +197,10 @@ def detect_segment_track(imgfiles, out_path, thresh=0.5, min_size=None,
 
 
 def parse_chunks(frame, boxes, min_len=16):
-    """ If a track disappear in the middle, 
-     we separate it to different segments to estimate the HPS independently. 
-     If a segment is less than 16 frames, we get rid of it for now. 
-     """
+    """If a track disappear in the middle,
+    we separate it to different segments to estimate the HPS independently.
+    If a segment is less than 16 frames, we get rid of it for now.
+    """
     frame_chunks = []
     boxes_chunks = []
     step = frame[1:] - frame[:-1]
@@ -194,40 +212,40 @@ def parse_chunks(frame, boxes, min_len=16):
         f_chunk = frame[start:bk]
         b_chunk = boxes[start:bk]
         start = bk
-        if len(f_chunk)>=min_len:
+        if len(f_chunk) >= min_len:
             frame_chunks.append(f_chunk)
             boxes_chunks.append(b_chunk)
 
-        if bk==breaks[-1]:  # last chunk
+        if bk == breaks[-1]:  # last chunk
             f_chunk = frame[bk:]
             b_chunk = boxes[bk:]
-            if len(f_chunk)>=min_len:
+            if len(f_chunk) >= min_len:
                 frame_chunks.append(f_chunk)
                 boxes_chunks.append(b_chunk)
 
     return frame_chunks, boxes_chunks
 
 
-def arrange_boxes(boxes, mode='size', min_size=None):
-    """ Helper to re-order boxes """
+def arrange_boxes(boxes, mode="size", min_size=None):
+    """Helper to re-order boxes"""
     # Left2right priority
-    if mode == 'left2right':
-        cx = (boxes[:,2] - boxes[:,0]) / 2 + boxes[:,0]
+    if mode == "left2right":
+        cx = (boxes[:, 2] - boxes[:, 0]) / 2 + boxes[:, 0]
         boxes = boxes[np.argsort(cx)]
     # size priority
-    elif mode == 'size':
-        w = boxes[:,2] - boxes[:,0]
-        h = boxes[:,3] - boxes[:,1]
-        area = w*h
+    elif mode == "size":
+        w = boxes[:, 2] - boxes[:, 0]
+        h = boxes[:, 3] - boxes[:, 1]
+        area = w * h
         boxes = boxes[np.argsort(area)[::-1]]
     # confidence priority
-    elif mode == 'conf':  
-        conf = boxes[:,4]
+    elif mode == "conf":
+        conf = boxes[:, 4]
         boxes = boxes[np.argsort(conf)[::-1]]
     # filter boxes by size
     if min_size is not None:
-        w = boxes[:,2] - boxes[:,0]
-        h = boxes[:,3] - boxes[:,1]
+        w = boxes[:, 2] - boxes[:, 0]
+        h = boxes[:, 3] - boxes[:, 1]
         valid = np.stack([w, h]).max(axis=0) > min_size
         boxes = boxes[valid]
 
@@ -261,7 +279,14 @@ def box_iou(box1, box2):
     area2 = box_area(box2.T)
 
     # inter(N,M) = (rb(N,M,2) - lt(N,M,2)).clamp(0).prod(2)
-    inter = (torch.min(box1[:, None, 2:], box2[:, 2:]) - torch.max(box1[:, None, :2], box2[:, :2])).clamp(0).prod(2)
-    return inter / (area1[:, None] + area2 - inter)  # iou = inter / (area1 + area2 - inter)
-
-
+    inter = (
+        (
+            torch.min(box1[:, None, 2:], box2[:, 2:])
+            - torch.max(box1[:, None, :2], box2[:, :2])
+        )
+        .clamp(0)
+        .prod(2)
+    )
+    return inter / (
+        area1[:, None] + area2 - inter
+    )  # iou = inter / (area1 + area2 - inter)

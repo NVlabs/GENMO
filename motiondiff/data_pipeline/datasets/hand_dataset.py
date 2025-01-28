@@ -1,33 +1,45 @@
-import numpy as np
-import torch
-from torch.utils import data
-from motiondiff.data_pipeline.tensors import collate
-from motiondiff.utils.tools import wandb_run_exists
-import wandb
-import pandas as pd
 import os
-from copy import copy
 import random
-from torchvision.transforms import transforms
-from pycocotools.coco import COCO
-from motiondiff.models.common.utils.human_models import smpl_x, smpl, mano
-from motiondiff.utils.torch_transform import rotation_matrix_to_angle_axis, quaternion_to_angle_axis, quat_mul, angle_axis_to_quaternion
+from copy import copy
 
+import numpy as np
+import pandas as pd
+import torch
+import wandb
+from pycocotools.coco import COCO
+from torch.utils import data
+from torchvision.transforms import transforms
+
+from motiondiff.data_pipeline.datasets.kp2d_dataset import KP2DDataset
 from motiondiff.data_pipeline.humanml.utils.get_opt import get_opt
 from motiondiff.data_pipeline.humanml.utils.word_vectorizer import WordVectorizer
+from motiondiff.data_pipeline.tensors import collate
+from motiondiff.models.common.utils.human_models import mano, smpl, smpl_x
 from motiondiff.models.common.utils.preprocessing import transform_joint_to_other_db
-from motiondiff.data_pipeline.datasets.kp2d_dataset import KP2DDataset
+from motiondiff.utils.tools import wandb_run_exists
+from motiondiff.utils.torch_transform import (
+    angle_axis_to_quaternion,
+    quat_mul,
+    quaternion_to_angle_axis,
+    rotation_matrix_to_angle_axis,
+)
+
 
 # an adapter to our collate func
 def hand_collate(batch):
     # batch.sort(key=lambda x: x[3], reverse=True)
-    adapted_batch = [{
-        'inp': torch.tensor(b[0].T).float().unsqueeze(1), # [seqlen, J] -> [J, 1, seqlen]
-        'target': 0,
-        # 'text': b[0], #b[0]['caption']
-        'text': "",
-        'lengths': b[1],
-    } for b in batch]
+    adapted_batch = [
+        {
+            "inp": torch.tensor(b[0].T)
+            .float()
+            .unsqueeze(1),  # [seqlen, J] -> [J, 1, seqlen]
+            "target": 0,
+            # 'text': b[0], #b[0]['caption']
+            "text": "",
+            "lengths": b[1],
+        }
+        for b in batch
+    ]
     return collate(adapted_batch)
 
 
@@ -40,36 +52,38 @@ def hand_collate(batch):
 
 # The last five joints are not from MANO forward, but from the tip vertex selection
 JOINT_NAMES = [
-    'wrist',
-    'index1',
-    'index2',
-    'index3',
-    'middle1',
-    'middle2',
-    'middle3',
-    'pinky1',
-    'pinky2',
-    'pinky3',
-    'ring1',
-    'ring2',
-    'ring3',
-    'thumb1',
-    'thumb2',
-    'thumb3',    
-    'thumb_tip', # 16
-    'index_tip', # 17
-    'middle_tip', # 18
-    'ring_tip', # 19
-    'pinky_tip', # 20
+    "wrist",
+    "index1",
+    "index2",
+    "index3",
+    "middle1",
+    "middle2",
+    "middle3",
+    "pinky1",
+    "pinky2",
+    "pinky3",
+    "ring1",
+    "ring2",
+    "ring3",
+    "thumb1",
+    "thumb2",
+    "thumb3",
+    "thumb_tip",  # 16
+    "index_tip",  # 17
+    "middle_tip",  # 18
+    "ring_tip",  # 19
+    "pinky_tip",  # 20
 ]
 
 
 class HandDataset(data.Dataset):
     def __init__(
-        self, split, num_frames,
-        meta_file='/lustre/fs5/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/bones_full347_v1.0/meta_240416_v3.csv',
+        self,
+        split,
+        num_frames,
+        meta_file="/lustre/fs5/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/bones_full347_v1.0/meta_240416_v3.csv",
         # meta_file='out/meta.csv',   # TODO
-        motion_feature_dir='/lustre/fs5/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/bones_full347_v1.0/new_joint_vecs',
+        motion_feature_dir="/lustre/fs5/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/bones_full347_v1.0/new_joint_vecs",
         text_augment_dir=None,
         augment_text=False,
         aug_text_ind_range=None,
@@ -77,11 +91,11 @@ class HandDataset(data.Dataset):
         use_natural_desc=False,
         use_short_desc=False,
         use_technical_desc=False,
-        split_file_pattern='assets/bones/splits/v1/%s_index.npy',
-        stats_folder='assets/bones/stats/v1',
-        normalize_motion = True,
+        split_file_pattern="assets/bones/splits/v1/%s_index.npy",
+        stats_folder="assets/bones/stats/v1",
+        normalize_motion=True,
         skip_idx_file=None,
-        name=None  # for compatibility with other datasets
+        name=None,  # for compatibility with other datasets
     ):
         self.meta = pd.read_csv(meta_file)
         self.split = split
@@ -95,8 +109,8 @@ class HandDataset(data.Dataset):
         # self.index = np.array([i for i in self.index if i not in self.skip_idx])
 
         if self.normalize_motion:
-            self.mean = np.load(os.path.join(stats_folder, 'mean.npy'))
-            self.std = np.load(os.path.join(stats_folder, 'std.npy'))
+            self.mean = np.load(os.path.join(stats_folder, "mean.npy"))
+            self.std = np.load(os.path.join(stats_folder, "std.npy"))
         self.num_frames = num_frames
         self.motion_feature_dir = motion_feature_dir
         self.seqfiles = os.listdir(motion_feature_dir)
@@ -109,7 +123,9 @@ class HandDataset(data.Dataset):
         self.use_short_desc = use_short_desc
         self.use_technical_desc = use_technical_desc
 
-        assert not (self.use_natural_desc or self.use_technical_desc), 'no description for hand dataset'
+        assert not (self.use_natural_desc or self.use_technical_desc), (
+            "no description for hand dataset"
+        )
         # NOTE: we don't need meta data for now
         # assert self.use_natural_desc or self.use_short_desc or self.use_technical_desc
         # self.motion_paths = self.meta['feature_path'].values
@@ -134,7 +150,7 @@ class HandDataset(data.Dataset):
         motion = np.load(motion_path)
         if self.normalize_motion:
             motion = self.normalize(motion)
-        
+
         # text_list = []
         # if self.use_natural_desc:
         #     text_list += [(self.natural_desc[i][item], i) for i in range(3)]
@@ -142,7 +158,7 @@ class HandDataset(data.Dataset):
         #     text_list.append((self.technical_desc[item], 3))
         # if self.use_short_desc:
         #     text_list.append((self.short_desc[item], 4))
-        
+
         # text, text_sub_ind = text_list[np.random.choice(len(text_list))]
         # if type(text) not in [str, np.str_]:
         #     text = ''
@@ -166,28 +182,33 @@ class HandDataset(data.Dataset):
         #         if wandb_run_exists():
         #             wandb.alert(title=f"[{item}-{text_sub_ind}]", text=f"[{item}-{text_sub_ind}] {text_augment_path}\n" + str(e), level=wandb.AlertLevel.ERROR)
         #         # raise
-        
-        if self.num_frames == -1:   # no truncation or padding
+
+        if self.num_frames == -1:  # no truncation or padding
             m_length = motion.shape[0]
             return motion, m_length
-        
+
         if motion.shape[0] >= self.num_frames:
             m_length = self.num_frames
             idx = np.random.randint(0, motion.shape[0] - self.num_frames + 1)
-            motion = motion[idx:idx + self.num_frames]
+            motion = motion[idx : idx + self.num_frames]
         else:
             m_length = motion.shape[0]
-            motion = np.concatenate([motion, np.zeros((self.num_frames - motion.shape[0], motion.shape[1]))], axis=0)
-        
+            motion = np.concatenate(
+                [
+                    motion,
+                    np.zeros((self.num_frames - motion.shape[0], motion.shape[1])),
+                ],
+                axis=0,
+            )
+
         return motion, m_length
 
 
-    
 class Hand3DV1(KP2DDataset):
-    # def __init__(self, datapath='./dataset/humanml_opt.txt', 
-    #              num_keypoints=14, num_frames=196, mode='train', split="train", 
-    #              debug=False, rng=None, img_w=1024, img_h=1024, num_views=4, cam_radius=8, cam_elevation=10, 
-    #              focal_scale=2, synthetic_view_type='even', normalize_type='image_size', bbox_scale=1.4, 
+    # def __init__(self, datapath='./dataset/humanml_opt.txt',
+    #              num_keypoints=14, num_frames=196, mode='train', split="train",
+    #              debug=False, rng=None, img_w=1024, img_h=1024, num_views=4, cam_radius=8, cam_elevation=10,
+    #              focal_scale=2, synthetic_view_type='even', normalize_type='image_size', bbox_scale=1.4,
     #              use_coco_pelvis=False, tilt_prob=0.0, tilt_std=15, normalize_stats_dir=None, **kwargs):
     #     super().__init__(num_frames, img_w, img_h, num_views, cam_radius, cam_elevation, focal_scale, synthetic_view_type, normalize_type, bbox_scale, tilt_prob, tilt_std, normalize_stats_dir)
     #     self.mode = mode
@@ -232,12 +253,13 @@ class Hand3DV1(KP2DDataset):
     #     breakpoint()
     #     assert len(self.t2m_dataset) > 1, 'You loaded an empty dataset, it is probably because your data dir has only texts and no motions. To train and evaluate MDM you should get the FULL data as described in the README file.'
 
-
     def __init__(
-        self, split, num_frames,
-        meta_file='/lustre/fs5/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/bones_full347_v1.0/meta_240416_v3.csv',
+        self,
+        split,
+        num_frames,
+        meta_file="/lustre/fs5/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/bones_full347_v1.0/meta_240416_v3.csv",
         # meta_file='out/meta.csv',   # TODO
-        motion_feature_dir='/lustre/fs5/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/bones_full347_v1.0/new_joint_vecs',
+        motion_feature_dir="/lustre/fs5/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/bones_full347_v1.0/new_joint_vecs",
         text_augment_dir=None,
         augment_text=False,
         aug_text_ind_range=None,
@@ -245,22 +267,48 @@ class Hand3DV1(KP2DDataset):
         use_natural_desc=False,
         use_short_desc=False,
         use_technical_desc=False,
-        split_file_pattern='assets/bones/splits/v1/%s_index.npy',
-        stats_folder='assets/bones/stats/v1',
-        normalize_motion = True,
-        joint_parents_file='assets/mv2d/mano_joint_parents2.p',
+        split_file_pattern="assets/bones/splits/v1/%s_index.npy",
+        stats_folder="assets/bones/stats/v1",
+        normalize_motion=True,
+        joint_parents_file="assets/mv2d/mano_joint_parents2.p",
         skip_idx_file=None,
-        name=None, # for compatibility with other datasets
-        debug=False, rng=None, img_w=1024, img_h=1024, num_views=4, cam_radius=8, cam_elevation=10, 
-        focal_scale=2, synthetic_view_type='even', normalize_type='image_size', bbox_scale=1.4, 
-        use_coco_pelvis=False, tilt_prob=0.0, tilt_std=15, normalize_stats_dir=None, 
+        name=None,  # for compatibility with other datasets
+        debug=False,
+        rng=None,
+        img_w=1024,
+        img_h=1024,
+        num_views=4,
+        cam_radius=8,
+        cam_elevation=10,
+        focal_scale=2,
+        synthetic_view_type="even",
+        normalize_type="image_size",
+        bbox_scale=1.4,
+        use_coco_pelvis=False,
+        tilt_prob=0.0,
+        tilt_std=15,
+        normalize_stats_dir=None,
         front_view_joints=[1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13],
-        **kwargs
+        **kwargs,
     ):
         # self.meta = pd.read_csv(meta_file)
-        super().__init__(num_frames, img_w, img_h, num_views, cam_radius, cam_elevation, focal_scale, 
-                         synthetic_view_type, normalize_type, bbox_scale, tilt_prob, tilt_std, normalize_stats_dir, 
-                         joint_parents_file, front_view_joints)
+        super().__init__(
+            num_frames,
+            img_w,
+            img_h,
+            num_views,
+            cam_radius,
+            cam_elevation,
+            focal_scale,
+            synthetic_view_type,
+            normalize_type,
+            bbox_scale,
+            tilt_prob,
+            tilt_std,
+            normalize_stats_dir,
+            joint_parents_file,
+            front_view_joints,
+        )
         self.split = split
         # self.normalize_motion = normalize_motion
         # if split == 'all':
@@ -301,7 +349,9 @@ class Hand3DV1(KP2DDataset):
             self.total_length += chip_num
         print("total length: ", self.total_length)
 
-        assert not (self.use_natural_desc or self.use_technical_desc), 'no description for hand dataset'
+        assert not (self.use_natural_desc or self.use_technical_desc), (
+            "no description for hand dataset"
+        )
         # NOTE: we don't need meta data for now
         # assert self.use_natural_desc or self.use_short_desc or self.use_technical_desc
         # self.motion_paths = self.meta['feature_path'].values
@@ -312,21 +362,25 @@ class Hand3DV1(KP2DDataset):
         # if self.use_technical_desc:
         #     self.technical_desc = self.meta[f'technical_description'].values
         # return
-        item=1
+        item = 1
         self.get_motion(item)
+
     #     breakpoint()
 
-
     def get_motion(self, item):
-        item = item % len(self.seqfiles) # TODO: change this for more uniformly sampling
+        item = item % len(
+            self.seqfiles
+        )  # TODO: change this for more uniformly sampling
         motion_path = os.path.join(self.motion_feature_dir, self.seqfiles[item])
         motion = np.load(motion_path)
         lhand_mano_params = motion[:, :51]
         rhand_mano_params = motion[:, 51:102]
 
         num_joints = 21
-        lhand_all_joints = motion[:, 102:102+21*3].reshape(-1, num_joints, 3)
-        rhand_all_joints = motion[:, 102+21*3:102+21*3*2].reshape(-1, num_joints, 3)
+        lhand_all_joints = motion[:, 102 : 102 + 21 * 3].reshape(-1, num_joints, 3)
+        rhand_all_joints = motion[:, 102 + 21 * 3 : 102 + 21 * 3 * 2].reshape(
+            -1, num_joints, 3
+        )
 
         if random.random() > 0.5:
             joints = lhand_all_joints
@@ -334,7 +388,9 @@ class Hand3DV1(KP2DDataset):
             joints = rhand_all_joints
 
         # seems not necessary
-        joints = transform_joint_to_other_db(joints.transpose(1, 0, 2), JOINT_NAMES, JOINT_NAMES).transpose(1, 0, 2)
+        joints = transform_joint_to_other_db(
+            joints.transpose(1, 0, 2), JOINT_NAMES, JOINT_NAMES
+        ).transpose(1, 0, 2)
 
         motion, cam_dict = self.generate_cam_and_2d_motion(joints)
         motion, m_length = self.pad_motion(motion)
@@ -353,25 +409,25 @@ class Hand3DV1(KP2DDataset):
         #     wham_joints = torch.matmul(self.wham_regressor, output.vertices)
         #     coco_joints = wham_joints[:, :17]
         #     smplx_joint_world[:, self.coco_smplx_ind] = coco_joints
-        
+
         # smplx_joint_world = smplx_joint_world[:, :self.num_keypoints]
         # if self.use_coco_pelvis:
         #     smplx_joint_world[:, 0] = (smplx_joint_world[:, 1] + smplx_joint_world[:, 2]) / 2
         # motion, cam_dict = self.generate_cam_and_2d_motion(smplx_joint_world)
         # motion, m_length = self.pad_motion(motion)
         # return text, motion, cam_dict, m_length
-        
+
     def __getitem__(self, item):
         text, motion, cam_dict, m_length = self.get_motion(item)
         info = {
-            'smpl_valid_joints': self.mano_valid_joints,
-            'dataset_name': 'humanml3d'
+            "smpl_valid_joints": self.mano_valid_joints,
+            "dataset_name": "humanml3d",
         }
         return text, motion, m_length, cam_dict, info
 
     # def __len__(self):
     #     return self.t2m_dataset.__len__()
-    
+
     def __len__(self):
         # return len(self.index)
         return self.total_length

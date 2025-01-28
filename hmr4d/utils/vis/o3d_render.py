@@ -1,10 +1,9 @@
-import torch
-from .renderer_tools import get_colors, checkerboard_geometry
 import open3d as o3d
-
-
 import open3d.visualization.gui as gui
 import open3d.visualization.rendering as rendering
+import torch
+
+from .renderer_tools import checkerboard_geometry, get_colors
 
 
 class Settings:
@@ -213,10 +212,12 @@ class Settings:
             setattr(self, key, val)
 
 
-
 def get_ground(length, center_x, center_z):
     length, center_x, center_z = map(float, (length, center_x, center_z))
-    v, f, vc, fc = map(torch.from_numpy, checkerboard_geometry(length=length, c1=center_x, c2=center_z, up="y"))
+    v, f, vc, fc = map(
+        torch.from_numpy,
+        checkerboard_geometry(length=length, c1=center_x, c2=center_z, up="y"),
+    )
     # v, f, vc = v.to(device), f.to(device), vc.to(device)
     ground_geometry = [v, f, vc]
     return ground_geometry

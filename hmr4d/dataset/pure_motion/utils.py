@@ -1,12 +1,13 @@
 import torch
 import torch.nn.functional as F
+from einops import rearrange
+
 from motiondiff.models.mdm.rotation_conversions import (
     axis_angle_to_matrix,
     matrix_to_axis_angle,
     matrix_to_rotation_6d,
     rotation_6d_to_matrix,
 )
-from einops import rearrange
 
 
 def aa_to_r6d(x):
@@ -37,15 +38,24 @@ def interpolate_smpl_params(smpl_params, tgt_len):
     betas = F.interpolate(betas, tgt_len, mode="linear", align_corners=True)
     betas = rearrange(betas, "c 1 l -> l c")
 
-    global_orient = rearrange(aa_to_r6d(global_orient.reshape(-1, 1, 3)), "l j c -> c j l")
-    global_orient = F.interpolate(global_orient, tgt_len, mode="linear", align_corners=True)
+    global_orient = rearrange(
+        aa_to_r6d(global_orient.reshape(-1, 1, 3)), "l j c -> c j l"
+    )
+    global_orient = F.interpolate(
+        global_orient, tgt_len, mode="linear", align_corners=True
+    )
     global_orient = r6d_to_aa(rearrange(global_orient, "c j l -> l j c")).reshape(-1, 3)
 
     transl = rearrange(transl, "l c -> c 1 l")
     transl = F.interpolate(transl, tgt_len, mode="linear", align_corners=True)
     transl = rearrange(transl, "c 1 l -> l c")
 
-    return {"body_pose": body_pose, "betas": betas, "global_orient": global_orient, "transl": transl}
+    return {
+        "body_pose": body_pose,
+        "betas": betas,
+        "global_orient": global_orient,
+        "transl": transl,
+    }
 
 
 def rotate_around_axis(global_orient, transl, axis="y"):

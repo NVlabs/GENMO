@@ -4,9 +4,14 @@ import math
 
 import torch
 import torch.nn as nn
+
 # from timm.models.layers import to_2tuple, trunc_normal_
-from mmcv.cnn import (build_activation_layer, build_conv_layer,
-                      build_norm_layer, trunc_normal_init)
+from mmcv.cnn import (
+    build_activation_layer,
+    build_conv_layer,
+    build_norm_layer,
+    trunc_normal_init,
+)
 from mmcv.cnn.bricks.transformer import build_dropout
 from mmcv.runner import BaseModule
 from torch.nn.functional import pad
@@ -28,7 +33,7 @@ def nlc_to_nchw(x, hw_shape):
     H, W = hw_shape
     assert len(x.shape) == 3
     B, L, C = x.shape
-    assert L == H * W, 'The seq_len doesn\'t match H, W'
+    assert L == H * W, "The seq_len doesn't match H, W"
     return x.transpose(1, 2).reshape(B, C, H, W)
 
 
@@ -47,7 +52,7 @@ def nchw_to_nlc(x):
 
 def build_drop_path(drop_path_rate):
     """Build drop path layer."""
-    return build_dropout(dict(type='DropPath', drop_prob=drop_path_rate))
+    return build_dropout(dict(type="DropPath", drop_prob=drop_path_rate))
 
 
 class WindowMSA(BaseModule):
@@ -71,17 +76,18 @@ class WindowMSA(BaseModule):
             Default: None.
     """
 
-    def __init__(self,
-                 embed_dims,
-                 num_heads,
-                 window_size,
-                 qkv_bias=True,
-                 qk_scale=None,
-                 attn_drop_rate=0.,
-                 proj_drop_rate=0.,
-                 with_rpe=True,
-                 init_cfg=None):
-
+    def __init__(
+        self,
+        embed_dims,
+        num_heads,
+        window_size,
+        qkv_bias=True,
+        qk_scale=None,
+        attn_drop_rate=0.0,
+        proj_drop_rate=0.0,
+        with_rpe=True,
+        init_cfg=None,
+    ):
         super().__init__(init_cfg=init_cfg)
         self.embed_dims = embed_dims
         self.window_size = window_size  # Wh, Ww
@@ -94,14 +100,15 @@ class WindowMSA(BaseModule):
             # define a parameter table of relative position bias
             self.relative_position_bias_table = nn.Parameter(
                 torch.zeros(
-                    (2 * window_size[0] - 1) * (2 * window_size[1] - 1),
-                    num_heads))  # 2*Wh-1 * 2*Ww-1, nH
+                    (2 * window_size[0] - 1) * (2 * window_size[1] - 1), num_heads
+                )
+            )  # 2*Wh-1 * 2*Ww-1, nH
 
             Wh, Ww = self.window_size
             rel_index_coords = self.double_step_seq(2 * Ww - 1, Wh, 1, Ww)
             rel_position_index = rel_index_coords + rel_index_coords.T
             rel_position_index = rel_position_index.flip(1).contiguous()
-            self.register_buffer('relative_position_index', rel_position_index)
+            self.register_buffer("relative_position_index", rel_position_index)
 
         self.qkv = nn.Linear(embed_dims, embed_dims * 3, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop_rate)
@@ -122,27 +129,34 @@ class WindowMSA(BaseModule):
                 Wh*Ww, Wh*Ww), value should be between (-inf, 0].
         """
         B, N, C = x.shape
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads,
-                                  C // self.num_heads).permute(2, 0, 3, 1, 4)
+        qkv = (
+            self.qkv(x)
+            .reshape(B, N, 3, self.num_heads, C // self.num_heads)
+            .permute(2, 0, 3, 1, 4)
+        )
         q, k, v = qkv[0], qkv[1], qkv[2]
 
         q = q * self.scale
-        attn = (q @ k.transpose(-2, -1))
+        attn = q @ k.transpose(-2, -1)
 
         if self.with_rpe:
             relative_position_bias = self.relative_position_bias_table[
-                self.relative_position_index.view(-1)].view(
-                    self.window_size[0] * self.window_size[1],
-                    self.window_size[0] * self.window_size[1],
-                    -1)  # Wh*Ww,Wh*Ww,nH
+                self.relative_position_index.view(-1)
+            ].view(
+                self.window_size[0] * self.window_size[1],
+                self.window_size[0] * self.window_size[1],
+                -1,
+            )  # Wh*Ww,Wh*Ww,nH
             relative_position_bias = relative_position_bias.permute(
-                2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
+                2, 0, 1
+            ).contiguous()  # nH, Wh*Ww, Wh*Ww
             attn = attn + relative_position_bias.unsqueeze(0)
 
         if mask is not None:
             nW = mask.shape[0]
-            attn = attn.view(B // nW, nW, self.num_heads, N,
-                             N) + mask.unsqueeze(1).unsqueeze(0)
+            attn = attn.view(B // nW, nW, self.num_heads, N, N) + mask.unsqueeze(
+                1
+            ).unsqueeze(0)
             attn = attn.view(-1, self.num_heads, N, N)
         attn = self.softmax(attn)
 
@@ -161,7 +175,7 @@ class WindowMSA(BaseModule):
 
 
 class LocalWindowSelfAttention(BaseModule):
-    r""" Local-window Self Attention (LSA) module with relative position bias.
+    r"""Local-window Self Attention (LSA) module with relative position bias.
 
     This module is the short-range self-attention module in the
     Interlaced Sparse Self-Attention <https://arxiv.org/abs/1907.12273>`_.
@@ -185,17 +199,19 @@ class LocalWindowSelfAttention(BaseModule):
             Default: None.
     """
 
-    def __init__(self,
-                 embed_dims,
-                 num_heads,
-                 window_size,
-                 qkv_bias=True,
-                 qk_scale=None,
-                 attn_drop_rate=0.,
-                 proj_drop_rate=0.,
-                 with_rpe=True,
-                 with_pad_mask=False,
-                 init_cfg=None):
+    def __init__(
+        self,
+        embed_dims,
+        num_heads,
+        window_size,
+        qkv_bias=True,
+        qk_scale=None,
+        attn_drop_rate=0.0,
+        proj_drop_rate=0.0,
+        with_rpe=True,
+        with_pad_mask=False,
+        init_cfg=None,
+    ):
         super().__init__(init_cfg=init_cfg)
         if isinstance(window_size, int):
             window_size = (window_size, window_size)
@@ -210,7 +226,8 @@ class LocalWindowSelfAttention(BaseModule):
             attn_drop_rate=attn_drop_rate,
             proj_drop_rate=proj_drop_rate,
             with_rpe=with_rpe,
-            init_cfg=init_cfg)
+            init_cfg=init_cfg,
+        )
 
     def forward(self, x, H, W, **kwargs):
         """Forward function."""
@@ -221,8 +238,9 @@ class LocalWindowSelfAttention(BaseModule):
         # center-pad the feature on H and W axes
         pad_h = math.ceil(H / Wh) * Wh - H
         pad_w = math.ceil(W / Ww) * Ww - W
-        x = pad(x, (0, 0, pad_w // 2, pad_w - pad_w // 2, pad_h // 2,
-                    pad_h - pad_h // 2))
+        x = pad(
+            x, (0, 0, pad_w // 2, pad_w - pad_w // 2, pad_h // 2, pad_h - pad_h // 2)
+        )
 
         # permute
         x = x.view(B, math.ceil(H / Wh), Wh, math.ceil(W / Ww), Ww, C)
@@ -233,13 +251,11 @@ class LocalWindowSelfAttention(BaseModule):
         if self.with_pad_mask and pad_h > 0 and pad_w > 0:
             pad_mask = x.new_zeros(1, H, W, 1)
             pad_mask = pad(
-                pad_mask, [
-                    0, 0, pad_w // 2, pad_w - pad_w // 2, pad_h // 2,
-                    pad_h - pad_h // 2
-                ],
-                value=-float('inf'))
-            pad_mask = pad_mask.view(1, math.ceil(H / Wh), Wh,
-                                     math.ceil(W / Ww), Ww, 1)
+                pad_mask,
+                [0, 0, pad_w // 2, pad_w - pad_w // 2, pad_h // 2, pad_h - pad_h // 2],
+                value=-float("inf"),
+            )
+            pad_mask = pad_mask.view(1, math.ceil(H / Wh), Wh, math.ceil(W / Ww), Ww, 1)
             pad_mask = pad_mask.permute(1, 3, 0, 2, 4, 5)
             pad_mask = pad_mask.reshape(-1, Wh * Ww)
             pad_mask = pad_mask[:, None, :].expand([-1, Wh * Ww, -1])
@@ -253,7 +269,7 @@ class LocalWindowSelfAttention(BaseModule):
         out = out.reshape(B, H + pad_h, W + pad_w, C)
 
         # de-pad
-        out = out[:, pad_h // 2:H + pad_h // 2, pad_w // 2:W + pad_w // 2]
+        out = out[:, pad_h // 2 : H + pad_h // 2, pad_w // 2 : W + pad_w // 2]
         return out.reshape(B, N, C)
 
 
@@ -274,14 +290,16 @@ class CrossFFN(BaseModule):
             Default: None.
     """
 
-    def __init__(self,
-                 in_features,
-                 hidden_features=None,
-                 out_features=None,
-                 act_cfg=dict(type='GELU'),
-                 dw_act_cfg=dict(type='GELU'),
-                 norm_cfg=dict(type='SyncBN'),
-                 init_cfg=None):
+    def __init__(
+        self,
+        in_features,
+        hidden_features=None,
+        out_features=None,
+        act_cfg=dict(type="GELU"),
+        dw_act_cfg=dict(type="GELU"),
+        norm_cfg=dict(type="SyncBN"),
+        init_cfg=None,
+    ):
         super().__init__(init_cfg=init_cfg)
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
@@ -294,7 +312,8 @@ class CrossFFN(BaseModule):
             kernel_size=3,
             stride=1,
             groups=hidden_features,
-            padding=1)
+            padding=1,
+        )
         self.act2 = build_activation_layer(dw_act_cfg)
         self.norm2 = build_norm_layer(norm_cfg, hidden_features)[1]
         self.fc2 = nn.Conv2d(hidden_features, out_features, kernel_size=1)
@@ -303,8 +322,15 @@ class CrossFFN(BaseModule):
 
         # put the modules togather
         self.layers = [
-            self.fc1, self.norm1, self.act1, self.dw3x3, self.norm2, self.act2,
-            self.fc2, self.norm3, self.act3
+            self.fc1,
+            self.norm1,
+            self.act1,
+            self.dw3x3,
+            self.norm2,
+            self.act2,
+            self.fc2,
+            self.norm3,
+            self.act3,
         ]
 
     def forward(self, x, H, W):
@@ -339,18 +365,20 @@ class HRFormerBlock(BaseModule):
 
     expansion = 1
 
-    def __init__(self,
-                 in_features,
-                 out_features,
-                 num_heads,
-                 window_size=7,
-                 mlp_ratio=4.0,
-                 drop_path=0.0,
-                 act_cfg=dict(type='GELU'),
-                 norm_cfg=dict(type='SyncBN'),
-                 transformer_norm_cfg=dict(type='LN', eps=1e-6),
-                 init_cfg=None,
-                 **kwargs):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        num_heads,
+        window_size=7,
+        mlp_ratio=4.0,
+        drop_path=0.0,
+        act_cfg=dict(type="GELU"),
+        norm_cfg=dict(type="SyncBN"),
+        transformer_norm_cfg=dict(type="LN", eps=1e-6),
+        init_cfg=None,
+        **kwargs,
+    ):
         super(HRFormerBlock, self).__init__(init_cfg=init_cfg)
         self.num_heads = num_heads
         self.window_size = window_size
@@ -362,7 +390,8 @@ class HRFormerBlock(BaseModule):
             num_heads=num_heads,
             window_size=window_size,
             init_cfg=None,
-            **kwargs)
+            **kwargs,
+        )
 
         self.norm2 = build_norm_layer(transformer_norm_cfg, out_features)[1]
         self.ffn = CrossFFN(
@@ -372,10 +401,12 @@ class HRFormerBlock(BaseModule):
             norm_cfg=norm_cfg,
             act_cfg=act_cfg,
             dw_act_cfg=act_cfg,
-            init_cfg=None)
+            init_cfg=None,
+        )
 
-        self.drop_path = build_drop_path(
-            drop_path) if drop_path > 0.0 else nn.Identity()
+        self.drop_path = (
+            build_drop_path(drop_path) if drop_path > 0.0 else nn.Identity()
+        )
 
     def forward(self, x):
         """Forward function."""
@@ -390,8 +421,9 @@ class HRFormerBlock(BaseModule):
 
     def extra_repr(self):
         """(Optional) Set the extra information about this module."""
-        return 'num_heads={}, window_size={}, mlp_ratio={}'.format(
-            self.num_heads, self.window_size, self.mlp_ratio)
+        return "num_heads={}, window_size={}, mlp_ratio={}".format(
+            self.num_heads, self.window_size, self.mlp_ratio
+        )
 
 
 class HRFomerModule(HRModule):
@@ -427,25 +459,26 @@ class HRFomerModule(HRModule):
             layers. Default: dict(mode='bilinear', align_corners=False)
     """
 
-    def __init__(self,
-                 num_branches,
-                 block,
-                 num_blocks,
-                 num_inchannels,
-                 num_channels,
-                 num_heads,
-                 num_window_sizes,
-                 num_mlp_ratios,
-                 multiscale_output=True,
-                 drop_paths=0.0,
-                 with_rpe=True,
-                 with_pad_mask=False,
-                 conv_cfg=None,
-                 norm_cfg=dict(type='SyncBN', requires_grad=True),
-                 transformer_norm_cfg=dict(type='LN', eps=1e-6),
-                 with_cp=False,
-                 upsample_cfg=dict(mode='bilinear', align_corners=False)):
-
+    def __init__(
+        self,
+        num_branches,
+        block,
+        num_blocks,
+        num_inchannels,
+        num_channels,
+        num_heads,
+        num_window_sizes,
+        num_mlp_ratios,
+        multiscale_output=True,
+        drop_paths=0.0,
+        with_rpe=True,
+        with_pad_mask=False,
+        conv_cfg=None,
+        norm_cfg=dict(type="SyncBN", requires_grad=True),
+        transformer_norm_cfg=dict(type="LN", eps=1e-6),
+        with_cp=False,
+        upsample_cfg=dict(mode="bilinear", align_corners=False),
+    ):
         self.transformer_norm_cfg = transformer_norm_cfg
         self.drop_paths = drop_paths
         self.num_heads = num_heads
@@ -454,20 +487,25 @@ class HRFomerModule(HRModule):
         self.with_rpe = with_rpe
         self.with_pad_mask = with_pad_mask
 
-        super().__init__(num_branches, block, num_blocks, num_inchannels,
-                         num_channels, multiscale_output, with_cp, conv_cfg,
-                         norm_cfg, upsample_cfg)
+        super().__init__(
+            num_branches,
+            block,
+            num_blocks,
+            num_inchannels,
+            num_channels,
+            multiscale_output,
+            with_cp,
+            conv_cfg,
+            norm_cfg,
+            upsample_cfg,
+        )
 
-    def _make_one_branch(self,
-                         branch_index,
-                         block,
-                         num_blocks,
-                         num_channels,
-                         stride=1):
+    def _make_one_branch(self, branch_index, block, num_blocks, num_channels, stride=1):
         """Build one branch."""
         # HRFormerBlock does not support down sample layer yet.
-        assert stride == 1 and self.in_channels[branch_index] == num_channels[
-            branch_index]
+        assert (
+            stride == 1 and self.in_channels[branch_index] == num_channels[branch_index]
+        )
         layers = []
         layers.append(
             block(
@@ -481,10 +519,13 @@ class HRFomerModule(HRModule):
                 transformer_norm_cfg=self.transformer_norm_cfg,
                 init_cfg=None,
                 with_rpe=self.with_rpe,
-                with_pad_mask=self.with_pad_mask))
+                with_pad_mask=self.with_pad_mask,
+            )
+        )
 
-        self.in_channels[
-            branch_index] = self.in_channels[branch_index] * block.expansion
+        self.in_channels[branch_index] = (
+            self.in_channels[branch_index] * block.expansion
+        )
         for i in range(1, num_blocks[branch_index]):
             layers.append(
                 block(
@@ -498,7 +539,9 @@ class HRFomerModule(HRModule):
                     transformer_norm_cfg=self.transformer_norm_cfg,
                     init_cfg=None,
                     with_rpe=self.with_rpe,
-                    with_pad_mask=self.with_pad_mask))
+                    with_pad_mask=self.with_pad_mask,
+                )
+            )
         return nn.Sequential(*layers)
 
     def _make_fuse_layers(self):
@@ -520,14 +563,16 @@ class HRFomerModule(HRModule):
                                 num_inchannels[i],
                                 kernel_size=1,
                                 stride=1,
-                                bias=False),
-                            build_norm_layer(self.norm_cfg,
-                                             num_inchannels[i])[1],
+                                bias=False,
+                            ),
+                            build_norm_layer(self.norm_cfg, num_inchannels[i])[1],
                             nn.Upsample(
-                                scale_factor=2**(j - i),
-                                mode=self.upsample_cfg['mode'],
-                                align_corners=self.
-                                upsample_cfg['align_corners'])))
+                                scale_factor=2 ** (j - i),
+                                mode=self.upsample_cfg["mode"],
+                                align_corners=self.upsample_cfg["align_corners"],
+                            ),
+                        )
+                    )
                 elif j == i:
                     fuse_layer.append(None)
                 else:
@@ -550,8 +595,7 @@ class HRFomerModule(HRModule):
                                 groups=num_inchannels[j],
                                 bias=False,
                             ),
-                            build_norm_layer(self.norm_cfg,
-                                             num_inchannels[j])[1],
+                            build_norm_layer(self.norm_cfg, num_inchannels[j])[1],
                             build_conv_layer(
                                 self.conv_cfg,
                                 num_inchannels[j],
@@ -560,8 +604,7 @@ class HRFomerModule(HRModule):
                                 stride=1,
                                 bias=False,
                             ),
-                            build_norm_layer(self.norm_cfg,
-                                             num_outchannels_conv3x3)[1]
+                            build_norm_layer(self.norm_cfg, num_outchannels_conv3x3)[1],
                         ]
                         if with_out_act:
                             sub_modules.append(nn.ReLU(False))
@@ -658,60 +701,63 @@ class HRFormer(HRNet):
         (1, 256, 1, 1)
     """
 
-    blocks_dict = {'BOTTLENECK': Bottleneck, 'HRFORMERBLOCK': HRFormerBlock}
+    blocks_dict = {"BOTTLENECK": Bottleneck, "HRFORMERBLOCK": HRFormerBlock}
 
-    def __init__(self,
-                 extra,
-                 in_channels=3,
-                 conv_cfg=None,
-                 norm_cfg=dict(type='BN', requires_grad=True),
-                 transformer_norm_cfg=dict(type='LN', eps=1e-6),
-                 norm_eval=False,
-                 with_cp=False,
-                 zero_init_residual=False,
-                 frozen_stages=-1):
-
+    def __init__(
+        self,
+        extra,
+        in_channels=3,
+        conv_cfg=None,
+        norm_cfg=dict(type="BN", requires_grad=True),
+        transformer_norm_cfg=dict(type="LN", eps=1e-6),
+        norm_eval=False,
+        with_cp=False,
+        zero_init_residual=False,
+        frozen_stages=-1,
+    ):
         # stochastic depth
         depths = [
-            extra[stage]['num_blocks'][0] * extra[stage]['num_modules']
-            for stage in ['stage2', 'stage3', 'stage4']
+            extra[stage]["num_blocks"][0] * extra[stage]["num_modules"]
+            for stage in ["stage2", "stage3", "stage4"]
         ]
         depth_s2, depth_s3, _ = depths
-        drop_path_rate = extra['drop_path_rate']
-        dpr = [
-            x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))
-        ]
-        extra['stage2']['drop_path_rates'] = dpr[0:depth_s2]
-        extra['stage3']['drop_path_rates'] = dpr[depth_s2:depth_s2 + depth_s3]
-        extra['stage4']['drop_path_rates'] = dpr[depth_s2 + depth_s3:]
+        drop_path_rate = extra["drop_path_rate"]
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]
+        extra["stage2"]["drop_path_rates"] = dpr[0:depth_s2]
+        extra["stage3"]["drop_path_rates"] = dpr[depth_s2 : depth_s2 + depth_s3]
+        extra["stage4"]["drop_path_rates"] = dpr[depth_s2 + depth_s3 :]
 
         # HRFormer use bilinear upsample as default
-        upsample_cfg = extra.get('upsample', {
-            'mode': 'bilinear',
-            'align_corners': False
-        })
-        extra['upsample'] = upsample_cfg
+        upsample_cfg = extra.get(
+            "upsample", {"mode": "bilinear", "align_corners": False}
+        )
+        extra["upsample"] = upsample_cfg
         self.transformer_norm_cfg = transformer_norm_cfg
-        self.with_rpe = extra.get('with_rpe', True)
-        self.with_pad_mask = extra.get('with_pad_mask', False)
+        self.with_rpe = extra.get("with_rpe", True)
+        self.with_pad_mask = extra.get("with_pad_mask", False)
 
-        super().__init__(extra, in_channels, conv_cfg, norm_cfg, norm_eval,
-                         with_cp, zero_init_residual, frozen_stages)
+        super().__init__(
+            extra,
+            in_channels,
+            conv_cfg,
+            norm_cfg,
+            norm_eval,
+            with_cp,
+            zero_init_residual,
+            frozen_stages,
+        )
 
-    def _make_stage(self,
-                    layer_config,
-                    num_inchannels,
-                    multiscale_output=True):
+    def _make_stage(self, layer_config, num_inchannels, multiscale_output=True):
         """Make each stage."""
-        num_modules = layer_config['num_modules']
-        num_branches = layer_config['num_branches']
-        num_blocks = layer_config['num_blocks']
-        num_channels = layer_config['num_channels']
-        block = self.blocks_dict[layer_config['block']]
-        num_heads = layer_config['num_heads']
-        num_window_sizes = layer_config['window_sizes']
-        num_mlp_ratios = layer_config['mlp_ratios']
-        drop_path_rates = layer_config['drop_path_rates']
+        num_modules = layer_config["num_modules"]
+        num_branches = layer_config["num_branches"]
+        num_blocks = layer_config["num_blocks"]
+        num_channels = layer_config["num_channels"]
+        block = self.blocks_dict[layer_config["block"]]
+        num_heads = layer_config["num_heads"]
+        num_window_sizes = layer_config["window_sizes"]
+        num_mlp_ratios = layer_config["mlp_ratios"]
+        drop_path_rates = layer_config["drop_path_rates"]
 
         modules = []
         for i in range(num_modules):
@@ -732,15 +778,18 @@ class HRFormer(HRNet):
                     num_window_sizes,
                     num_mlp_ratios,
                     reset_multiscale_output,
-                    drop_paths=drop_path_rates[num_blocks[0] *
-                                               i:num_blocks[0] * (i + 1)],
+                    drop_paths=drop_path_rates[
+                        num_blocks[0] * i : num_blocks[0] * (i + 1)
+                    ],
                     with_rpe=self.with_rpe,
                     with_pad_mask=self.with_pad_mask,
                     conv_cfg=self.conv_cfg,
                     norm_cfg=self.norm_cfg,
                     transformer_norm_cfg=self.transformer_norm_cfg,
                     with_cp=self.with_cp,
-                    upsample_cfg=self.upsample_cfg))
+                    upsample_cfg=self.upsample_cfg,
+                )
+            )
             num_inchannels = modules[-1].get_num_inchannels()
 
         return nn.Sequential(*modules), num_inchannels

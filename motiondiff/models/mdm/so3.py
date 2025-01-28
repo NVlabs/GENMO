@@ -10,9 +10,9 @@ import warnings
 from typing import Tuple
 
 import torch
-from motiondiff.models.mdm.rotation_conversions import *
 
 from hmr4d.utils.math import acos_linear_extrapolation
+from motiondiff.models.mdm.rotation_conversions import *
 
 
 def so3_relative_angle(

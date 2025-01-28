@@ -1,10 +1,12 @@
-import torch
-import cv2
-import numpy as np
-from hmr4d.utils.geo_transform import apply_T_on_points, project_p2d
-from pathlib import Path
 import json
 import time
+from pathlib import Path
+
+import cv2
+import numpy as np
+import torch
+
+from hmr4d.utils.geo_transform import apply_T_on_points, project_p2d
 
 # ----- Meta sample utils ----- #
 
@@ -18,7 +20,8 @@ def sample_idx2meta(idx2meta, sample_interval):
     idx2meta = [
         v
         for k, v in idx2meta.items()
-        if int(v["frame_name"]) > 45 and (int(v["frame_name"]) + int(v["cam_id"])) % sample_interval == 0
+        if int(v["frame_name"]) > 45
+        and (int(v["frame_name"]) + int(v["cam_id"])) % sample_interval == 0
     ]
     idx2meta = sorted(idx2meta, key=lambda meta: meta["img_key"])
     return idx2meta
@@ -31,10 +34,19 @@ def remove_bbx_invisible_frame(idx2meta, img2gtbbx):
 
     idx2meta_new = []
     for meta in idx2meta:
-        gtbbx_center = np.array([img2gtbbx[meta["img_key"]][[0, 2]].mean(), img2gtbbx[meta["img_key"]][[1, 3]].mean()])
+        gtbbx_center = np.array(
+            [
+                img2gtbbx[meta["img_key"]][[0, 2]].mean(),
+                img2gtbbx[meta["img_key"]][[1, 3]].mean(),
+            ]
+        )
         if (gtbbx_center < raw_img_lu).any():
             continue
-        raw_img_rb = raw_img_rb_type1 if meta["cam_key"] not in ["Pavallion_3", "Pavallion_5"] else raw_img_rb_type2
+        raw_img_rb = (
+            raw_img_rb_type1
+            if meta["cam_key"] not in ["Pavallion_3", "Pavallion_5"]
+            else raw_img_rb_type2
+        )
         if (gtbbx_center > raw_img_rb).any():
             continue
         idx2meta_new.append(meta)
@@ -109,19 +121,29 @@ def squared_crop_and_resize(dataset, img, bbx_lurb, dst_size=224, state=None):
         ],
         dtype=np.float32,
     )
-    dst = np.array([[0, 0], [dst_size - 1, 0], [dst_size / 2 - 0.5, dst_size / 2 - 0.5]], dtype=np.float32)
+    dst = np.array(
+        [[0, 0], [dst_size - 1, 0], [dst_size / 2 - 0.5, dst_size / 2 - 0.5]],
+        dtype=np.float32,
+    )
 
     A = cv2.getAffineTransform(src, dst)
     img_crop = cv2.warpAffine(img, A, (dst_size, dst_size), flags=cv2.INTER_LINEAR)
     bbx_new = np.array(
-        [center_x - ori_half_size, center_y - ori_half_size, center_x + ori_half_size, center_y + ori_half_size],
+        [
+            center_x - ori_half_size,
+            center_y - ori_half_size,
+            center_x + ori_half_size,
+            center_y + ori_half_size,
+        ],
         dtype=bbx_lurb.dtype,
     )
     return img_crop, bbx_new, A
 
 
 # Augment bbx
-def get_augmented_square_bbx(bbx_lurb, per_shift=0.1, per_zoomout=0.2, base_zoomout=0.15, state=None):
+def get_augmented_square_bbx(
+    bbx_lurb, per_shift=0.1, per_zoomout=0.2, base_zoomout=0.15, state=None
+):
     """
     Args:
         per_shift: in percent, maximum random shift
@@ -156,20 +178,36 @@ def get_squared_bbx_region_and_resize(frames, bbx_xys, dst_size=224):
         bbx_xys: (F, 3), xys
     """
     frames_np = frames.numpy() if isinstance(frames, torch.Tensor) else frames
-    bbx_xys = bbx_xys if isinstance(bbx_xys, torch.Tensor) else torch.tensor(bbx_xys)  # use tensor
+    bbx_xys = (
+        bbx_xys if isinstance(bbx_xys, torch.Tensor) else torch.tensor(bbx_xys)
+    )  # use tensor
     srcs = torch.stack(
         [
-            torch.stack([bbx_xys[:, 0] - bbx_xys[:, 2] / 2, bbx_xys[:, 1] - bbx_xys[:, 2] / 2], dim=-1),
-            torch.stack([bbx_xys[:, 0] + bbx_xys[:, 2] / 2, bbx_xys[:, 1] - bbx_xys[:, 2] / 2], dim=-1),
+            torch.stack(
+                [bbx_xys[:, 0] - bbx_xys[:, 2] / 2, bbx_xys[:, 1] - bbx_xys[:, 2] / 2],
+                dim=-1,
+            ),
+            torch.stack(
+                [bbx_xys[:, 0] + bbx_xys[:, 2] / 2, bbx_xys[:, 1] - bbx_xys[:, 2] / 2],
+                dim=-1,
+            ),
             bbx_xys[:, :2],
         ],
         dim=1,
     )  # (F, 3, 2)
-    dst = np.array([[0, 0], [dst_size - 1, 0], [dst_size / 2 - 0.5, dst_size / 2 - 0.5]], dtype=np.float32)
+    dst = np.array(
+        [[0, 0], [dst_size - 1, 0], [dst_size / 2 - 0.5, dst_size / 2 - 0.5]],
+        dtype=np.float32,
+    )
     As = np.stack([cv2.getAffineTransform(src, dst) for src in srcs.numpy()])
 
     img_crops = np.stack(
-        [cv2.warpAffine(frames_np[i], As[i], (dst_size, dst_size), flags=cv2.INTER_LINEAR) for i in range(len(As))]
+        [
+            cv2.warpAffine(
+                frames_np[i], As[i], (dst_size, dst_size), flags=cv2.INTER_LINEAR
+            )
+            for i in range(len(As))
+        ]
     )
     img_crops = torch.from_numpy(img_crops)
     As = torch.from_numpy(As)
@@ -246,7 +284,10 @@ def parse_seqname_info(skip_multi_persons=True):
     Returns:
         sname_to_info: scan_name, subject_id, gender, cam_ids
     """
-    fns = [Path(__file__).parent / f"resource/{split}.txt" for split in ["train", "val", "test"]]
+    fns = [
+        Path(__file__).parent / f"resource/{split}.txt"
+        for split in ["train", "val", "test"]
+    ]
     # Train / Val&Test Header:
     # sequence_name	capture_name	scan_name	id	moving_cam	gender	view_id
     # sequence_name	capture_name	scan_name	id	moving_cam	gender	scene	action/scene-interaction	subjects	view_id
@@ -285,17 +326,24 @@ def get_seqname_to_imgrange():
     """Each sequence has a different range of image ids."""
     from tqdm import tqdm
 
-    split_seqnames = {split: get_seqnames_of_split(split) for split in ["train", "val", "test"]}
+    split_seqnames = {
+        split: get_seqnames_of_split(split) for split in ["train", "val", "test"]
+    }
     seqname_to_imgrange = {}
     for split in ["train", "val", "test"]:
         for seqname in tqdm(split_seqnames[split]):
-            img_root = Path("inputs/RICH") / "images_ds4" / split  # compressed (not original)
+            img_root = (
+                Path("inputs/RICH") / "images_ds4" / split
+            )  # compressed (not original)
             img_dir = img_root / seqname
             img_names = sorted([n.name for n in img_dir.glob("**/*.jpeg")])
             if len(img_names) == 0:
                 img_range = (0, 0)
             else:
-                img_range = (int(img_names[0].split("_")[0]), int(img_names[-1].split("_")[0]))
+                img_range = (
+                    int(img_names[0].split("_")[0]),
+                    int(img_names[-1].split("_")[0]),
+                )
             seqname_to_imgrange[seqname] = img_range
     return seqname_to_imgrange
 
@@ -327,7 +375,9 @@ def get_img_fn(img_root, seq_name, cam_id, f_id):
     img_root = Path(img_root)
     cam_id = int(cam_id)
     f_id = int(f_id)
-    return str(img_root / f"{seq_name}/cam_{cam_id:02d}" / f"{f_id:05d}_{cam_id:02d}.jpeg")
+    return str(
+        img_root / f"{seq_name}/cam_{cam_id:02d}" / f"{f_id:05d}_{cam_id:02d}.jpeg"
+    )
 
 
 # ----- WHAM ----- #
@@ -351,7 +401,9 @@ def get_K_wham_vid(vid):
 class RichVid2Tc2az:
     def __init__(self) -> None:
         self.w2az = get_w2az_sahmr()  # scan_name: tensor 4,4
-        seqname_info = parse_seqname_info(skip_multi_persons=True)  # {k: (scan_name, subject_id, gender, cam_ids)}
+        seqname_info = parse_seqname_info(
+            skip_multi_persons=True
+        )  # {k: (scan_name, subject_id, gender, cam_ids)}
         self.seqname_to_scanname = {k: v[0] for k, v in seqname_info.items()}
         self.cam2params = get_cam2params()  # cam_key -> (T_w2c, K)
 

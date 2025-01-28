@@ -1,21 +1,23 @@
 import argparse
-from yacs.config import CfgNode as CN
 from os.path import join
 
+from yacs.config import CfgNode as CN
 
-JOINT_REGRESSOR_TRAIN_EXTRA = 'inputs/checkpoints/body_models/smpl/J_regressor_extra.npy'
-JOINT_REGRESSOR_H36M = 'inputs/checkpoints/body_models/smpl/J_regressor_h36m.npy'
-SMPL_MEAN_PARAMS = 'inputs/checkpoints/body_models/smpl/smpl_mean_params.npz'
-SMPL_MODEL_DIR = 'inputs/checkpoints/body_models/smpl'
+JOINT_REGRESSOR_TRAIN_EXTRA = (
+    "inputs/checkpoints/body_models/smpl/J_regressor_extra.npy"
+)
+JOINT_REGRESSOR_H36M = "inputs/checkpoints/body_models/smpl/J_regressor_h36m.npy"
+SMPL_MEAN_PARAMS = "inputs/checkpoints/body_models/smpl/smpl_mean_params.npz"
+SMPL_MODEL_DIR = "inputs/checkpoints/body_models/smpl"
 
 
 # Configuration variables
 cfg = CN()
 
-cfg.OUTPUT_DIR = 'results'
-cfg.EXP_NAME = 'default'
-cfg.DEVICE = 'cuda'
-cfg.LOGDIR = ''
+cfg.OUTPUT_DIR = "results"
+cfg.EXP_NAME = "default"
+cfg.DEVICE = "cuda"
+cfg.LOGDIR = ""
 cfg.NUM_WORKERS = 4
 cfg.SEED_VALUE = -1
 cfg.IMG_RES = 224
@@ -27,8 +29,8 @@ cfg.CUDNN.DETERMINISTIC = False
 cfg.CUDNN.ENABLED = True
 
 cfg.TRAIN = CN()
-cfg.TRAIN.RESUME = ''
-cfg.TRAIN.PRETRAINED = ''
+cfg.TRAIN.RESUME = ""
+cfg.TRAIN.PRETRAINED = ""
 cfg.TRAIN.IS_FINETUNE = False
 cfg.TRAIN.POSE_PRETRAIN = True
 cfg.TRAIN.BATCH_SIZE = 32
@@ -43,14 +45,14 @@ cfg.TRAIN.CLIP_NORM = 1.0
 cfg.TRAIN.LOSS_SCALE = 60
 cfg.TRAIN.MASKED_PROB = 0.0
 cfg.TRAIN.SMPL_BETA = 0.001
-cfg.TRAIN.SCHEDULER = 'default'
+cfg.TRAIN.SCHEDULER = "default"
 cfg.TRAIN.WD = 0.01
-cfg.TRAIN.OPT = 'AdamW'
+cfg.TRAIN.OPT = "AdamW"
 cfg.TRAIN.MULTI_LR = False
 cfg.TRAIN.LR2 = None
 
 cfg.DATASET = CN()
-cfg.DATASET.TEST = 'emdb_1'
+cfg.DATASET.TEST = "emdb_1"
 cfg.DATASET.SEQ_LEN = 16
 cfg.DATASET.STRIDE = 16
 cfg.DATASET.RESCALE_TO_BEDLAM = 0.25
@@ -58,8 +60,8 @@ cfg.DATASET.RESCALE_TO_BEDLAM = 0.25
 cfg.MODEL = CN()
 cfg.MODEL.PRETRAINED = None
 cfg.MODEL.REG_LAYER = 2
-cfg.MODEL.PTYPE = 'marker'
-cfg.MODEL.BACKBONE = 'hrnet_w32'
+cfg.MODEL.PTYPE = "marker"
+cfg.MODEL.BACKBONE = "hrnet_w32"
 cfg.MODEL.CORR_LAYER = 0
 cfg.MODEL.DROP_PATH = 0.3
 cfg.MODEL.GRU_DIM = 256
@@ -69,7 +71,6 @@ cfg.MODEL.MOTION_MODULE = False
 cfg.MODEL.MOTION_DIM = 384
 
 cfg.LOSS = CN()
-
 
 
 def get_cfg_defaults():
@@ -89,14 +90,14 @@ def update_cfg(cfg_file):
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, help='cfg file path')
+    parser.add_argument("--cfg", type=str, help="cfg file path")
 
     if args is None:
         args = parser.parse_args()
     else:
         args = parser.parse_args(args)
 
-    print(args, end='\n\n')
+    print(args, end="\n\n")
 
     cfg_file = args.cfg
     if cfg_file is not None:

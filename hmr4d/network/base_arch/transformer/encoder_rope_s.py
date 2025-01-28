@@ -1,10 +1,12 @@
+import math
+from typing import Optional, Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
-from timm.models.vision_transformer import Mlp
-from typing import Optional, Tuple
 from einops import einsum, rearrange, repeat
+from timm.models.vision_transformer import Mlp
+
 from hmr4d.network.base_arch.embeddings.rotary_embedding import ROPE
 
 

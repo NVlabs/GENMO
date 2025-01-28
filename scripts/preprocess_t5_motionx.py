@@ -1,7 +1,9 @@
 import os
+
 import torch
+from transformers import T5EncoderModel, T5Tokenizer
+
 from hmr4d.dataset.motionx.motionx import MotionXDataset
-from transformers import T5Tokenizer, T5EncoderModel
 
 
 def load_and_freeze_llm(llm_version):
@@ -13,10 +15,11 @@ def load_and_freeze_llm(llm_version):
         p.requires_grad = False
     return model, tokenizer
 
+
 def encode_text(raw_text, has_text):
     # raw_text - list (batch_size length) of strings with input text prompts
     no_text = ~torch.tensor(has_text)
-    device = 'cuda'
+    device = "cuda"
     with torch.no_grad():
         with torch.cuda.amp.autocast(enabled=False):
             max_text_len = 50
@@ -26,7 +29,7 @@ def encode_text(raw_text, has_text):
                 return_tensors="pt",
                 padding="max_length",
                 max_length=max_text_len,
-                truncation=True
+                truncation=True,
             )
             # We expect all the processing is done in GPU.
             input_ids = encoded.input_ids.to(device)
@@ -46,25 +49,25 @@ def encode_text(raw_text, has_text):
     return encoded_text
 
 
-text_encoder, tokenizer = load_and_freeze_llm('t5-3b')
+text_encoder, tokenizer = load_and_freeze_llm("t5-3b")
 text_encoder.cuda()
 
 
 torch.autograd.set_grad_enabled(False)
 
-dataset = MotionXDataset(version='v2d')
-output_dir = 'inputs/MotionXpp_ye/t5_embeddings_v1'
+dataset = MotionXDataset(version="v2d")
+output_dir = "inputs/MotionXpp_ye/t5_embeddings_v1"
 os.makedirs(output_dir, exist_ok=True)
 
 text_embed_dict = {}
 
 for i, (vid, data) in enumerate(dataset.train_labels.items()):
-    text = [data['text']]
-    has_text = [x != '' for x in text]
+    text = [data["text"]]
+    has_text = [x != "" for x in text]
     text_embed = encode_text(text, has_text).cpu()
     # torch.save(text_embed, os.path.join(output_dir, f"{mid}.pth"))
     text_embed_dict[vid] = text_embed
-    print(f'{i}/{len(dataset)} {vid} {text[0]}')
+    print(f"{i}/{len(dataset)} {vid} {text[0]}")
 
 torch.save(text_embed_dict, os.path.join(output_dir, f"all_text_embed.pth"))
 print(len(dataset))

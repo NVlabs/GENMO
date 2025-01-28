@@ -2,16 +2,16 @@
 # Adhere to their licence to use this script
 
 
-import torch
 import numpy as np
-from torch import nn
-from torch.optim import lr_scheduler
+import torch
 from scipy.interpolate import interp1d
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
+from torch import nn
+from torch.optim import lr_scheduler
+
 
 class ExtModuleWrapper:
-
     def __init__(self, module):
         self.module = module
 
@@ -29,12 +29,14 @@ class ExtModuleWrapper:
 
 
 class to_cpu:
-
     def __init__(self, *models):
         self.models = list(filter(lambda x: x is not None, models))
-        self.prev_devices = [x.device if hasattr(x, 'device') else next(x.parameters()).device for x in self.models]
+        self.prev_devices = [
+            x.device if hasattr(x, "device") else next(x.parameters()).device
+            for x in self.models
+        ]
         for x in self.models:
-            x.to(torch.device('cpu'))
+            x.to(torch.device("cpu"))
 
     def __enter__(self):
         pass
@@ -46,10 +48,12 @@ class to_cpu:
 
 
 class to_device:
-
     def __init__(self, device, *models):
         self.models = list(filter(lambda x: x is not None, models))
-        self.prev_devices = [x.device if hasattr(x, 'device') else next(x.parameters()).device for x in self.models]
+        self.prev_devices = [
+            x.device if hasattr(x, "device") else next(x.parameters()).device
+            for x in self.models
+        ]
         for x in self.models:
             x.to(device)
 
@@ -63,7 +67,6 @@ class to_device:
 
 
 class to_test:
-
     def __init__(self, *models):
         self.models = list(filter(lambda x: x is not None, models))
         self.prev_modes = [x.training for x in self.models]
@@ -80,7 +83,6 @@ class to_test:
 
 
 class to_train:
-
     def __init__(self, *models):
         self.models = list(filter(lambda x: x is not None, models))
         self.prev_modes = [x.training for x in self.models]
@@ -139,14 +141,17 @@ def move_module_dict_to_device(module_dict, device):
 def initialize_weights(modules):
     for m in modules:
         if isinstance(m, nn.Conv2d):
-            nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-            if m.bias is not None: nn.init.constant_(m.bias, 0)
+            nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
         elif isinstance(m, nn.BatchNorm2d):
             nn.init.constant_(m.weight, 1)
-            if m.bias is not None: nn.init.constant_(m.bias, 0)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
         elif isinstance(m, nn.Linear):
             nn.init.normal_(m.weight, 0, 0.01)
-            if m.bias is not None: nn.init.constant_(m.bias, 0)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
 
 
 def tensor_to_img(x, chw2hwc=True, rgb2bgr=False):
@@ -168,14 +173,21 @@ def interp_tensor_with_scipy(x, new_len=None, scale=None, dim=-1):
     if new_len is None:
         new_len = int(orig_len * scale)
     T = orig_len
-    f = interp1d(np.linspace(0, T, orig_len), x.cpu().numpy(), axis=dim, assume_sorted=True, fill_value="extrapolate")
+    f = interp1d(
+        np.linspace(0, T, orig_len),
+        x.cpu().numpy(),
+        axis=dim,
+        assume_sorted=True,
+        fill_value="extrapolate",
+    )
     x_interp = torch.from_numpy(f(np.linspace(0, T, new_len))).type_as(x)
     return x_interp
 
+
 def slerp_joint_rots(x, new_len=None, scale=None):
-    '''
+    """
     x : [batch, motion_len, num_joints, 4]
-    '''
+    """
     # TODO this is super inefficient, should translate to pytorch and implement batched
     B, orig_len, J, _ = x.shape
     if new_len is None:
@@ -187,23 +199,36 @@ def slerp_joint_rots(x, new_len=None, scale=None):
     interp_x = torch.zeros((B, new_len, J, 4))
     for bi in range(B):
         for ji in range(J):
-            joint_motion = x[bi,:,ji] # [motion_len, 4]
+            joint_motion = x[bi, :, ji]  # [motion_len, 4]
             # scipy expects scalar-last quats
-            joint_motion = torch.cat([joint_motion[:,1:], joint_motion[:,0:1]], dim=-1).cpu().numpy()
+            joint_motion = (
+                torch.cat([joint_motion[:, 1:], joint_motion[:, 0:1]], dim=-1)
+                .cpu()
+                .numpy()
+            )
             joint_r = R.from_quat(joint_motion)
             slerp = Slerp(og_times, joint_r)
             interp_joint_motion = torch.from_numpy(slerp(new_times).as_quat())
-            interp_joint_motion = torch.cat([interp_joint_motion[:,3:], interp_joint_motion[:,:3]], dim=-1)
-            interp_x[bi,:,ji] = interp_joint_motion
+            interp_joint_motion = torch.cat(
+                [interp_joint_motion[:, 3:], interp_joint_motion[:, :3]], dim=-1
+            )
+            interp_x[bi, :, ji] = interp_joint_motion
     interp_x = interp_x.to(x)
     return interp_x
+
 
 def interp_scipy_ndarray(x, new_len=None, scale=None, dim=-1):
     orig_len = x.shape[dim]
     if new_len is None:
         new_len = int(orig_len * scale)
     T = orig_len
-    f = interp1d(np.linspace(0, T, orig_len), x, axis=dim, assume_sorted=True, fill_value="extrapolate")
+    f = interp1d(
+        np.linspace(0, T, orig_len),
+        x,
+        axis=dim,
+        assume_sorted=True,
+        fill_value="extrapolate",
+    )
     x_interp = f(np.linspace(0, T, new_len))
     return x_interp
 

@@ -45,15 +45,12 @@ class HMRMeshHead(nn.Module):
             init_cam = torch.FloatTensor([[1, 0, 0]])
         else:
             mean_params = np.load(smpl_mean_params)
-            init_pose = torch.from_numpy(
-                mean_params['pose'][:]).unsqueeze(0).float()
-            init_shape = torch.from_numpy(
-                mean_params['shape'][:]).unsqueeze(0).float()
-            init_cam = torch.from_numpy(
-                mean_params['cam']).unsqueeze(0).float()
-        self.register_buffer('init_pose', init_pose)
-        self.register_buffer('init_shape', init_shape)
-        self.register_buffer('init_cam', init_cam)
+            init_pose = torch.from_numpy(mean_params["pose"][:]).unsqueeze(0).float()
+            init_shape = torch.from_numpy(mean_params["shape"][:]).unsqueeze(0).float()
+            init_cam = torch.from_numpy(mean_params["cam"]).unsqueeze(0).float()
+        self.register_buffer("init_pose", init_pose)
+        self.register_buffer("init_shape", init_shape)
+        self.register_buffer("init_cam", init_cam)
 
     def forward(self, x):
         """Forward function.

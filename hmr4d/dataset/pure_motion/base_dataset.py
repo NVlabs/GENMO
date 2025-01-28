@@ -1,17 +1,33 @@
-import torch
-from torch.utils.data import Dataset
 from pathlib import Path
 
-from .utils import *
-from .cam_traj_utils import CameraAugmentorV11
+import torch
+from torch.utils.data import Dataset
+
 from hmr4d.utils.geo.hmr_cam import create_camera_sensor
 from hmr4d.utils.geo.hmr_global import get_c_rootparam, get_R_c2gv
-from hmr4d.utils.net_utils import get_valid_mask, repeat_to_max_len, repeat_to_max_len_dict
-from hmr4d.utils.geo_transform import compute_cam_angvel, compute_cam_tvel, apply_T_on_points, project_p2d, cvt_p2d_from_i_to_c
-
-from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines, convert_motion_as_line_mesh
+from hmr4d.utils.geo_transform import (
+    apply_T_on_points,
+    as_identity,
+    compute_cam_angvel,
+    compute_cam_tvel,
+    cvt_p2d_from_i_to_c,
+    normalize_T_w2c,
+    project_p2d,
+)
+from hmr4d.utils.net_utils import (
+    get_valid_mask,
+    repeat_to_max_len,
+    repeat_to_max_len_dict,
+)
 from hmr4d.utils.smplx_utils import make_smplx
-from hmr4d.utils.geo_transform import normalize_T_w2c, as_identity
+from hmr4d.utils.wis3d_utils import (
+    add_motion_as_lines,
+    convert_motion_as_line_mesh,
+    make_wis3d,
+)
+
+from .cam_traj_utils import CameraAugmentorV11
+from .utils import *
 
 
 class BaseDataset(Dataset):
@@ -55,7 +71,9 @@ class BaseDataset(Dataset):
         # Augmentation: betas, SMPL (gravity-axis)
         body_pose = data["body_pose"]
         betas = augment_betas(data["betas"], std=0.1)
-        global_orient_w, transl_w = rotate_around_axis(data["global_orient"], data["transl"], axis="y")
+        global_orient_w, transl_w = rotate_around_axis(
+            data["global_orient"], data["transl"], axis="y"
+        )
         del data
 
         # SMPL_params in world
@@ -76,7 +94,9 @@ class BaseDataset(Dataset):
                 smpl_params_w["global_orient"][::N],
                 None,
             )
-            w_j3d = w_j3d.repeat_interleave(N, dim=0) + smpl_params_w["transl"][:, None]  # (F, 24, 3)
+            w_j3d = (
+                w_j3d.repeat_interleave(N, dim=0) + smpl_params_w["transl"][:, None]
+            )  # (F, 24, 3)
 
             if False:
                 wis3d = make_wis3d(name="debug_amass")
@@ -95,7 +115,9 @@ class BaseDataset(Dataset):
                 smpl_params_w["global_orient"][::N],
                 None,
             )
-            w_j3d = w_j3d.repeat_interleave(N, dim=0) + smpl_params_w["transl"][:, None]  # (F, 24, 3)
+            w_j3d = (
+                w_j3d.repeat_interleave(N, dim=0) + smpl_params_w["transl"][:, None]
+            )  # (F, 24, 3)
 
             if False:
                 wis3d = make_wis3d(name="debug_amass")
@@ -120,15 +142,21 @@ class BaseDataset(Dataset):
                 bg = np.ones((height, width, 3), dtype=np.uint8) * 255
 
                 # render
-                renderer = Renderer(width, height, device="cuda", faces=faces, K=K_fullimg)
+                renderer = Renderer(
+                    width, height, device="cuda", faces=faces, K=K_fullimg
+                )
                 vname = f"{idx_render:02d}"
                 out_fn = Path(f"outputs/dump_render_wham_cam/{vname}.mp4")
                 out_fn.parent.mkdir(exist_ok=True, parents=True)
-                writer = imageio.get_writer(out_fn, fps=30, mode="I", format="FFMPEG", macro_block_size=1)
+                writer = imageio.get_writer(
+                    out_fn, fps=30, mode="I", format="FFMPEG", macro_block_size=1
+                )
                 for i in tqdm(range(len(verts)), desc=f"Rendering {vname}"):
                     # incam
                     # img_overlay_pred = renderer.render_mesh(verts[i].cuda(), bg, [0.8, 0.8, 0.8], VI=1)
-                    img_overlay_pred = renderer.render_mesh(verts[i].cuda(), bg, vertex_colors, VI=1)
+                    img_overlay_pred = renderer.render_mesh(
+                        verts[i].cuda(), bg, vertex_colors, VI=1
+                    )
                     # if batch["meta_render"][0].get("bbx_xys", None) is not None:  # draw bbox lines
                     #     bbx_xys = batch["meta_render"][0]["bbx_xys"][i].cpu().numpy()
                     #     lu_point = (bbx_xys[:2] - bbx_xys[2:] / 2).astype(int)
@@ -139,7 +167,7 @@ class BaseDataset(Dataset):
                     writer.append_data(img_overlay_pred)
                 writer.close()
                 pass
-        
+
         T_c2w = T_w2c.inverse()
         noisy_T_c2w = T_c2w.clone()
         R_c2w = as_identity(T_c2w[:, :3, :3])
@@ -211,13 +239,21 @@ class BaseDataset(Dataset):
         }
 
         # Batchable
-        return_data["smpl_params_c"] = repeat_to_max_len_dict(return_data["smpl_params_c"], max_len)
-        return_data["smpl_params_w"] = repeat_to_max_len_dict(return_data["smpl_params_w"], max_len)
+        return_data["smpl_params_c"] = repeat_to_max_len_dict(
+            return_data["smpl_params_c"], max_len
+        )
+        return_data["smpl_params_w"] = repeat_to_max_len_dict(
+            return_data["smpl_params_w"], max_len
+        )
         return_data["R_c2gv"] = repeat_to_max_len(return_data["R_c2gv"], max_len)
         return_data["K_fullimg"] = repeat_to_max_len(return_data["K_fullimg"], max_len)
-        return_data["cam_angvel"] = repeat_to_max_len(return_data["cam_angvel"], max_len)
+        return_data["cam_angvel"] = repeat_to_max_len(
+            return_data["cam_angvel"], max_len
+        )
         return_data["cam_tvel"] = repeat_to_max_len(return_data["cam_tvel"], max_len)
-        return_data["noisy_cam_tvel"] = repeat_to_max_len(return_data["noisy_cam_tvel"], max_len)
+        return_data["noisy_cam_tvel"] = repeat_to_max_len(
+            return_data["noisy_cam_tvel"], max_len
+        )
         return_data["T_w2c"] = repeat_to_max_len(return_data["T_w2c"], max_len)
         return return_data
 

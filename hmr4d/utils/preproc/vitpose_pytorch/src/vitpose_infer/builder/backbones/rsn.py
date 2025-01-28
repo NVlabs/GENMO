@@ -4,8 +4,7 @@ import copy as cp
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mmcv.cnn import (ConvModule, MaxPool2d, constant_init, kaiming_init,
-                      normal_init)
+from mmcv.cnn import ConvModule, MaxPool2d, constant_init, kaiming_init, normal_init
 
 from ..builder import BACKBONES
 from .base_backbone import BaseBackbone
@@ -32,16 +31,18 @@ class RSB(nn.Module):
 
     expansion = 1
 
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 num_steps=4,
-                 stride=1,
-                 downsample=None,
-                 with_cp=False,
-                 norm_cfg=dict(type='BN'),
-                 expand_times=26,
-                 res_top_channels=64):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        num_steps=4,
+        stride=1,
+        downsample=None,
+        with_cp=False,
+        norm_cfg=dict(type="BN"),
+        expand_times=26,
+        res_top_channels=64,
+    ):
         # Protect mutable default arguments
         norm_cfg = cp.deepcopy(norm_cfg)
         super().__init__()
@@ -62,10 +63,11 @@ class RSB(nn.Module):
             stride=self.stride,
             padding=0,
             norm_cfg=self.norm_cfg,
-            inplace=False)
+            inplace=False,
+        )
         for i in range(self.num_steps):
             for j in range(i + 1):
-                module_name = f'conv_bn_relu2_{i + 1}_{j + 1}'
+                module_name = f"conv_bn_relu2_{i + 1}_{j + 1}"
                 self.add_module(
                     module_name,
                     ConvModule(
@@ -75,7 +77,9 @@ class RSB(nn.Module):
                         stride=1,
                         padding=1,
                         norm_cfg=self.norm_cfg,
-                        inplace=False))
+                        inplace=False,
+                    ),
+                )
         self.conv_bn3 = ConvModule(
             self.num_steps * self.branch_channels,
             self.out_channels * self.expansion,
@@ -84,7 +88,8 @@ class RSB(nn.Module):
             padding=0,
             act_cfg=None,
             norm_cfg=self.norm_cfg,
-            inplace=False)
+            inplace=False,
+        )
         self.relu = nn.ReLU(inplace=False)
 
     def forward(self, x):
@@ -105,7 +110,7 @@ class RSB(nn.Module):
                     inputs = outputs[i][j - 1]
                 if i > j:
                     inputs = inputs + outputs[i - 1][j]
-                module_name = f'conv_bn_relu2_{i + 1}_{j + 1}'
+                module_name = f"conv_bn_relu2_{i + 1}_{j + 1}"
                 module_i_j = getattr(self, module_name)
                 outputs[i].append(module_i_j(inputs))
 
@@ -140,15 +145,17 @@ class Downsample_module(nn.Module):
             Default:26.
     """
 
-    def __init__(self,
-                 block,
-                 num_blocks,
-                 num_steps=4,
-                 num_units=4,
-                 has_skip=False,
-                 norm_cfg=dict(type='BN'),
-                 in_channels=64,
-                 expand_times=26):
+    def __init__(
+        self,
+        block,
+        num_blocks,
+        num_steps=4,
+        num_units=4,
+        has_skip=False,
+        norm_cfg=dict(type="BN"),
+        in_channels=64,
+        expand_times=26,
+    ):
         # Protect mutable default arguments
         norm_cfg = cp.deepcopy(norm_cfg)
         super().__init__()
@@ -164,9 +171,10 @@ class Downsample_module(nn.Module):
             in_channels,
             num_blocks[0],
             expand_times=expand_times,
-            res_top_channels=in_channels)
+            res_top_channels=in_channels,
+        )
         for i in range(1, num_units):
-            module_name = f'layer{i + 1}'
+            module_name = f"layer{i + 1}"
             self.add_module(
                 module_name,
                 self._make_layer(
@@ -175,15 +183,19 @@ class Downsample_module(nn.Module):
                     num_blocks[i],
                     stride=2,
                     expand_times=expand_times,
-                    res_top_channels=in_channels))
+                    res_top_channels=in_channels,
+                ),
+            )
 
-    def _make_layer(self,
-                    block,
-                    out_channels,
-                    blocks,
-                    stride=1,
-                    expand_times=26,
-                    res_top_channels=64):
+    def _make_layer(
+        self,
+        block,
+        out_channels,
+        blocks,
+        stride=1,
+        expand_times=26,
+        res_top_channels=64,
+    ):
         downsample = None
         if stride != 1 or self.in_channels != out_channels * block.expansion:
             downsample = ConvModule(
@@ -194,7 +206,8 @@ class Downsample_module(nn.Module):
                 padding=0,
                 norm_cfg=self.norm_cfg,
                 act_cfg=None,
-                inplace=True)
+                inplace=True,
+            )
 
         units = list()
         units.append(
@@ -206,7 +219,9 @@ class Downsample_module(nn.Module):
                 downsample=downsample,
                 norm_cfg=self.norm_cfg,
                 expand_times=expand_times,
-                res_top_channels=res_top_channels))
+                res_top_channels=res_top_channels,
+            )
+        )
         self.in_channels = out_channels * block.expansion
         for _ in range(1, blocks):
             units.append(
@@ -215,14 +230,16 @@ class Downsample_module(nn.Module):
                     out_channels,
                     num_steps=self.num_steps,
                     expand_times=expand_times,
-                    res_top_channels=res_top_channels))
+                    res_top_channels=res_top_channels,
+                )
+            )
 
         return nn.Sequential(*units)
 
     def forward(self, x, skip1, skip2):
         out = list()
         for i in range(self.num_units):
-            module_name = f'layer{i + 1}'
+            module_name = f"layer{i + 1}"
             module_i = getattr(self, module_name)
             x = module_i(x)
             if self.has_skip:
@@ -255,15 +272,17 @@ class Upsample_unit(nn.Module):
             module. Must equal to in_channels of downsample module. Default:64
     """
 
-    def __init__(self,
-                 ind,
-                 num_units,
-                 in_channels,
-                 unit_channels=256,
-                 gen_skip=False,
-                 gen_cross_conv=False,
-                 norm_cfg=dict(type='BN'),
-                 out_channels=64):
+    def __init__(
+        self,
+        ind,
+        num_units,
+        in_channels,
+        unit_channels=256,
+        gen_skip=False,
+        gen_cross_conv=False,
+        norm_cfg=dict(type="BN"),
+        out_channels=64,
+    ):
         # Protect mutable default arguments
         norm_cfg = cp.deepcopy(norm_cfg)
         super().__init__()
@@ -277,7 +296,8 @@ class Upsample_unit(nn.Module):
             padding=0,
             norm_cfg=self.norm_cfg,
             act_cfg=None,
-            inplace=True)
+            inplace=True,
+        )
         self.relu = nn.ReLU(inplace=True)
 
         self.ind = ind
@@ -290,7 +310,8 @@ class Upsample_unit(nn.Module):
                 padding=0,
                 norm_cfg=self.norm_cfg,
                 act_cfg=None,
-                inplace=True)
+                inplace=True,
+            )
 
         self.gen_skip = gen_skip
         if self.gen_skip:
@@ -301,7 +322,8 @@ class Upsample_unit(nn.Module):
                 stride=1,
                 padding=0,
                 norm_cfg=self.norm_cfg,
-                inplace=True)
+                inplace=True,
+            )
 
             self.out_skip2 = ConvModule(
                 unit_channels,
@@ -310,7 +332,8 @@ class Upsample_unit(nn.Module):
                 stride=1,
                 padding=0,
                 norm_cfg=self.norm_cfg,
-                inplace=True)
+                inplace=True,
+            )
 
         self.gen_cross_conv = gen_cross_conv
         if self.ind == num_units - 1 and self.gen_cross_conv:
@@ -321,17 +344,16 @@ class Upsample_unit(nn.Module):
                 stride=1,
                 padding=0,
                 norm_cfg=self.norm_cfg,
-                inplace=True)
+                inplace=True,
+            )
 
     def forward(self, x, up_x):
         out = self.in_skip(x)
 
         if self.ind > 0:
             up_x = F.interpolate(
-                up_x,
-                size=(x.size(2), x.size(3)),
-                mode='bilinear',
-                align_corners=True)
+                up_x, size=(x.size(2), x.size(3)), mode="bilinear", align_corners=True
+            )
             up_x = self.up_conv(up_x)
             out = out + up_x
         out = self.relu(out)
@@ -366,13 +388,15 @@ class Upsample_module(nn.Module):
             module. Must equal to in_channels of downsample module. Default:64
     """
 
-    def __init__(self,
-                 unit_channels=256,
-                 num_units=4,
-                 gen_skip=False,
-                 gen_cross_conv=False,
-                 norm_cfg=dict(type='BN'),
-                 out_channels=64):
+    def __init__(
+        self,
+        unit_channels=256,
+        num_units=4,
+        gen_skip=False,
+        gen_cross_conv=False,
+        norm_cfg=dict(type="BN"),
+        out_channels=64,
+    ):
         # Protect mutable default arguments
         norm_cfg = cp.deepcopy(norm_cfg)
         super().__init__()
@@ -385,7 +409,7 @@ class Upsample_module(nn.Module):
         self.gen_cross_conv = gen_cross_conv
         self.norm_cfg = norm_cfg
         for i in range(num_units):
-            module_name = f'up{i + 1}'
+            module_name = f"up{i + 1}"
             self.add_module(
                 module_name,
                 Upsample_unit(
@@ -396,7 +420,9 @@ class Upsample_module(nn.Module):
                     self.gen_skip,
                     self.gen_cross_conv,
                     norm_cfg=self.norm_cfg,
-                    out_channels=64))
+                    out_channels=64,
+                ),
+            )
 
     def forward(self, x):
         out = list()
@@ -404,7 +430,7 @@ class Upsample_module(nn.Module):
         skip2 = list()
         cross_conv = None
         for i in range(self.num_units):
-            module_i = getattr(self, f'up{i + 1}')
+            module_i = getattr(self, f"up{i + 1}")
             if i == 0:
                 outi, skip1_i, skip2_i, _ = module_i(x[i], None)
             elif i == self.num_units - 1:
@@ -443,17 +469,19 @@ class Single_stage_RSN(nn.Module):
             Default:26.
     """
 
-    def __init__(self,
-                 has_skip=False,
-                 gen_skip=False,
-                 gen_cross_conv=False,
-                 unit_channels=256,
-                 num_units=4,
-                 num_steps=4,
-                 num_blocks=[2, 2, 2, 2],
-                 norm_cfg=dict(type='BN'),
-                 in_channels=64,
-                 expand_times=26):
+    def __init__(
+        self,
+        has_skip=False,
+        gen_skip=False,
+        gen_cross_conv=False,
+        unit_channels=256,
+        num_units=4,
+        num_steps=4,
+        num_blocks=[2, 2, 2, 2],
+        norm_cfg=dict(type="BN"),
+        in_channels=64,
+        expand_times=26,
+    ):
         # Protect mutable default arguments
         norm_cfg = cp.deepcopy(norm_cfg)
         num_blocks = cp.deepcopy(num_blocks)
@@ -468,11 +496,19 @@ class Single_stage_RSN(nn.Module):
         self.num_blocks = num_blocks
         self.norm_cfg = norm_cfg
 
-        self.downsample = Downsample_module(RSB, num_blocks, num_steps,
-                                            num_units, has_skip, norm_cfg,
-                                            in_channels, expand_times)
-        self.upsample = Upsample_module(unit_channels, num_units, gen_skip,
-                                        gen_cross_conv, norm_cfg, in_channels)
+        self.downsample = Downsample_module(
+            RSB,
+            num_blocks,
+            num_steps,
+            num_units,
+            has_skip,
+            norm_cfg,
+            in_channels,
+            expand_times,
+        )
+        self.upsample = Upsample_module(
+            unit_channels, num_units, gen_skip, gen_cross_conv, norm_cfg, in_channels
+        )
 
     def forward(self, x, skip1, skip2):
         mid = self.downsample(x, skip1, skip2)
@@ -490,7 +526,7 @@ class ResNet_top(nn.Module):
         channels (int): Number of channels of the feature output by ResNet_top.
     """
 
-    def __init__(self, norm_cfg=dict(type='BN'), channels=64):
+    def __init__(self, norm_cfg=dict(type="BN"), channels=64):
         # Protect mutable default arguments
         norm_cfg = cp.deepcopy(norm_cfg)
         super().__init__()
@@ -502,7 +538,10 @@ class ResNet_top(nn.Module):
                 stride=2,
                 padding=3,
                 norm_cfg=norm_cfg,
-                inplace=True), MaxPool2d(kernel_size=3, stride=2, padding=1))
+                inplace=True,
+            ),
+            MaxPool2d(kernel_size=3, stride=2, padding=1),
+        )
 
     def forward(self, img):
         return self.top(img)
@@ -546,15 +585,17 @@ class RSN(BaseBackbone):
         (1, 256, 128, 128)
     """
 
-    def __init__(self,
-                 unit_channels=256,
-                 num_stages=4,
-                 num_units=4,
-                 num_blocks=[2, 2, 2, 2],
-                 num_steps=4,
-                 norm_cfg=dict(type='BN'),
-                 res_top_channels=64,
-                 expand_times=26):
+    def __init__(
+        self,
+        unit_channels=256,
+        num_stages=4,
+        num_units=4,
+        num_blocks=[2, 2, 2, 2],
+        num_steps=4,
+        norm_cfg=dict(type="BN"),
+        res_top_channels=64,
+        expand_times=26,
+    ):
         # Protect mutable default arguments
         norm_cfg = cp.deepcopy(norm_cfg)
         num_blocks = cp.deepcopy(num_blocks)
@@ -584,10 +625,19 @@ class RSN(BaseBackbone):
                 gen_skip = False
                 gen_cross_conv = False
             self.multi_stage_rsn.append(
-                Single_stage_RSN(has_skip, gen_skip, gen_cross_conv,
-                                 unit_channels, num_units, num_steps,
-                                 num_blocks, norm_cfg, res_top_channels,
-                                 expand_times))
+                Single_stage_RSN(
+                    has_skip,
+                    gen_skip,
+                    gen_cross_conv,
+                    unit_channels,
+                    num_units,
+                    num_steps,
+                    num_blocks,
+                    norm_cfg,
+                    res_top_channels,
+                    expand_times,
+                )
+            )
 
     def forward(self, x):
         """Model forward function."""

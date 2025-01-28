@@ -27,6 +27,6 @@
 			"**/dataset/**": true,
 			"**/out/**": true
 		}
-		
+
 	}
 }

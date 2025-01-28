@@ -1,7 +1,7 @@
 # Install
 
 ## Environment
-
+Setup python env:
 ```bash
 git clone https://github.com/zju3dv/GVHMR --recursive
 cd GVHMR
@@ -21,6 +21,12 @@ pip install numba pypose
 export CUDA_HOME=/usr/local/cuda-12.1/
 export PATH=$PATH:/usr/local/cuda-12.1/bin/
 pip install -e .
+```
+
+Setup pre-commit for code formatting:
+```
+pip install pre-commit
+pre-commit install
 ```
 
 ## Inputs & Outputs

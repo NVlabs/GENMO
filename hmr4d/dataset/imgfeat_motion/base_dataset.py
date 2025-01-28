@@ -1,7 +1,9 @@
+from pathlib import Path
+
+import numpy as np
 import torch
 from torch.utils import data
-import numpy as np
-from pathlib import Path
+
 from hmr4d.utils.pylogger import Log
 
 

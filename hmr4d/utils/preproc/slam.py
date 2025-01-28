@@ -1,12 +1,13 @@
-import cv2
 import time
-import torch
 from multiprocessing import Process, Queue
 
+import cv2
+import torch
+
 try:
-    from dpvo.utils import Timer
-    from dpvo.dpvo import DPVO
     from dpvo.config import cfg
+    from dpvo.dpvo import DPVO
+    from dpvo.utils import Timer
 except:
     pass
 
@@ -16,7 +17,17 @@ from hmr4d.utils.geo.hmr_cam import estimate_focal_length
 
 
 class SLAMModel(object):
-    def __init__(self, video_path, width, height, intrinsics=None, stride=1, skip=0, buffer=2048, resize=0.5):
+    def __init__(
+        self,
+        video_path,
+        width,
+        height,
+        intrinsics=None,
+        stride=1,
+        skip=0,
+        buffer=2048,
+        resize=0.5,
+    ):
         """
         Args:
             intrinsics: [fx, fy, cx, cy]
@@ -24,7 +35,9 @@ class SLAMModel(object):
         if intrinsics is None:
             print("Estimating focal length")
             focal_length = estimate_focal_length(width, height)
-            intrinsics = torch.tensor([focal_length, focal_length, width / 2.0, height / 2.0])
+            intrinsics = torch.tensor(
+                [focal_length, focal_length, width / 2.0, height / 2.0]
+            )
         else:
             intrinsics = intrinsics.clone()
 
@@ -35,7 +48,10 @@ class SLAMModel(object):
         self.times = []
         self.slam = None
         self.queue = Queue(maxsize=8)
-        self.reader = Process(target=video_stream, args=(self.queue, video_path, intrinsics, stride, skip, resize))
+        self.reader = Process(
+            target=video_stream,
+            args=(self.queue, video_path, intrinsics, stride, skip, resize),
+        )
         self.reader.start()
 
     def track(self):
@@ -50,7 +66,9 @@ class SLAMModel(object):
         if self.slam is None:
             cfg.merge_from_file(self.dpvo_cfg)
             cfg.BUFFER_SIZE = self.buffer
-            self.slam = DPVO(cfg, self.dpvo_ckpt, ht=image.shape[1], wd=image.shape[2], viz=False)
+            self.slam = DPVO(
+                cfg, self.dpvo_ckpt, ht=image.shape[1], wd=image.shape[2], viz=False
+            )
 
         with Timer("SLAM", enabled=False):
             t = time.time()
@@ -87,7 +105,9 @@ def video_stream(queue, imagedir, intrinsics, stride, skip=0, resize=0.5):
         if not ret:
             break
 
-        image = cv2.resize(image, None, fx=resize, fy=resize, interpolation=cv2.INTER_AREA)
+        image = cv2.resize(
+            image, None, fx=resize, fy=resize, interpolation=cv2.INTER_AREA
+        )
         h, w, _ = image.shape
         image = image[: h - h % 16, : w - w % 16]
 

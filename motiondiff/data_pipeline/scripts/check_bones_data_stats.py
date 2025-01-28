@@ -1,13 +1,14 @@
-from typing import DefaultDict
-import pandas as pd
 import os
-from tqdm import tqdm 
 from collections import OrderedDict
+from typing import DefaultDict
+
+import pandas as pd
+from tqdm import tqdm
 
 # data_dir = '/lustre/fs5/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/bones_full_raw'
-data_dir = 'dataset/bones_full_raw'
+data_dir = "dataset/bones_full_raw"
 # csv_path = os.path.join(data_dir, 'Metadata - 350 000 moves.csv')
-csv_path = os.path.join(data_dir, 'Metadata_240416_v3.csv')
+csv_path = os.path.join(data_dir, "Metadata_240416_v3.csv")
 
 csv = pd.read_csv(csv_path)
 
@@ -16,10 +17,10 @@ action_dict = DefaultDict(int)
 style_dict = DefaultDict(int)
 content_dict = DefaultDict(int)
 
-f_actor = open('bones_actor_stats.txt', 'w')
-f_action = open('bones_action_stats.txt', 'w')
-f_style = open('bones_style_stats.txt', 'w')
-f_content = open('bones_content_stats.txt', 'w')
+f_actor = open("bones_actor_stats.txt", "w")
+f_action = open("bones_action_stats.txt", "w")
+f_style = open("bones_style_stats.txt", "w")
+f_content = open("bones_content_stats.txt", "w")
 
 for actor in tqdm(csv.actor_uid):
     actor_dict[str(actor)] += 1
@@ -47,9 +48,15 @@ f_style.close()
 f_content.close()
 
 # Check missing texts
-f_texts = open('bones_missing_texts.txt', 'w')
+f_texts = open("bones_missing_texts.txt", "w")
 missing_texts = DefaultDict(int)
-for col in ['content_natural_desc_1', 'content_natural_desc_2', 'content_natural_desc_3', 'content_technical_description', 'content_short_description']:
+for col in [
+    "content_natural_desc_1",
+    "content_natural_desc_2",
+    "content_natural_desc_3",
+    "content_technical_description",
+    "content_short_description",
+]:
     for i in range(len(csv.move_bvh_path)):
         if not isinstance(csv[col][i], str):
             missing_texts[col] += 1

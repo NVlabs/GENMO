@@ -31,4 +31,3 @@ if [ -n "$env_var" ]; then
 fi
 
 $python_cmd
-

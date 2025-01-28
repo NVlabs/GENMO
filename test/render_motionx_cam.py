@@ -1,41 +1,33 @@
 import copy
 import json
-import numpy as np
 import os
 import os.path as osp
+
+import cv2
+import numpy
+import numpy as np
+import pyrender
+import torch
+import trimesh
+from PIL import Image
 from pycocotools.coco import COCO
-from pytorch3d.io import load_objs_as_meshes
-from pytorch3d.structures import Meshes
+from pytorch3d.io import load_obj, load_objs_as_meshes
 from pytorch3d.renderer import (
-    look_at_view_transform,
+    HardPhongShader,
+    MeshRasterizer,
+    MeshRenderer,
     PerspectiveCameras,
     PointLights,
     RasterizationSettings,
-    MeshRenderer,
-    MeshRasterizer,
     SoftPhongShader,
-)
-from pytorch3d.transforms import Transform3d
-from pytorch3d.renderer import TexturesVertex
-from PIL import Image
-from pytorch3d.io import load_obj
-from pytorch3d.renderer import (
-    PerspectiveCameras,
-    RasterizationSettings,
-    MeshRasterizer,
-    MeshRenderer,
-    HardPhongShader,
     TexturesVertex,
+    look_at_view_transform,
 )
 from pytorch3d.structures import Meshes
+from pytorch3d.transforms import Transform3d
 from pytorch3d.utils import cameras_from_opencv_projection
-import torch
-import cv2
-from smplx import SMPL, SMPLX, SMPLH
+from smplx import SMPL, SMPLH, SMPLX
 from tqdm import tqdm
-import numpy
-import trimesh
-import pyrender
 
 SMPLX_path = "common/human_model_files/smplx/SMPLX_NEUTRAL.npz"
 import os
@@ -185,7 +177,9 @@ def draw_bbox(frame, bbox, color=(0, 255, 0), thickness=2):
 
 
 if __name__ == "__main__":
-    local_coco_file = "/mnt/disk3/motion-x++/motion/mesh_recovery/local_motion/animation/*.json"
+    local_coco_file = (
+        "/mnt/disk3/motion-x++/motion/mesh_recovery/local_motion/animation/*.json"
+    )
     # The original video corresponding to the json file
     video_path = "video/*.mp4"
 

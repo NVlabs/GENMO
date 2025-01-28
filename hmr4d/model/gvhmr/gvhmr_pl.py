@@ -1,29 +1,38 @@
-from typing import Any, Dict
-import numpy as np
 from pathlib import Path
-import torch
+from typing import Any, Dict
+
+import numpy as np
 import pytorch_lightning as pl
+import torch
+from einops import einsum, rearrange
 from hydra.utils import instantiate
-from hmr4d.utils.pylogger import Log
-from einops import rearrange, einsum
+
 from hmr4d.configs import MainStore, builds
-
-from hmr4d.utils.geo_transform import compute_T_ayfz2ay, apply_T_on_points
-from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
-from hmr4d.utils.smplx_utils import make_smplx
-from hmr4d.utils.geo.augment_noisy_pose import (
-    get_wham_aug_kp3d,
-    get_visible_mask,
-    get_invisible_legs_mask,
-    randomly_occlude_lower_half,
-    randomly_modify_hands_legs,
+from hmr4d.model.gvhmr.utils.postprocess import (
+    pp_static_joint,
+    pp_static_joint_cam,
+    process_ik,
 )
-from hmr4d.utils.geo.hmr_cam import perspective_projection, normalize_kp2d, safely_render_x3d_K, get_bbx_xys
-
+from hmr4d.utils.geo.augment_noisy_pose import (
+    get_invisible_legs_mask,
+    get_visible_mask,
+    get_wham_aug_kp3d,
+    randomly_modify_hands_legs,
+    randomly_occlude_lower_half,
+)
+from hmr4d.utils.geo.flip_utils import avg_smplx_aa, flip_smplx_params
+from hmr4d.utils.geo.hmr_cam import (
+    get_bbx_xys,
+    normalize_kp2d,
+    perspective_projection,
+    safely_render_x3d_K,
+)
+from hmr4d.utils.geo_transform import apply_T_on_points, compute_T_ayfz2ay
+from hmr4d.utils.pylogger import Log
+from hmr4d.utils.smplx_utils import make_smplx
 from hmr4d.utils.video_io_utils import save_video
 from hmr4d.utils.vis.cv2_utils import draw_bbx_xys_on_image_batch
-from hmr4d.utils.geo.flip_utils import flip_smplx_params, avg_smplx_aa
-from hmr4d.model.gvhmr.utils.postprocess import pp_static_joint, pp_static_joint_cam, process_ik
+from hmr4d.utils.wis3d_utils import add_motion_as_lines, make_wis3d
 
 
 class GvhmrPL(pl.LightningModule):
@@ -86,9 +95,13 @@ class GvhmrPL(pl.LightningModule):
             for bid in range(B):
                 images = torch.zeros(F, render_h, render_w, 3, device=i_x2d.device)
                 for fid in range(F):
-                    images[fid, i_x2d_render[bid, fid, :, 1], i_x2d_render[bid, fid, :, 0]] = 255
+                    images[
+                        fid, i_x2d_render[bid, fid, :, 1], i_x2d_render[bid, fid, :, 0]
+                    ] = 255
 
-                images = draw_bbx_xys_on_image_batch(bbx_xys_render[bid].cpu().numpy(), images.cpu().numpy())
+                images = draw_bbx_xys_on_image_batch(
+                    bbx_xys_render[bid].cpu().numpy(), images.cpu().numpy()
+                )
                 images = np.stack(images).astype("uint8")  # (L, H, W, 3)
                 images[:, 0, :] = np.array([255, 255, 255])
                 images[:, -1, :] = np.array([255, 255, 255])
@@ -108,13 +121,21 @@ class GvhmrPL(pl.LightningModule):
         noisy_j3d = gt_j3d + get_wham_aug_kp3d(gt_j3d.shape[:2])
         if True:
             noisy_j3d = randomly_modify_hands_legs(noisy_j3d)
-        obs_i_j2d = perspective_projection(noisy_j3d, batch["K_fullimg"])  # (B, L, J, 2)
+        obs_i_j2d = perspective_projection(
+            noisy_j3d, batch["K_fullimg"]
+        )  # (B, L, J, 2)
         j2d_visible_mask = get_visible_mask(gt_j3d.shape[:2]).cuda()  # (B, L, J)
-        j2d_visible_mask[noisy_j3d[..., 2] < 0.3] = False  # Set close-to-image-plane points as invisible
+        j2d_visible_mask[noisy_j3d[..., 2] < 0.3] = (
+            False  # Set close-to-image-plane points as invisible
+        )
         if True:  # Set both legs as invisible for a period
-            legs_invisible_mask = get_invisible_legs_mask(gt_j3d.shape[:2]).cuda()  # (B, L, J)
+            legs_invisible_mask = get_invisible_legs_mask(
+                gt_j3d.shape[:2]
+            ).cuda()  # (B, L, J)
             j2d_visible_mask[legs_invisible_mask] = False
-        obs_kp2d = torch.cat([obs_i_j2d, j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
+        obs_kp2d = torch.cat(
+            [obs_i_j2d, j2d_visible_mask[:, :, :, None].float()], dim=-1
+        )  # (B, L, J, 3)
         obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
         obs[~j2d_visible_mask] = 0  # if not visible, set to (0,0,0)
         batch["obs"] = obs
@@ -131,8 +152,12 @@ class GvhmrPL(pl.LightningModule):
 
         if True:  # Use some detected vitpose (presave data)
             prob = 0.5
-            mask_real_vitpose = (torch.rand(B).to(obs_kp2d) < prob) * batch["mask"]["vitpose"]
-            batch["obs"][mask_real_vitpose] = normalize_kp2d(batch["kp2d"], batch["bbx_xys"])[mask_real_vitpose]
+            mask_real_vitpose = (torch.rand(B).to(obs_kp2d) < prob) * batch["mask"][
+                "vitpose"
+            ]
+            batch["obs"][mask_real_vitpose] = normalize_kp2d(
+                batch["kp2d"], batch["bbx_xys"]
+            )[mask_real_vitpose]
 
         # Set untrusted frames to False
         batch["obs"][~batch["mask"]["valid"]] = 0
@@ -142,7 +167,9 @@ class GvhmrPL(pl.LightningModule):
         if False:  # wis3d
             wis3d = make_wis3d(name="debug-aug-kp3d")
             add_motion_as_lines(gt_j3d[0], wis3d, name="gt_j3d", skeleton_type="coco17")
-            add_motion_as_lines(noisy_j3d[0], wis3d, name="noisy_j3d", skeleton_type="coco17")
+            add_motion_as_lines(
+                noisy_j3d[0], wis3d, name="noisy_j3d", skeleton_type="coco17"
+            )
 
         # f_imgseq: apply random aug on offline extracted features
         # f_imgseq = batch["f_imgseq"] + torch.randn_like(batch["f_imgseq"]) * 0.1
@@ -168,40 +195,48 @@ class GvhmrPL(pl.LightningModule):
         return outputs
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
-        if 'is_2d' in batch and batch['is_2d'][0]:
+        if "is_2d" in batch and batch["is_2d"][0]:
             return self.validation_2d(batch, batch_idx, dataloader_idx)
         else:
             return self.validation_3d(batch, batch_idx, dataloader_idx)
-        
+
     def validation_2d(self, batch, batch_idx, dataloader_idx=0):
         B = batch["obs_kp2d"].shape[0]
-        obs_kp2d = batch['obs_kp2d'].squeeze(2)
-        conf = batch['conf']
+        obs_kp2d = batch["obs_kp2d"].squeeze(2)
+        conf = batch["conf"]
         batch["bbx_xys"] = get_bbx_xys(obs_kp2d, do_augment=False)
-        
+
         orig_obs_kp2d = obs_kp2d.clone()
-        orig_obs_kp2d = torch.cat([orig_obs_kp2d, conf[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
-        batch["orig_obs"] = normalize_kp2d(orig_obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
+        orig_obs_kp2d = torch.cat(
+            [orig_obs_kp2d, conf[:, :, :, None].float()], dim=-1
+        )  # (B, L, J, 3)
+        batch["orig_obs"] = normalize_kp2d(
+            orig_obs_kp2d, batch["bbx_xys"]
+        )  # (B, L, J, 3)
         batch["orig_obs"][~batch["mask"]] = 0
-        
-        noisy_2d_obs = False # self.model_cfg.get("test_with_noisy_2d_obs", False)
+
+        noisy_2d_obs = False  # self.model_cfg.get("test_with_noisy_2d_obs", False)
         if noisy_2d_obs:
             aug = get_wham_aug_kp3d(obs_kp2d.shape[:2])[..., :2]
-            f = torch.tensor([1024., 1024.]).to(aug) / 4.
+            f = torch.tensor([1024.0, 1024.0]).to(aug) / 4.0
             aug *= f * self.model_cfg.kp2d_noise_scale
             obs_kp2d += aug
             obs_kp2d = randomly_modify_hands_legs(obs_kp2d)
             j2d_visible_mask = get_visible_mask(obs_kp2d.shape[:2]).cuda()  # (B, L, J)
-            legs_invisible_mask = get_invisible_legs_mask(obs_kp2d.shape[:2]).cuda()  # (B, L, J)
+            legs_invisible_mask = get_invisible_legs_mask(
+                obs_kp2d.shape[:2]
+            ).cuda()  # (B, L, J)
             j2d_visible_mask[legs_invisible_mask] = False
-            j2d_visible_mask *= (conf > 0.5)
+            j2d_visible_mask *= conf > 0.5
         else:
             j2d_visible_mask = conf > 0.5
-        obs_kp2d = torch.cat([obs_kp2d, j2d_visible_mask[:, :, :, None].float()], dim=-1)  # (B, L, J, 3)
+        obs_kp2d = torch.cat(
+            [obs_kp2d, j2d_visible_mask[:, :, :, None].float()], dim=-1
+        )  # (B, L, J, 3)
         obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
         obs[~batch["mask"]] = 0
         batch["obs"] = obs
-        
+
         # vis_ind = 0
         # mv2d_norm = obs.unsqueeze(2)
         # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
@@ -211,16 +246,20 @@ class GvhmrPL(pl.LightningModule):
         # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/2d_test_obs.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
 
         # Forward and get loss
-        outputs = self.pipeline.forward_2d(batch, train=False, global_step=self.trainer.global_step)
+        outputs = self.pipeline.forward_2d(
+            batch, train=False, global_step=self.trainer.global_step
+        )
         outputs["batch"] = batch
         return outputs
-        
+
     def validation_3d(self, batch, batch_idx, dataloader_idx=0):
         # Options & Check
         do_postproc = self.trainer.state.stage == "test"  # Only apply postproc in test
         do_postproc = False
         do_flip_test = "flip_test" in batch
-        do_postproc_not_flip_test = do_postproc and not do_flip_test  # later pp when flip_test
+        do_postproc_not_flip_test = (
+            do_postproc and not do_flip_test
+        )  # later pp when flip_test
         assert batch["B"] == 1, "Only support batch size 1 in evalution."
 
         # ROPE inference
@@ -235,18 +274,24 @@ class GvhmrPL(pl.LightningModule):
             "K_fullimg": batch["K_fullimg"],
             "cam_angvel": batch["cam_angvel"],
             "cam_tvel": batch["cam_tvel"],
-            "R_w2c": batch['R_w2c'],
+            "R_w2c": batch["R_w2c"],
             "f_imgseq": batch["f_imgseq"],
-            "meta": batch['meta']
+            "meta": batch["meta"],
         }
-        if 'vimo_smpl_params' in batch:
-            batch_['vimo_smpl_params'] = batch['vimo_smpl_params']
-            batch_['scales'] = batch['scales']
-            batch_['mean_scale'] = batch['mean_scale']
+        if "vimo_smpl_params" in batch:
+            batch_["vimo_smpl_params"] = batch["vimo_smpl_params"]
+            batch_["scales"] = batch["scales"]
+            batch_["mean_scale"] = batch["mean_scale"]
 
-        outputs = self.pipeline.forward(batch_, train=False, postproc=do_postproc_not_flip_test)
-        outputs["pred_smpl_params_global"] = {k: v[0] for k, v in outputs["pred_smpl_params_global"].items()}
-        outputs["pred_smpl_params_incam"] = {k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()}
+        outputs = self.pipeline.forward(
+            batch_, train=False, postproc=do_postproc_not_flip_test
+        )
+        outputs["pred_smpl_params_global"] = {
+            k: v[0] for k, v in outputs["pred_smpl_params_global"].items()
+        }
+        outputs["pred_smpl_params_incam"] = {
+            k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()
+        }
 
         if do_flip_test:
             flip_test = batch["flip_test"]
@@ -280,8 +325,12 @@ class GvhmrPL(pl.LightningModule):
             smpl_params2 = flip_smplx_params(flipped_outputs["pred_smpl_params_incam"])
 
             smpl_params_avg = smpl_params1.copy()
-            smpl_params_avg["betas"] = (smpl_params1["betas"] + smpl_params2["betas"]) / 2
-            smpl_params_avg["body_pose"] = avg_smplx_aa(smpl_params1["body_pose"], smpl_params2["body_pose"])
+            smpl_params_avg["betas"] = (
+                smpl_params1["betas"] + smpl_params2["betas"]
+            ) / 2
+            smpl_params_avg["body_pose"] = avg_smplx_aa(
+                smpl_params1["body_pose"], smpl_params2["body_pose"]
+            )
             smpl_params_avg["global_orient"] = avg_smplx_aa(
                 smpl_params1["global_orient"], smpl_params2["global_orient"]
             )
@@ -293,15 +342,23 @@ class GvhmrPL(pl.LightningModule):
             # global_vel_w1 = global_trans_w1[1:] - global_trans_w1[:-1]
             # global_vel_w2 = global_trans_w2[1:] - global_trans_w2[:-1]
             outputs["pred_smpl_params_global"]["betas"] = smpl_params_avg["betas"]
-            outputs["pred_smpl_params_global"]["body_pose"] = smpl_params_avg["body_pose"]
+            outputs["pred_smpl_params_global"]["body_pose"] = smpl_params_avg[
+                "body_pose"
+            ]
 
             # Finally, apply postprocess
             if do_postproc:
                 # temporarily recover the original batch-dim
-                outputs["pred_smpl_params_global"] = {k: v[None] for k, v in outputs["pred_smpl_params_global"].items()}
-                outputs["pred_smpl_params_global"]["transl"] = pp_static_joint(outputs, self.pipeline.endecoder)
+                outputs["pred_smpl_params_global"] = {
+                    k: v[None] for k, v in outputs["pred_smpl_params_global"].items()
+                }
+                outputs["pred_smpl_params_global"]["transl"] = pp_static_joint(
+                    outputs, self.pipeline.endecoder
+                )
                 body_pose = process_ik(outputs, self.pipeline.endecoder)
-                outputs["pred_smpl_params_global"] = {k: v[0] for k, v in outputs["pred_smpl_params_global"].items()}
+                outputs["pred_smpl_params_global"] = {
+                    k: v[0] for k, v in outputs["pred_smpl_params_global"].items()
+                }
 
                 outputs["pred_smpl_params_global"]["body_pose"] = body_pose[0]
                 # outputs["pred_smpl_params_incam"]["body_pose"] = body_pose[0]
@@ -318,25 +375,39 @@ class GvhmrPL(pl.LightningModule):
             smplx_out = smplx_model(**pred_smpl_params_global)
             for i in range(len(smplx_out.vertices)):
                 wis3d.set_scene_id(i)
-                wis3d.add_mesh(smplx_out.vertices[i], smplx_model.bm.faces, name=f"pred-smplx-global")
+                wis3d.add_mesh(
+                    smplx_out.vertices[i],
+                    smplx_model.bm.faces,
+                    name=f"pred-smplx-global",
+                )
 
             # GT (w)
             smplx_models = {
                 "male": make_smplx("rich-smplx", gender="male").cuda(),
                 "female": make_smplx("rich-smplx", gender="female").cuda(),
             }
-            gt_smpl_params = {k: v[0, windows[0]] for k, v in batch["gt_smpl_params"].items()}
+            gt_smpl_params = {
+                k: v[0, windows[0]] for k, v in batch["gt_smpl_params"].items()
+            }
             gt_smplx_out = smplx_models[gender](**gt_smpl_params)
 
             # GT (ayfz)
             smplx_verts_ay = apply_T_on_points(gt_smplx_out.vertices, T_w2ay)
             smplx_joints_ay = apply_T_on_points(gt_smplx_out.joints, T_w2ay)
-            T_ay2ayfz = compute_T_ayfz2ay(smplx_joints_ay[:1], inverse=True)[0]  # (4, 4)
-            smplx_verts_ayfz = apply_T_on_points(smplx_verts_ay, T_ay2ayfz)  # (F, 22, 3)
+            T_ay2ayfz = compute_T_ayfz2ay(smplx_joints_ay[:1], inverse=True)[
+                0
+            ]  # (4, 4)
+            smplx_verts_ayfz = apply_T_on_points(
+                smplx_verts_ay, T_ay2ayfz
+            )  # (F, 22, 3)
 
             for i in range(len(smplx_verts_ayfz)):
                 wis3d.set_scene_id(i)
-                wis3d.add_mesh(smplx_verts_ayfz[i], smplx_models[gender].bm.faces, name=f"gt-smplx-ayfz")
+                wis3d.add_mesh(
+                    smplx_verts_ayfz[i],
+                    smplx_models[gender].bm.faces,
+                    name=f"gt-smplx-ayfz",
+                )
 
             breakpoint()
 
@@ -366,7 +437,9 @@ class GvhmrPL(pl.LightningModule):
             return optimizer
 
         scheduler_cfg = dict(self.scheduler_cfg)
-        scheduler_cfg["scheduler"] = instantiate(scheduler_cfg["scheduler"], optimizer=optimizer)
+        scheduler_cfg["scheduler"] = instantiate(
+            scheduler_cfg["scheduler"], optimizer=optimizer
+        )
         return [optimizer], [scheduler_cfg]
 
     # ============== Utils ================= #
@@ -385,7 +458,9 @@ class GvhmrPL(pl.LightningModule):
         missing, unexpected = self.load_state_dict(state_dict, strict=False)
         real_missing = []
         for k in missing:
-            ignored_when_saving = any(k.startswith(ig_keys) for ig_keys in self.ignored_weights_prefix)
+            ignored_when_saving = any(
+                k.startswith(ig_keys) for ig_keys in self.ignored_weights_prefix
+            )
             if not ignored_when_saving:
                 real_missing.append(k)
 

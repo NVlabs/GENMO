@@ -1,4 +1,5 @@
 from omegaconf import DictConfig, ListConfig
+
 from hmr4d.configs import MainStore, builds
 
 # do not perform scheduling
@@ -21,11 +22,23 @@ def epoch_half_by(milestones=[100, 200, 300]):
     )
 
 
-MainStore.store(name="epoch_half_100_200_300", node=epoch_half_by([100, 200, 300]), group=f"scheduler_cfg")
-MainStore.store(name="epoch_half_100_200", node=epoch_half_by([100, 200]), group=f"scheduler_cfg")
-MainStore.store(name="epoch_half_200_350", node=epoch_half_by([200, 350]), group=f"scheduler_cfg")
-MainStore.store(name="epoch_half_300", node=epoch_half_by([300]), group=f"scheduler_cfg")
-MainStore.store(name="no_schedule", node=DictConfig({'scheduler': None}), group=f"scheduler_cfg")
+MainStore.store(
+    name="epoch_half_100_200_300",
+    node=epoch_half_by([100, 200, 300]),
+    group=f"scheduler_cfg",
+)
+MainStore.store(
+    name="epoch_half_100_200", node=epoch_half_by([100, 200]), group=f"scheduler_cfg"
+)
+MainStore.store(
+    name="epoch_half_200_350", node=epoch_half_by([200, 350]), group=f"scheduler_cfg"
+)
+MainStore.store(
+    name="epoch_half_300", node=epoch_half_by([300]), group=f"scheduler_cfg"
+)
+MainStore.store(
+    name="no_schedule", node=DictConfig({"scheduler": None}), group=f"scheduler_cfg"
+)
 
 
 # epoch-based
@@ -44,5 +57,13 @@ def warmup_epoch_half_by(warmup=10, milestones=[100, 200, 300]):
     )
 
 
-MainStore.store(name="warmup_5_epoch_half_200_350", node=warmup_epoch_half_by(5, [200, 350]), group=f"scheduler_cfg")
-MainStore.store(name="warmup_10_epoch_half_200_350", node=warmup_epoch_half_by(10, [200, 350]), group=f"scheduler_cfg")
+MainStore.store(
+    name="warmup_5_epoch_half_200_350",
+    node=warmup_epoch_half_by(5, [200, 350]),
+    group=f"scheduler_cfg",
+)
+MainStore.store(
+    name="warmup_10_epoch_half_200_350",
+    node=warmup_epoch_half_by(10, [200, 350]),
+    group=f"scheduler_cfg",
+)

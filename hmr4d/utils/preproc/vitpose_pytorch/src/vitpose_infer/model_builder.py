@@ -1,17 +1,16 @@
-import torch
+from functools import partial
+from importlib import import_module
 
-# from configs.coco.ViTPose_base_coco_256x192 import model
-from .builder.heads.topdown_heatmap_simple_head import TopdownHeatmapSimpleHead
+# print(model)
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 # import TopdownHeatmapSimpleHead
 from .builder.backbones import ViT
 
-# print(model)
-import torch
-from functools import partial
-import torch.nn as nn
-import torch.nn.functional as F
-from importlib import import_module
+# from configs.coco.ViTPose_base_coco_256x192 import model
+from .builder.heads.topdown_heatmap_simple_head import TopdownHeatmapSimpleHead
 
 models = {
     "ViTPose_huge_coco_256x192": dict(

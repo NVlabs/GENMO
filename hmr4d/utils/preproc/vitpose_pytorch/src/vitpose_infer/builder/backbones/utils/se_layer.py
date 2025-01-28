@@ -21,11 +21,13 @@ class SELayer(nn.Module):
             Default: (dict(type='ReLU'), dict(type='Sigmoid'))
     """
 
-    def __init__(self,
-                 channels,
-                 ratio=16,
-                 conv_cfg=None,
-                 act_cfg=(dict(type='ReLU'), dict(type='Sigmoid'))):
+    def __init__(
+        self,
+        channels,
+        ratio=16,
+        conv_cfg=None,
+        act_cfg=(dict(type="ReLU"), dict(type="Sigmoid")),
+    ):
         super().__init__()
         if isinstance(act_cfg, dict):
             act_cfg = (act_cfg, act_cfg)
@@ -38,14 +40,16 @@ class SELayer(nn.Module):
             kernel_size=1,
             stride=1,
             conv_cfg=conv_cfg,
-            act_cfg=act_cfg[0])
+            act_cfg=act_cfg[0],
+        )
         self.conv2 = ConvModule(
             in_channels=int(channels / ratio),
             out_channels=channels,
             kernel_size=1,
             stride=1,
             conv_cfg=conv_cfg,
-            act_cfg=act_cfg[1])
+            act_cfg=act_cfg[1],
+        )
 
     def forward(self, x):
         out = self.global_avgpool(x)

@@ -12,10 +12,7 @@ occ_jts_list = [
     [0, 1, 2, 3, 4, 5],
     [6, 7, 10, 11, 12, 13],
 ]
-occ_jts_list = [
-    [11, 12, 13, 14, 15, 16],
-    [0, 1, 2, 3, 4, 7, 8, 9, 10]
-]
+occ_jts_list = [[11, 12, 13, 14, 15, 16], [0, 1, 2, 3, 4, 7, 8, 9, 10]]
 
 
 def get_bbox_kp(img_idx, old_joints2ds, old_bboxs, scale_mult):
@@ -32,7 +29,14 @@ def get_bbox_kp(img_idx, old_joints2ds, old_bboxs, scale_mult):
 
 
 def rand_img_clip_transforms2(
-    img_idx, frame_idx, max_idx, old_joints2ds, old_bboxs, scale_mult, img_path=None, imgscale=None
+    img_idx,
+    frame_idx,
+    max_idx,
+    old_joints2ds,
+    old_bboxs,
+    scale_mult,
+    img_path=None,
+    imgscale=None,
 ):
     local_random = random.Random(0)
     if frame_idx % occ_interval_amb == 0:
@@ -90,7 +94,9 @@ def rand_img_clip_transforms2(
     return np.array(center), np.array(scale)
 
 
-def rand_img_clip_transform(joints, joints_vis, bbox_origin, local_random, imgscale=None):
+def rand_img_clip_transform(
+    joints, joints_vis, bbox_origin, local_random, imgscale=None
+):
     # occ_jts_list: list of list of jts indices
     part_joints_vis = [
         np.array([joints_vis[idx] for idx in occ_jts]) for occ_jts in occ_jts_list
@@ -142,7 +148,10 @@ def rand_img_clip_transform(joints, joints_vis, bbox_origin, local_random, imgsc
     # rand_center_shift = np.random.randn(2) * 5
     if imgscale is not None:
         rand_center_shift = np.array(
-            [local_random.random() * imgscale / 5 - imgscale / 10, local_random.random() * imgscale / 5 - imgscale / 10]
+            [
+                local_random.random() * imgscale / 5 - imgscale / 10,
+                local_random.random() * imgscale / 5 - imgscale / 10,
+            ]
         )
     else:
         rand_center_shift = np.array(
@@ -377,9 +386,6 @@ def get_common_joint_names():
         "neck",  # 12  "neck",      # 12
         "headtop",  # 13  "headtop",   # 13
     ]
-
-
-
 
 
 def translate_img_path(img_path_origin, dataset_name):

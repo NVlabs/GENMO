@@ -11,7 +11,9 @@ class PositionalEncoding(nn.Module):
 
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model)
+        )
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0).transpose(0, 1)
@@ -22,9 +24,9 @@ class PositionalEncoding(nn.Module):
         # not used in the final model
         if batch_first:
             pe = self.pe.transpose(0, 1)
-            x = x + pe[:, :x.shape[1], :]
+            x = x + pe[:, : x.shape[1], :]
         else:
-            x = x + self.pe[:x.shape[0], :]
+            x = x + self.pe[: x.shape[0], :]
         return self.dropout(x)
 
 
@@ -52,17 +54,17 @@ class InputProcess(nn.Module):
         self.input_feats = input_feats
         self.latent_dim = latent_dim
         self.poseEmbedding = nn.Linear(self.input_feats, self.latent_dim)
-        if self.data_rep == 'rot_vel':
+        if self.data_rep == "rot_vel":
             self.velEmbedding = nn.Linear(self.input_feats, self.latent_dim)
 
     def forward(self, x):
         bs, njoints, nfeats, nframes = x.shape
-        x = x.permute((3, 0, 1, 2)).reshape(nframes, bs, njoints*nfeats)
+        x = x.permute((3, 0, 1, 2)).reshape(nframes, bs, njoints * nfeats)
 
-        if self.data_rep in ['rot', 'xyz', 'hml_vec', 'root']:
+        if self.data_rep in ["rot", "xyz", "hml_vec", "root"]:
             x = self.poseEmbedding(x)  # [seqlen, bs, d]
             return x
-        elif self.data_rep == 'rot_vel':
+        elif self.data_rep == "rot_vel":
             first_pose = x[[0]]  # [1, bs, 150]
             first_pose = self.poseEmbedding(first_pose)  # [1, bs, d]
             vel = x[1:]  # [seqlen-1, bs, 150]
@@ -81,14 +83,14 @@ class OutputProcess(nn.Module):
         self.njoints = njoints
         self.nfeats = nfeats
         self.poseFinal = nn.Linear(self.latent_dim, self.input_feats)
-        if self.data_rep == 'rot_vel':
+        if self.data_rep == "rot_vel":
             self.velFinal = nn.Linear(self.latent_dim, self.input_feats)
 
     def forward(self, output):
         nframes, bs, d = output.shape
-        if self.data_rep in ['rot', 'xyz', 'hml_vec', 'root']:
+        if self.data_rep in ["rot", "xyz", "hml_vec", "root"]:
             output = self.poseFinal(output)  # [seqlen, bs, 150]
-        elif self.data_rep == 'rot_vel':
+        elif self.data_rep == "rot_vel":
             first_pose = output[[0]]  # [1, bs, d]
             first_pose = self.poseFinal(first_pose)  # [1, bs, 150]
             vel = output[1:]  # [seqlen-1, bs, d]
@@ -106,9 +108,9 @@ class EmbedActionScalar(nn.Module):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        mid_features = int(out_features/2)
+        mid_features = int(out_features / 2)
         self.lin1 = nn.Linear(in_features, mid_features)
-        self.activation = eval(f'F.{activation}')
+        self.activation = eval(f"F.{activation}")
         self.lin2 = nn.Linear(mid_features, out_features)
 
     def forward(self, input):

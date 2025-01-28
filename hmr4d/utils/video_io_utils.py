@@ -1,11 +1,12 @@
+import shutil
+from pathlib import Path
+
+import cv2
+import ffmpeg
 import imageio.v3 as iio
 import numpy as np
 import torch
-from pathlib import Path
-import shutil
-import ffmpeg
 from tqdm import tqdm
-import cv2
 
 
 def get_video_lwh(video_path):
@@ -30,7 +31,9 @@ def read_video_np(video_path, start_frame=0, end_frame=-1, scale=1.0):
             filter_args.append(("trim", f"start_frame={start_frame}"))
         else:
             should_check_length = True
-            filter_args.append(("trim", f"start_frame={start_frame}:end_frame={end_frame}"))
+            filter_args.append(
+                ("trim", f"start_frame={start_frame}:end_frame={end_frame}")
+            )
 
     # 2. Scale
     if scale != 1.0:
@@ -56,7 +59,9 @@ def read_images_np(image_paths, verbose=False):
         images: np.array, (N, H, W, 3) RGB, uint8
     """
     if verbose:
-        images = [cv2.imread(str(img_path))[..., ::-1] for img_path in tqdm(image_paths)]
+        images = [
+            cv2.imread(str(img_path))[..., ::-1] for img_path in tqdm(image_paths)
+        ]
     else:
         images = [cv2.imread(str(img_path))[..., ::-1] for img_path in image_paths]
     images = np.stack(images, axis=0)

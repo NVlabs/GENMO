@@ -3,14 +3,21 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mmcv.cnn import (build_conv_layer, build_norm_layer, build_upsample_layer,
-                      constant_init, normal_init)
-
+from mmcv.cnn import (
+    build_conv_layer,
+    build_norm_layer,
+    build_upsample_layer,
+    constant_init,
+    normal_init,
+)
 from mmpose.core.evaluation.top_down_eval import (
-    keypoints_from_heatmaps3d, multilabel_classification_accuracy)
+    keypoints_from_heatmaps3d,
+    multilabel_classification_accuracy,
+)
 from mmpose.core.post_processing import flip_back
 from mmpose.models.builder import build_loss
 from mmpose.models.necks import GlobalAveragePooling
+
 from ..builder import HEADS
 
 
@@ -30,15 +37,16 @@ class Heatmap3DHead(nn.Module):
         extra (dict): Configs for extra conv layers. Default: None
     """
 
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 depth_size=64,
-                 num_deconv_layers=3,
-                 num_deconv_filters=(256, 256, 256),
-                 num_deconv_kernels=(4, 4, 4),
-                 extra=None):
-
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        depth_size=64,
+        num_deconv_layers=3,
+        num_deconv_filters=(256, 256, 256),
+        num_deconv_kernels=(4, 4, 4),
+        extra=None,
+    ):
         super().__init__()
 
         assert out_channels % depth_size == 0
@@ -46,7 +54,7 @@ class Heatmap3DHead(nn.Module):
         self.in_channels = in_channels
 
         if extra is not None and not isinstance(extra, dict):
-            raise TypeError('extra should be dict or None.')
+            raise TypeError("extra should be dict or None.")
 
         if num_deconv_layers > 0:
             self.deconv_layers = self._make_deconv_layer(
@@ -57,20 +65,19 @@ class Heatmap3DHead(nn.Module):
         elif num_deconv_layers == 0:
             self.deconv_layers = nn.Identity()
         else:
-            raise ValueError(
-                f'num_deconv_layers ({num_deconv_layers}) should >= 0.')
+            raise ValueError(f"num_deconv_layers ({num_deconv_layers}) should >= 0.")
 
         identity_final_layer = False
-        if extra is not None and 'final_conv_kernel' in extra:
-            assert extra['final_conv_kernel'] in [0, 1, 3]
-            if extra['final_conv_kernel'] == 3:
+        if extra is not None and "final_conv_kernel" in extra:
+            assert extra["final_conv_kernel"] in [0, 1, 3]
+            if extra["final_conv_kernel"] == 3:
                 padding = 1
-            elif extra['final_conv_kernel'] == 1:
+            elif extra["final_conv_kernel"] == 1:
                 padding = 0
             else:
                 # 0 for Identity mapping.
                 identity_final_layer = True
-            kernel_size = extra['final_conv_kernel']
+            kernel_size = extra["final_conv_kernel"]
         else:
             kernel_size = 1
             padding = 0
@@ -78,36 +85,39 @@ class Heatmap3DHead(nn.Module):
         if identity_final_layer:
             self.final_layer = nn.Identity()
         else:
-            conv_channels = num_deconv_filters[
-                -1] if num_deconv_layers > 0 else self.in_channels
+            conv_channels = (
+                num_deconv_filters[-1] if num_deconv_layers > 0 else self.in_channels
+            )
 
             layers = []
             if extra is not None:
-                num_conv_layers = extra.get('num_conv_layers', 0)
-                num_conv_kernels = extra.get('num_conv_kernels',
-                                             [1] * num_conv_layers)
+                num_conv_layers = extra.get("num_conv_layers", 0)
+                num_conv_kernels = extra.get("num_conv_kernels", [1] * num_conv_layers)
 
                 for i in range(num_conv_layers):
                     layers.append(
                         build_conv_layer(
-                            dict(type='Conv2d'),
+                            dict(type="Conv2d"),
                             in_channels=conv_channels,
                             out_channels=conv_channels,
                             kernel_size=num_conv_kernels[i],
                             stride=1,
-                            padding=(num_conv_kernels[i] - 1) // 2))
-                    layers.append(
-                        build_norm_layer(dict(type='BN'), conv_channels)[1])
+                            padding=(num_conv_kernels[i] - 1) // 2,
+                        )
+                    )
+                    layers.append(build_norm_layer(dict(type="BN"), conv_channels)[1])
                     layers.append(nn.ReLU(inplace=True))
 
             layers.append(
                 build_conv_layer(
-                    cfg=dict(type='Conv2d'),
+                    cfg=dict(type="Conv2d"),
                     in_channels=conv_channels,
                     out_channels=out_channels,
                     kernel_size=kernel_size,
                     stride=1,
-                    padding=padding))
+                    padding=padding,
+                )
+            )
 
             if len(layers) > 1:
                 self.final_layer = nn.Sequential(*layers)
@@ -117,30 +127,33 @@ class Heatmap3DHead(nn.Module):
     def _make_deconv_layer(self, num_layers, num_filters, num_kernels):
         """Make deconv layers."""
         if num_layers != len(num_filters):
-            error_msg = f'num_layers({num_layers}) ' \
-                        f'!= length of num_filters({len(num_filters)})'
+            error_msg = (
+                f"num_layers({num_layers}) != length of num_filters({len(num_filters)})"
+            )
             raise ValueError(error_msg)
         if num_layers != len(num_kernels):
-            error_msg = f'num_layers({num_layers}) ' \
-                        f'!= length of num_kernels({len(num_kernels)})'
+            error_msg = (
+                f"num_layers({num_layers}) != length of num_kernels({len(num_kernels)})"
+            )
             raise ValueError(error_msg)
 
         layers = []
         for i in range(num_layers):
-            kernel, padding, output_padding = \
-                self._get_deconv_cfg(num_kernels[i])
+            kernel, padding, output_padding = self._get_deconv_cfg(num_kernels[i])
 
             planes = num_filters[i]
             layers.append(
                 build_upsample_layer(
-                    dict(type='deconv'),
+                    dict(type="deconv"),
                     in_channels=self.in_channels,
                     out_channels=planes,
                     kernel_size=kernel,
                     stride=2,
                     padding=padding,
                     output_padding=output_padding,
-                    bias=False))
+                    bias=False,
+                )
+            )
             layers.append(nn.BatchNorm2d(planes))
             layers.append(nn.ReLU(inplace=True))
             self.in_channels = planes
@@ -160,7 +173,7 @@ class Heatmap3DHead(nn.Module):
             padding = 0
             output_padding = 0
         else:
-            raise ValueError(f'Not supported num_kernels ({deconv_kernel}).')
+            raise ValueError(f"Not supported num_kernels ({deconv_kernel}).")
 
         return deconv_kernel, padding, output_padding
 
@@ -197,7 +210,7 @@ class Heatmap1DHead(nn.Module):
         hidden_dims (list|tuple): Number of feature dimension of FC layers.
     """
 
-    def __init__(self, in_channels=2048, heatmap_size=64, hidden_dims=(512, )):
+    def __init__(self, in_channels=2048, heatmap_size=64, hidden_dims=(512,)):
         super().__init__()
 
         self.in_channels = in_channels
@@ -208,9 +221,12 @@ class Heatmap1DHead(nn.Module):
 
     def soft_argmax_1d(self, heatmap1d):
         heatmap1d = F.softmax(heatmap1d, 1)
-        accu = heatmap1d * torch.arange(
-            self.heatmap_size, dtype=heatmap1d.dtype,
-            device=heatmap1d.device)[None, :]
+        accu = (
+            heatmap1d
+            * torch.arange(
+                self.heatmap_size, dtype=heatmap1d.dtype, device=heatmap1d.device
+            )[None, :]
+        )
         coord = accu.sum(dim=1)
         return coord
 
@@ -219,8 +235,7 @@ class Heatmap1DHead(nn.Module):
         layers = []
         for i in range(len(feat_dims) - 1):
             layers.append(nn.Linear(feat_dims[i], feat_dims[i + 1]))
-            if i < len(feat_dims) - 2 or \
-                    (i == len(feat_dims) - 2 and relu_final):
+            if i < len(feat_dims) - 2 or (i == len(feat_dims) - 2 and relu_final):
                 layers.append(nn.ReLU(inplace=True))
         return nn.Sequential(*layers)
 
@@ -247,7 +262,7 @@ class MultilabelClassificationHead(nn.Module):
         hidden_dims (list|tuple): Number of hidden dimension of FC layers.
     """
 
-    def __init__(self, in_channels=2048, num_labels=2, hidden_dims=(512, )):
+    def __init__(self, in_channels=2048, num_labels=2, hidden_dims=(512,)):
         super().__init__()
 
         self.in_channels = in_channels
@@ -261,8 +276,7 @@ class MultilabelClassificationHead(nn.Module):
         layers = []
         for i in range(len(feat_dims) - 1):
             layers.append(nn.Linear(feat_dims[i], feat_dims[i + 1]))
-            if i < len(feat_dims) - 2 or \
-                    (i == len(feat_dims) - 2 and relu_final):
+            if i < len(feat_dims) - 2 or (i == len(feat_dims) - 2 and relu_final):
                 layers.append(nn.ReLU(inplace=True))
         return nn.Sequential(*layers)
 
@@ -297,23 +311,24 @@ class Interhand3DHead(nn.Module):
             loss. Default: None.
     """
 
-    def __init__(self,
-                 keypoint_head_cfg,
-                 root_head_cfg,
-                 hand_type_head_cfg,
-                 loss_keypoint=None,
-                 loss_root_depth=None,
-                 loss_hand_type=None,
-                 train_cfg=None,
-                 test_cfg=None):
+    def __init__(
+        self,
+        keypoint_head_cfg,
+        root_head_cfg,
+        hand_type_head_cfg,
+        loss_keypoint=None,
+        loss_root_depth=None,
+        loss_hand_type=None,
+        train_cfg=None,
+        test_cfg=None,
+    ):
         super().__init__()
 
         # build sub-module heads
         self.right_hand_head = Heatmap3DHead(**keypoint_head_cfg)
         self.left_hand_head = Heatmap3DHead(**keypoint_head_cfg)
         self.root_head = Heatmap1DHead(**root_head_cfg)
-        self.hand_type_head = MultilabelClassificationHead(
-            **hand_type_head_cfg)
+        self.hand_type_head = MultilabelClassificationHead(**hand_type_head_cfg)
         self.neck = GlobalAveragePooling()
 
         # build losses
@@ -322,7 +337,7 @@ class Interhand3DHead(nn.Module):
         self.hand_type_loss = build_loss(loss_hand_type)
         self.train_cfg = {} if train_cfg is None else train_cfg
         self.test_cfg = {} if test_cfg is None else test_cfg
-        self.target_type = self.test_cfg.get('target_type', 'GaussianHeatmap')
+        self.target_type = self.test_cfg.get("target_type", "GaussianHeatmap")
 
     def init_weights(self):
         self.left_hand_head.init_weights()
@@ -346,19 +361,19 @@ class Interhand3DHead(nn.Module):
         assert not isinstance(self.keypoint_loss, nn.Sequential)
         out, tar, tar_weight = output[0], target[0], target_weight[0]
         assert tar.dim() == 5 and tar_weight.dim() == 3
-        losses['hand_loss'] = self.keypoint_loss(out, tar, tar_weight)
+        losses["hand_loss"] = self.keypoint_loss(out, tar, tar_weight)
 
         # relative root depth loss
         assert not isinstance(self.root_depth_loss, nn.Sequential)
         out, tar, tar_weight = output[1], target[1], target_weight[1]
         assert tar.dim() == 2 and tar_weight.dim() == 2
-        losses['rel_root_loss'] = self.root_depth_loss(out, tar, tar_weight)
+        losses["rel_root_loss"] = self.root_depth_loss(out, tar, tar_weight)
 
         # hand type loss
         assert not isinstance(self.hand_type_loss, nn.Sequential)
         out, tar, tar_weight = output[2], target[2], target_weight[2]
         assert tar.dim() == 2 and tar_weight.dim() in [1, 2]
-        losses['hand_type_loss'] = self.hand_type_loss(out, tar, tar_weight)
+        losses["hand_type_loss"] = self.hand_type_loss(out, tar, tar_weight)
 
         return losses
 
@@ -377,15 +392,15 @@ class Interhand3DHead(nn.Module):
             target[2].detach().cpu().numpy(),
             target_weight[2].detach().cpu().numpy(),
         )
-        accuracy['acc_classification'] = float(avg_acc)
+        accuracy["acc_classification"] = float(avg_acc)
         return accuracy
 
     def forward(self, x):
         """Forward function."""
         outputs = []
         outputs.append(
-            torch.cat([self.right_hand_head(x),
-                       self.left_hand_head(x)], dim=1))
+            torch.cat([self.right_hand_head(x), self.left_hand_head(x)], dim=1)
+        )
         x = self.neck(x)
         outputs.append(self.root_head(x))
         outputs.append(self.hand_type_head(x))
@@ -416,14 +431,13 @@ class Interhand3DHead(nn.Module):
             heatmap_3d_flipped_back = flip_back(
                 heatmap_3d.detach().cpu().numpy(),
                 flip_pairs,
-                target_type=self.target_type)
+                target_type=self.target_type,
+            )
             # reshape back to 3D heatmap
-            heatmap_3d_flipped_back = heatmap_3d_flipped_back.reshape(
-                N, K, D, H, W)
+            heatmap_3d_flipped_back = heatmap_3d_flipped_back.reshape(N, K, D, H, W)
             # feature is not aligned, shift flipped heatmap for higher accuracy
-            if self.test_cfg.get('shift_heatmap', False):
-                heatmap_3d_flipped_back[...,
-                                        1:] = heatmap_3d_flipped_back[..., :-1]
+            if self.test_cfg.get("shift_heatmap", False):
+                heatmap_3d_flipped_back[..., 1:] = heatmap_3d_flipped_back[..., :-1]
             output[0] = heatmap_3d_flipped_back
 
             # flip relative hand root depth
@@ -469,22 +483,22 @@ class Interhand3DHead(nn.Module):
         scale = np.zeros((batch_size, 2), dtype=np.float32)
         image_paths = []
         score = np.ones(batch_size, dtype=np.float32)
-        if 'bbox_id' in img_metas[0]:
+        if "bbox_id" in img_metas[0]:
             bbox_ids = []
         else:
             bbox_ids = None
 
         for i in range(batch_size):
-            heatmap3d_depth_bound[i] = img_metas[i]['heatmap3d_depth_bound']
-            root_depth_bound[i] = img_metas[i]['root_depth_bound']
-            center[i, :] = img_metas[i]['center']
-            scale[i, :] = img_metas[i]['scale']
-            image_paths.append(img_metas[i]['image_file'])
+            heatmap3d_depth_bound[i] = img_metas[i]["heatmap3d_depth_bound"]
+            root_depth_bound[i] = img_metas[i]["root_depth_bound"]
+            center[i, :] = img_metas[i]["center"]
+            scale[i, :] = img_metas[i]["scale"]
+            image_paths.append(img_metas[i]["image_file"])
 
-            if 'bbox_score' in img_metas[i]:
-                score[i] = np.array(img_metas[i]['bbox_score']).reshape(-1)
+            if "bbox_score" in img_metas[i]:
+                score[i] = np.array(img_metas[i]["bbox_score"]).reshape(-1)
             if bbox_ids is not None:
-                bbox_ids.append(img_metas[i]['bbox_id'])
+                bbox_ids.append(img_metas[i]["bbox_id"])
 
         all_boxes = np.zeros((batch_size, 6), dtype=np.float32)
         all_boxes[:, 0:2] = center[:, 0:2]
@@ -493,29 +507,29 @@ class Interhand3DHead(nn.Module):
         # need multiply 200.0 to get bbox size
         all_boxes[:, 4] = np.prod(scale * 200.0, axis=1)
         all_boxes[:, 5] = score
-        result['boxes'] = all_boxes
-        result['image_paths'] = image_paths
-        result['bbox_ids'] = bbox_ids
+        result["boxes"] = all_boxes
+        result["image_paths"] = image_paths
+        result["bbox_ids"] = bbox_ids
 
         # decode 3D heatmaps of hand keypoints
         heatmap3d = output[0]
         preds, maxvals = keypoints_from_heatmaps3d(heatmap3d, center, scale)
-        keypoints_3d = np.zeros((batch_size, preds.shape[1], 4),
-                                dtype=np.float32)
+        keypoints_3d = np.zeros((batch_size, preds.shape[1], 4), dtype=np.float32)
         keypoints_3d[:, :, 0:3] = preds[:, :, 0:3]
         keypoints_3d[:, :, 3:4] = maxvals
         # transform keypoint depth to camera space
-        keypoints_3d[:, :, 2] = \
-            (keypoints_3d[:, :, 2] / self.right_hand_head.depth_size - 0.5) \
-            * heatmap3d_depth_bound[:, np.newaxis]
+        keypoints_3d[:, :, 2] = (
+            keypoints_3d[:, :, 2] / self.right_hand_head.depth_size - 0.5
+        ) * heatmap3d_depth_bound[:, np.newaxis]
 
-        result['preds'] = keypoints_3d
+        result["preds"] = keypoints_3d
 
         # decode relative hand root depth
         # transform relative root depth to camera space
-        result['rel_root_depth'] = (output[1] / self.root_head.heatmap_size -
-                                    0.5) * root_depth_bound
+        result["rel_root_depth"] = (
+            output[1] / self.root_head.heatmap_size - 0.5
+        ) * root_depth_bound
 
         # decode hand type
-        result['hand_type'] = output[2] > 0.5
+        result["hand_type"] = output[2] > 0.5
         return result

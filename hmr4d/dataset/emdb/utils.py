@@ -1,8 +1,10 @@
-import torch
 import pickle
-import numpy as np
 from pathlib import Path
+
+import numpy as np
+import torch
 from tqdm import tqdm
+
 from hmr4d.utils.geo_transform import convert_lurb_to_bbx_xys
 from hmr4d.utils.video_io_utils import get_video_lwh
 
@@ -39,7 +41,9 @@ def load_pkl(fp):
     data["gender"] = annot["gender"]
     data["smpl_params"] = smpl_params
     data["mask"] = torch.from_numpy(annot["good_frames_mask"]).bool()  # (L,)
-    data["K_fullimg"] = torch.from_numpy(annot["camera"]["intrinsics"]).float()  # (3, 3)
+    data["K_fullimg"] = torch.from_numpy(
+        annot["camera"]["intrinsics"]
+    ).float()  # (3, 3)
     data["T_w2c"] = torch.from_numpy(annot["camera"]["extrinsics"]).float()  # (L, 4, 4)
     bbx_lurb = torch.from_numpy(annot["bboxes"]["bboxes"]).float()
     data["bbx_xys"] = convert_lurb_to_bbx_xys(bbx_lurb)  # (L, 3)
@@ -103,11 +107,16 @@ EMDB_NAMES = list(sorted(set(EMDB1_NAMES + EMDB2_NAMES)))
 def _check_annot(emdb_raw_dir=Path("inputs/EMDB/EMDB")):
     for pkl_local_path in set(EMDB1_LIST + EMDB2_LIST):
         annot = load_raw_pkl(emdb_raw_dir / pkl_local_path)
-        if any((annot["bboxes"]["invalid_idxs"] != np.where(~annot["good_frames_mask"])[0])):
+        if any(
+            (annot["bboxes"]["invalid_idxs"] != np.where(~annot["good_frames_mask"])[0])
+        ):
             print(annot["name"])
 
 
-def _check_length(emdb_raw_dir=Path("inputs/EMDB/EMDB"), emdb_hmr4d_support_dir=Path("inputs/EMDB/hmr4d_support")):
+def _check_length(
+    emdb_raw_dir=Path("inputs/EMDB/EMDB"),
+    emdb_hmr4d_support_dir=Path("inputs/EMDB/hmr4d_support"),
+):
     lengths = []
     for local_pkl_path in tqdm(set(EMDB1_LIST + EMDB2_LIST)):
         data = load_pkl(emdb_raw_dir / local_pkl_path)

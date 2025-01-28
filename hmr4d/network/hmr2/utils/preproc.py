@@ -1,7 +1,8 @@
+from pathlib import Path
+
 import cv2
 import numpy as np
 import torch
-from pathlib import Path
 
 IMAGE_MEAN = torch.tensor([0.485, 0.456, 0.406])
 IMAGE_STD = torch.tensor([0.229, 0.224, 0.225])
@@ -44,7 +45,10 @@ def crop_and_resize(img, bbx_xy, bbx_s, dst_size=256, enlarge_ratio=1.2):
             bbx_xy,  # center
         ]
     ).astype(np.float32)
-    dst = np.array([[0, 0], [dst_size - 1, 0], [dst_size / 2 - 0.5, dst_size / 2 - 0.5]], dtype=np.float32)
+    dst = np.array(
+        [[0, 0], [dst_size - 1, 0], [dst_size / 2 - 0.5, dst_size / 2 - 0.5]],
+        dtype=np.float32,
+    )
     A = cv2.getAffineTransform(src, dst)
 
     img_crop = cv2.warpAffine(img, A, (dst_size, dst_size), flags=cv2.INTER_LINEAR)

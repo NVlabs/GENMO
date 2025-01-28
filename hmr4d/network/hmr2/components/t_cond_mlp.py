@@ -36,7 +36,9 @@ class AdaptiveLayerNorm1D(torch.nn.Module):
 class SequentialCond(torch.nn.Sequential):
     def forward(self, input, *args, **kwargs):
         for module in self:
-            if isinstance(module, (AdaptiveLayerNorm1D, SequentialCond, ResidualMLPBlock)):
+            if isinstance(
+                module, (AdaptiveLayerNorm1D, SequentialCond, ResidualMLPBlock)
+            ):
                 # print(f'Passing on args to {module}', [a.shape for a in args])
                 input = module(input, *args, **kwargs)
             else:
@@ -189,11 +191,12 @@ class FrequencyEmbedder(torch.nn.Module):
         if x.dim() == 1:  # (N,)
             x = x.unsqueeze(1)  # (N, D) where D=1
         x_unsqueezed = x.unsqueeze(-1)  # (N, D, 1)
-        scaled = self.frequencies.view(1, 1, -1) * x_unsqueezed  # (N, D, num_frequencies)
+        scaled = (
+            self.frequencies.view(1, 1, -1) * x_unsqueezed
+        )  # (N, D, num_frequencies)
         s = torch.sin(scaled)
         c = torch.cos(scaled)
         embedded = torch.cat([s, c, x_unsqueezed], dim=-1).view(
             N, -1
         )  # (N, D * 2 * num_frequencies + D)
         return embedded
-

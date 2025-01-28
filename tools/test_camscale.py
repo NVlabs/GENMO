@@ -1,20 +1,20 @@
 import os
-import torch
 import random
-from motiondiff.utils.vis_scenepic import ScenepicVisualizer
+
+import torch
+
 from hmr4d.dataset.pure_motion.cam_traj_utils import CameraAugmentorV11
-from hmr4d.utils.geo.hmr_cam import create_camera_sensor
-from hmr4d.utils.smplx_utils import make_smplx
-from hmr4d.utils.geo.hmr_global import get_c_rootparam, get_R_c2gv
-from hmr4d.utils.geo.hmr_cam import perspective_projection
 from hmr4d.utils.eval.eval_utils import batch_compute_scale_trans_torch
+from hmr4d.utils.geo.hmr_cam import create_camera_sensor, perspective_projection
+from hmr4d.utils.geo.hmr_global import get_c_rootparam, get_R_c2gv
+from hmr4d.utils.smplx_utils import make_smplx
 from motiondiff.models.mdm.rotation_conversions import (
     axis_angle_to_matrix,
     matrix_to_axis_angle,
     matrix_to_quaternion,
     quaternion_to_matrix,
 )
-
+from motiondiff.utils.vis_scenepic import ScenepicVisualizer
 
 
 def as_identity(R):
@@ -50,7 +50,11 @@ def estimate_scale_and_offset(t0, t1):
 
 
 def ransac_scale_and_offset(
-    t0, t1, num_iterations=100, min_inliers_ratio=0.6, sample_ratio=0.1,
+    t0,
+    t1,
+    num_iterations=100,
+    min_inliers_ratio=0.6,
+    sample_ratio=0.1,
 ):
     """
     Estimate optimal scale s and offset t such that t0 ≈ s*t1 + t using RANSAC
@@ -71,7 +75,9 @@ def ransac_scale_and_offset(
     sample_size = int(B * sample_ratio)
     sample_size = max(sample_size, 100)  # Ensure at least 100 points are sampled
     sall, t, R = batch_compute_scale_trans_torch(t0[None], t1[None])
-    t0_hat = (sall.unsqueeze(-1).unsqueeze(-1) * R.bmm(t0[None].permute(0, 2, 1)) + t).permute(0, 2, 1)
+    t0_hat = (
+        sall.unsqueeze(-1).unsqueeze(-1) * R.bmm(t0[None].permute(0, 2, 1)) + t
+    ).permute(0, 2, 1)
 
     s_list = []
     t_list = []
@@ -85,7 +91,9 @@ def ransac_scale_and_offset(
         sample_t1 = t1[idx]
 
         s, t, R = batch_compute_scale_trans_torch(sample_t0[None], sample_t1[None])
-        import ipdb;        ipdb.set_trace()
+        import ipdb
+
+        ipdb.set_trace()
         s_all_k, t, solution = estimate_scale_and_offset(sample_t0, sample_t1)
         s = s_all_k.mean()
 
@@ -108,18 +116,18 @@ def estimate_camscale(smpl_param_c, smpl_param_w, T_w2c, gravity_vec):
     bs = T_w2c.shape[0]
     # 1. align the camera view direction
     # R_w2c = R_c @ R_w.mT
-    R_c = smpl_param_c['global_orient']
-    t_c = smpl_param_c['transl']
-    R_w = smpl_param_w['global_orient']
-    t_w = smpl_param_w['transl']
+    R_c = smpl_param_c["global_orient"]
+    t_c = smpl_param_c["transl"]
+    R_w = smpl_param_w["global_orient"]
+    t_w = smpl_param_w["transl"]
 
-    est_R_w2c = R_c @ R_w.mT    # estiamte from motion
+    est_R_w2c = R_c @ R_w.mT  # estiamte from motion
     slam_R_w2c = T_w2c[:, :3, :3]
     slam_t_w2c = T_w2c[:, :3, 3]
     # Find optimal R0 using SVD (Kabsch algorithm)
     H = (slam_R_w2c.mT @ est_R_w2c).sum(dim=0)
     U, _, Vt = torch.linalg.svd(H)
-    R0 = (Vt.mT @ U.mT)
+    R0 = Vt.mT @ U.mT
 
     # Verify the result
     aligned_R_w2c = slam_R_w2c @ R0.mT
@@ -137,7 +145,7 @@ def estimate_camscale(smpl_param_c, smpl_param_w, T_w2c, gravity_vec):
     vel_slam = slam_t_c2w[1:] - slam_t_c2w[:-1]
     scale_c2w = vel_est / vel_slam
 
-    scale = (scale_c2w.median(0).values)
+    scale = scale_c2w.median(0).values
     scale = scale[1]
     aligned_t_c2w = slam_t_c2w * scale
     delta_t = (aligned_t_c2w - est_t_c2w).mean(0)
@@ -155,9 +163,10 @@ def estimate_camscale(smpl_param_c, smpl_param_w, T_w2c, gravity_vec):
     res_T_w2c[:, :3, 3] = aligned_t_w2c
     return res_T_w2c
 
+
 device = "cuda:0"
 sp_visualizer = ScenepicVisualizer("inputs/checkpoints/body_models/smpl", device=device)
-smpl = sp_visualizer.smpl_dict['neutral']
+smpl = sp_visualizer.smpl_dict["neutral"]
 smplx = make_smplx("supermotion_v437coco17").to(device)
 
 # data_pt = torch.load("inputs/EMDB/hmr4d_support/emdb_vit_v4.pt")
@@ -197,7 +206,7 @@ for idx in idxes:
 
     offset = torch.sqrt((transl[:, [0, 2]] ** 2).sum(dim=1))
     offset = offset - offset[:1]
-    print('max offset', torch.max(offset.abs()))
+    print("max offset", torch.max(offset.abs()))
     if torch.max(offset.abs()) < 1:
         continue
 
@@ -208,7 +217,9 @@ for idx in idxes:
     if body_pose.shape[1] < 69:
         bs = body_pose.shape[0]
         pad_size = 69 - body_pose.shape[1]
-        body_pose = torch.cat((body_pose, torch.zeros(bs, pad_size).to(body_pose)), dim=1)
+        body_pose = torch.cat(
+            (body_pose, torch.zeros(bs, pad_size).to(body_pose)), dim=1
+        )
 
     # # align the first frame
     # transl = transl - transl[:1]
@@ -218,7 +229,7 @@ for idx in idxes:
         body_pose=body_pose,
         global_orient=global_orient,
         transl=transl,
-        orig_joints=True
+        orig_joints=True,
     )
     joints = smpl_out.joints
     length = joints.shape[0]
@@ -239,10 +250,8 @@ for idx in idxes:
         global_orient=global_orient_c,
         transl=transl_c,
     )
-    local_joints_2d = perspective_projection(
-        local_joints, K_fullimg
-    )  # (B, L, J, 2)
-    
+    local_joints_2d = perspective_projection(local_joints, K_fullimg)  # (B, L, J, 2)
+
     # R_w2c = R_c2w.mT
     # t_w2c = - R_c2w.mT @ t_c2w
     # R_c2w = R_w2c.mT  (cam orient)
@@ -282,11 +291,7 @@ for idx in idxes:
     vis = True
     if vis:
         # move y-axis to z-axis for vis
-        vis_mat = torch.tensor(
-            ((1, 0, 0),
-            (0, 0, -1),
-            (0, 1, 0))
-        ).to(device).float()
+        vis_mat = torch.tensor(((1, 0, 0), (0, 0, -1), (0, 1, 0))).to(device).float()
         joints_vis = (vis_mat[None] @ joints.mT).mT
         gt_T_w2c_vis = gt_T_w2c.clone()
         gt_T_w2c_vis[:, :3, :3] = gt_T_w2c[:, :3, :3] @ vis_mat[None].mT
@@ -294,7 +299,7 @@ for idx in idxes:
             "text": "",
             "joints_pos": joints_vis.detach(),
             "T_w2c": gt_T_w2c_vis.detach(),
-            "vis_all_cam": True
+            "vis_all_cam": True,
         }
         est_T_w2c2_vis = est_T_w2c2.clone()
         est_T_w2c2_vis[:, :3, :3] = est_T_w2c2[:, :3, :3] @ vis_mat[None].mT
@@ -304,10 +309,9 @@ for idx in idxes:
             "T_w2c": est_T_w2c2_vis.detach(),
             "vis_all_cam": True,
         }
-        res = {
-            'gt': res,
-            'est': res_est
-        }
-        html_path = f'tmp/{idx}_{os.path.basename(vid)}.html'
+        res = {"gt": res, "est": res_est}
+        html_path = f"tmp/{idx}_{os.path.basename(vid)}.html"
         sp_visualizer.vis_smpl_scene(res, html_path, window_size=(600, 600))
-        import ipdb; ipdb.set_trace()
+        import ipdb
+
+        ipdb.set_trace()

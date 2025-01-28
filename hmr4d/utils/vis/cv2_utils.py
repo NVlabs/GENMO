@@ -1,6 +1,7 @@
-import torch
 import cv2
 import numpy as np
+import torch
+
 from hmr4d.utils.wis3d_utils import get_colors_by_conf
 
 
@@ -31,9 +32,13 @@ def draw_bbx_xys_on_image_batch(bbx_xys_batch, image_batch, conf=None):
     image_batch_out = []
     for i in range(len(bbx_xys_batch)):
         if use_conf:
-            image_batch_out.append(draw_bbx_xys_on_image(bbx_xys_batch[i], image_batch[i], conf[i]))
+            image_batch_out.append(
+                draw_bbx_xys_on_image(bbx_xys_batch[i], image_batch[i], conf[i])
+            )
         else:
-            image_batch_out.append(draw_bbx_xys_on_image(bbx_xys_batch[i], image_batch[i]))
+            image_batch_out.append(
+                draw_bbx_xys_on_image(bbx_xys_batch[i], image_batch[i])
+            )
     return image_batch_out
 
 
@@ -41,7 +46,13 @@ def draw_bbx_xyxy_on_image(bbx_xys, image, conf=True):
     bbx_xys = to_numpy(bbx_xys)
     image = to_numpy(image)
     color = (255, 178, 102) if conf == True else (128, 128, 128)  # orange or gray
-    image = cv2.rectangle(image, (int(bbx_xys[0]), int(bbx_xys[1])), (int(bbx_xys[2]), int(bbx_xys[3])), color, 2)
+    image = cv2.rectangle(
+        image,
+        (int(bbx_xys[0]), int(bbx_xys[1])),
+        (int(bbx_xys[2]), int(bbx_xys[3])),
+        color,
+        2,
+    )
     return image
 
 
@@ -62,10 +73,14 @@ def draw_bbx_xyxy_on_image_batch(bbx_xyxy_batch, image_batch, mask=None, conf=No
     image_batch_out = []
     for i in range(len(bbx_xyxy_batch)):
         if use_conf:
-            image_batch_out.append(draw_bbx_xyxy_on_image(bbx_xyxy_batch[i], image_batch[i], conf[i]))
+            image_batch_out.append(
+                draw_bbx_xyxy_on_image(bbx_xyxy_batch[i], image_batch[i], conf[i])
+            )
         else:
             if mask is None or mask[i]:
-                image_batch_out.append(draw_bbx_xyxy_on_image(bbx_xyxy_batch[i], image_batch[i]))
+                image_batch_out.append(
+                    draw_bbx_xyxy_on_image(bbx_xyxy_batch[i], image_batch[i])
+                )
             else:
                 image_batch_out.append(image_batch[i])
     return image_batch_out
@@ -105,7 +120,9 @@ def draw_kpts_with_conf_batch(frames, kp2d_batch, conf_batch, thickness=2):
     assert len(frames) == len(conf_batch)
     frames_ = []
     for i in range(len(frames)):
-        frames_.append(draw_kpts_with_conf(frames[i], kp2d_batch[i], conf_batch[i], thickness))
+        frames_.append(
+            draw_kpts_with_conf(frames[i], kp2d_batch[i], conf_batch[i], thickness)
+        )
     return frames_
 
 
@@ -113,7 +130,7 @@ def draw_coco17_skeleton(img, keypoints, conf_thr=0):
     use_conf_thr = True if keypoints.shape[1] == 3 else False
     img = img.copy()
     # fmt:off
-    coco_skel = [[15, 13], [13, 11], [16, 14], [14, 12], [11, 12], [5, 11], [6, 12], [5, 6], [5, 7], [6, 8], [7, 9], [8, 10], [1, 2], [0, 1], [0, 2], [1, 3], [2, 4], [3, 5], [4, 6]]            
+    coco_skel = [[15, 13], [13, 11], [16, 14], [14, 12], [11, 12], [5, 11], [6, 12], [5, 6], [5, 7], [6, 8], [7, 9], [8, 10], [1, 2], [0, 1], [0, 2], [1, 3], [2, 4], [3, 5], [4, 6]]
     # fmt:on
     for bone in coco_skel:
         if use_conf_thr:

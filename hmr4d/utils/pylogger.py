@@ -1,5 +1,6 @@
-from time import time
 import logging
+from time import time
+
 import torch
 from colorlog import ColoredFormatter
 
@@ -18,7 +19,9 @@ Log.setLevel(logging.INFO)
 ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
 # Use colorlog
-formatstring = "[%(cyan)s%(asctime)s%(reset)s][%(log_color)s%(levelname)s%(reset)s] %(message)s"
+formatstring = (
+    "[%(cyan)s%(asctime)s%(reset)s][%(log_color)s%(levelname)s%(reset)s] %(message)s"
+)
 datefmt = "%m/%d %H:%M:%S"
 ch.setFormatter(ColoredFormatter(formatstring, datefmt=datefmt))
 
@@ -50,7 +53,7 @@ def timer(sync_cuda=False, mem=False, loop=1):
             if loop == 1:
                 message = f"{func.__name__} took {Log.time() - start:.3f} s."
             else:
-                message = f"{func.__name__} took {((Log.time() - start))/loop:.3f} s. (loop={loop})"
+                message = f"{func.__name__} took {(Log.time() - start) / loop:.3f} s. (loop={loop})"
 
             if mem:
                 end_mem = torch.cuda.memory_allocated() / 1024**2

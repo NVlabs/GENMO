@@ -1,5 +1,5 @@
-import torch
 import numpy as np
+import torch
 
 
 @torch.no_grad()
@@ -103,7 +103,7 @@ def compute_global_metrics(batch, mask=None):
         wa_j3d = global_align_joints(target_j3d, pred_j3d)
 
         if False:
-            from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
+            from hmr4d.utils.wis3d_utils import add_motion_as_lines, make_wis3d
 
             wis3d = make_wis3d(name="debug-metric_utils")
             add_motion_as_lines(target_j3d, wis3d, name="target_j3d")
@@ -341,8 +341,12 @@ def compute_error_accel(joints_gt, joints_pred, valid_mask=None, fps=None):
 
 def compute_rte(target_trans, pred_trans):
     # Compute the global alignment
-    _, rot, trans = align_pcl(target_trans[None, :], pred_trans[None, :], fixed_scale=True)
-    pred_trans_hat = (torch.einsum("tij,tnj->tni", rot, pred_trans[None, :]) + trans[None, :])[0]
+    _, rot, trans = align_pcl(
+        target_trans[None, :], pred_trans[None, :], fixed_scale=True
+    )
+    pred_trans_hat = (
+        torch.einsum("tij,tnj->tni", rot, pred_trans[None, :]) + trans[None, :]
+    )[0]
 
     # Compute the entire displacement of ground truth trajectory
     disps, disp = [], 0
@@ -405,8 +409,12 @@ def compute_foot_sliding(target_verts, pred_verts, thr=1e-2):
 def convert_joints22_to_24(joints22, ratio2220=0.3438, ratio2321=0.3345):
     joints24 = torch.zeros(*joints22.shape[:-2], 24, 3).to(joints22.device)
     joints24[..., :22, :] = joints22
-    joints24[..., 22, :] = joints22[..., 20, :] + ratio2220 * (joints22[..., 20, :] - joints22[..., 18, :])
-    joints24[..., 23, :] = joints22[..., 21, :] + ratio2321 * (joints22[..., 21, :] - joints22[..., 19, :])
+    joints24[..., 22, :] = joints22[..., 20, :] + ratio2220 * (
+        joints22[..., 20, :] - joints22[..., 18, :]
+    )
+    joints24[..., 23, :] = joints22[..., 21, :] + ratio2321 * (
+        joints22[..., 21, :] - joints22[..., 19, :]
+    )
     return joints24
 
 
@@ -451,7 +459,12 @@ def align_pcl(Y, X, weight=None, fixed_scale=False):
         s = torch.ones(*dims, 1, device=Y.device, dtype=torch.float32)
     else:
         var = torch.sum(torch.square(x0), dim=(-1, -2), keepdim=True) / N  # (*, 1, 1)
-        s = torch.diagonal(torch.matmul(D, S), dim1=-2, dim2=-1).sum(dim=-1, keepdim=True) / var[..., 0]  # (*, 1)
+        s = (
+            torch.diagonal(torch.matmul(D, S), dim1=-2, dim2=-1).sum(
+                dim=-1, keepdim=True
+            )
+            / var[..., 0]
+        )  # (*, 1)
 
     t = my - s * torch.matmul(R, mx[..., None])[..., 0]  # (*, 3)
 
@@ -463,8 +476,12 @@ def global_align_joints(gt_joints, pred_joints):
     :param gt_joints (T, J, 3)
     :param pred_joints (T, J, 3)
     """
-    s_glob, R_glob, t_glob = align_pcl(gt_joints.reshape(-1, 3), pred_joints.reshape(-1, 3))
-    pred_glob = s_glob * torch.einsum("ij,tnj->tni", R_glob, pred_joints) + t_glob[None, None]
+    s_glob, R_glob, t_glob = align_pcl(
+        gt_joints.reshape(-1, 3), pred_joints.reshape(-1, 3)
+    )
+    pred_glob = (
+        s_glob * torch.einsum("ij,tnj->tni", R_glob, pred_joints) + t_glob[None, None]
+    )
     return pred_glob
 
 
@@ -475,8 +492,12 @@ def first_align_joints(gt_joints, pred_joints):
     :param pred_joints (T, J, 3)
     """
     # (1, 1), (1, 3, 3), (1, 3)
-    s_first, R_first, t_first = align_pcl(gt_joints[:2].reshape(1, -1, 3), pred_joints[:2].reshape(1, -1, 3))
-    pred_first = s_first * torch.einsum("tij,tnj->tni", R_first, pred_joints) + t_first[:, None]
+    s_first, R_first, t_first = align_pcl(
+        gt_joints[:2].reshape(1, -1, 3), pred_joints[:2].reshape(1, -1, 3)
+    )
+    pred_first = (
+        s_first * torch.einsum("tij,tnj->tni", R_first, pred_joints) + t_first[:, None]
+    )
     return pred_first
 
 

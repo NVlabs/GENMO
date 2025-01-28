@@ -1,29 +1,28 @@
-import torch
 import os
 import sys
-sys.path.append('./')
 
-import open3d as o3d
-import numpy as np
-from tqdm import tqdm
+import torch
+
+sys.path.append("./")
+
 # from o3d_materials import Settings
 import json
+
 import matplotlib.pyplot as plt
-from hmr4d.utils.smplx_utils import make_smplx
+import numpy as np
 import open3d as o3d
-from hmr4d.utils.vis.o3d_render import get_ground, create_meshes, Settings
-from hmr4d.utils.geo_transform import apply_T_on_points, compute_T_ayfz2ay
 from einops import einsum, rearrange
+from tqdm import tqdm
+
+from hmr4d.utils.geo_transform import apply_T_on_points, compute_T_ayfz2ay
+from hmr4d.utils.smplx_utils import make_smplx
+from hmr4d.utils.video_io_utils import get_video_lwh, get_video_reader, get_writer
+from hmr4d.utils.vis.o3d_render import Settings, create_meshes, get_ground
 from hmr4d.utils.vis.renderer import (
     Renderer,
     get_global_cameras_static,
     get_global_cameras_static_v2,
     get_ground_params_from_points,
-)
-from hmr4d.utils.video_io_utils import (
-    get_video_lwh,
-    get_video_reader,
-    get_writer
 )
 
 CRF = 23  # 17 is lossless, every +6 halves the mp4 size
@@ -37,7 +36,9 @@ def move_to_start_point_face_z(verts, J_regressor):
     offset[1] = verts[:, :, [1]].min()
     verts = verts - offset
     # face direction
-    T_ay2ayfz = compute_T_ayfz2ay(einsum(J_regressor, verts[[0]], "j v, l v i -> l j i"), inverse=True)
+    T_ay2ayfz = compute_T_ayfz2ay(
+        einsum(J_regressor, verts[[0]], "j v, l v i -> l j i"), inverse=True
+    )
     verts = apply_T_on_points(verts, T_ay2ayfz)
     return verts
 
@@ -73,11 +74,16 @@ if __name__ == "__main__":
     global_video_path = f"out/demo/motion1-1.mp4"
     os.makedirs("out/demo/", exist_ok=True)
     smplx = make_smplx("supermotion").to("cuda")
-    smpl_model = {"male": make_smplx("smpl", gender="male"), "female": make_smplx("smpl", gender="female")}
+    smpl_model = {
+        "male": make_smplx("smpl", gender="male"),
+        "female": make_smplx("smpl", gender="female"),
+    }
     smplx2smpl = torch.load("hmr4d/utils/body_model/smplx2smpl_sparse.pt").to("cuda")
     faces_smpl = smpl_model["male"].faces
-    J_regressor = torch.load("hmr4d/utils/body_model/smpl_neutral_J_regressor.pt").to("cuda")
-    data = torch.load(f'{file_name}.pt')
+    J_regressor = torch.load("hmr4d/utils/body_model/smpl_neutral_J_regressor.pt").to(
+        "cuda"
+    )
+    data = torch.load(f"{file_name}.pt")
 
     pred_smpl_params_global = data["pred_smpl_params_global"]
     time_pred_ay_smpl_out_list = smplx(**pred_smpl_params_global)

@@ -42,7 +42,9 @@ class DefaultPredictor_Lazy:
         # new LazyConfig
         self.cfg = cfg
         self.model = instantiate(cfg.model)
-        test_dataset = OmegaConf.select(cfg, "dataloader.test.dataset.names", default=None)
+        test_dataset = OmegaConf.select(
+            cfg, "dataloader.test.dataset.names", default=None
+        )
         if isinstance(test_dataset, (list, tuple)):
             test_dataset = test_dataset[0]
 

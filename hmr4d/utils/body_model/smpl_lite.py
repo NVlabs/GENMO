@@ -1,14 +1,15 @@
+import pickle
+from pathlib import Path
+from time import time
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from pathlib import Path
-from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix
-from smplx.utils import Struct, to_np, to_tensor
 from einops import einsum, rearrange
-from time import time
+from smplx.utils import Struct, to_np, to_tensor
 
-import pickle
+from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix
 
 from .smplx_lite import batch_rigid_transform_v2
 
@@ -66,12 +67,16 @@ class SmplLite(nn.Module):
     def register_fast_skeleton_computing_buffers(self):
         # For fast computing of skeleton under beta
         J_template = self.J_regressor @ self.v_template  # (J, 3)
-        J_shapedirs = torch.einsum("jv, vcd -> jcd", self.J_regressor, self.shapedirs)  # (J, 3, 10)
+        J_shapedirs = torch.einsum(
+            "jv, vcd -> jcd", self.J_regressor, self.shapedirs
+        )  # (J, 3, 10)
         self.register_buffer("J_template", J_template, False)
         self.register_buffer("J_shapedirs", J_shapedirs, False)
 
     def get_skeleton(self, betas):
-        return self.J_template + einsum(betas, self.J_shapedirs, "... k, j c k -> ... j c")
+        return self.J_template + einsum(
+            betas, self.J_shapedirs, "... k, j c k -> ... j c"
+        )
 
     def forward(
         self,
@@ -91,14 +96,18 @@ class SmplLite(nn.Module):
         """
         # 1. Convert [global_orient, body_pose] to rot_mats
         full_pose = torch.cat([global_orient, body_pose], dim=-1)
-        rot_mats = axis_angle_to_matrix(full_pose.reshape(*full_pose.shape[:-1], full_pose.shape[-1] // 3, 3))
+        rot_mats = axis_angle_to_matrix(
+            full_pose.reshape(*full_pose.shape[:-1], full_pose.shape[-1] // 3, 3)
+        )
 
         # 2. Forward Kinematics
         J = self.get_skeleton(betas)  # (*, 55, 3)
         A = batch_rigid_transform_v2(rot_mats, J, self.parents)[1]
 
         # 3. Canonical v_posed = v_template + shaped_offsets + pose_offsets
-        pose_feature = rot_mats[..., 1:, :, :] - rot_mats.new([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        pose_feature = rot_mats[..., 1:, :, :] - rot_mats.new(
+            [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+        )
         pose_feature = pose_feature.view(*pose_feature.shape[:-3], -1)  # (*, 55*3*3)
         v_posed = (
             self.v_template
@@ -109,7 +118,10 @@ class SmplLite(nn.Module):
 
         # 4. Skinning
         T = einsum(self.lbs_weights, A, "v j, ... j c d -> ... v c d")
-        verts = einsum(T[..., :3, :3], v_posed, "... v c d, ... v d -> ... v c") + T[..., :3, 3]
+        verts = (
+            einsum(T[..., :3, :3], v_posed, "... v c d, ... v d -> ... v c")
+            + T[..., :3, 3]
+        )
 
         # 5. Translation
         verts = verts + transl[..., None, :]

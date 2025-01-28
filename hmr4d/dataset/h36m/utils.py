@@ -1,8 +1,9 @@
 import json
-import numpy as np
-from pathlib import Path
-from collections import defaultdict
 import pickle
+from collections import defaultdict
+from pathlib import Path
+
+import numpy as np
 import torch
 
 RESOURCE_FOLDER = Path(__file__).resolve().parent / "resource"

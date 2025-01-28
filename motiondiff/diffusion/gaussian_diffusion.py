@@ -9,19 +9,15 @@ Docstrings have been added, as well as DDIM sampling and a new collection of bet
 import enum
 import math
 import random
+from copy import deepcopy
 
 import numpy as np
 import torch
 import torch as th
-from copy import deepcopy
-from motiondiff.diffusion.nn import mean_flat, sum_flat
-from motiondiff.diffusion.losses import normal_kl, discretized_gaussian_log_likelihood
-from motiondiff.models.mdm.rotation_conversions import (
-    rotation_6d_to_matrix,
-    matrix_to_rotation_6d,
-)
+
 # from torchmin import minimize
 from torch.autograd import Variable
+
 from hmr4d.utils.geo.hmr_cam import (
     compute_bbox_info_bedlam,
     compute_transl_full_cam,
@@ -30,9 +26,15 @@ from hmr4d.utils.geo.hmr_cam import (
     unnormalize_kp2d,
 )
 from hmr4d.utils.geo_transform import (
-    project_p2d,
     convert_bbx_xys_to_lurb,
     cvt_to_bi01_p2d,
+    project_p2d,
+)
+from motiondiff.diffusion.losses import discretized_gaussian_log_likelihood, normal_kl
+from motiondiff.diffusion.nn import mean_flat, sum_flat
+from motiondiff.models.mdm.rotation_conversions import (
+    matrix_to_rotation_6d,
+    rotation_6d_to_matrix,
 )
 
 
@@ -47,7 +49,7 @@ def gmof(res, sigma):
     return (sigma_squared * x_squared) / (sigma_squared + x_squared)
 
 
-def get_named_beta_schedule(schedule_name, num_diffusion_timesteps, scale_betas=1.):
+def get_named_beta_schedule(schedule_name, num_diffusion_timesteps, scale_betas=1.0):
     """
     Get a pre-defined beta schedule for the given name.
 
@@ -203,13 +205,17 @@ class GaussianDiffusion:
             / (1.0 - self.alphas_cumprod)
         )
 
-        self.l2_loss = lambda a, b: (a - b) ** 2  # th.nn.MSELoss(reduction='none')  # must be None for handling mask later on.
+        self.l2_loss = (
+            lambda a, b: (a - b) ** 2
+        )  # th.nn.MSELoss(reduction='none')  # must be None for handling mask later on.
 
     def masked_l2(self, a, b, mask):
         # assuming a.shape == b.shape == bs, J, Jdim, seqlen
         # assuming mask.shape == bs, 1, 1, seqlen
         loss = self.l2_loss(a, b)
-        loss = sum_flat(loss * mask.float())  # gives \sigma_euclidean over unmasked elements
+        loss = sum_flat(
+            loss * mask.float()
+        )  # gives \sigma_euclidean over unmasked elements
         n_entries = a.shape[1] * a.shape[2]
         non_zero_elements = sum_flat(mask) * n_entries
         # print('mask', mask.shape)
@@ -218,7 +224,6 @@ class GaussianDiffusion:
         mse_loss_val = loss / non_zero_elements
         # print('mse_loss_val', mse_loss_val)
         return mse_loss_val
-
 
     def q_mean_variance(self, x_start, t):
         """
@@ -282,9 +287,15 @@ class GaussianDiffusion:
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
     def p_mean_variance_guided(
-        self, model, x, t, clip_denoised=True, 
-        denoised_fn=None, model_kwargs=None,
-        guide=None, target_motion=None
+        self,
+        model,
+        x,
+        t,
+        clip_denoised=True,
+        denoised_fn=None,
+        model_kwargs=None,
+        guide=None,
+        target_motion=None,
     ):
         """
         Apply the model to get p(x_{t-1} | x_t), as well as a prediction of
@@ -348,7 +359,9 @@ class GaussianDiffusion:
             model_log_variance = _extract_into_tensor(model_log_variance, t, x.shape)
 
         if guide is not None:
-            model_output = guide.guide(x, model_output, target_motion, model_variance, t)
+            model_output = guide.guide(
+                x, model_output, target_motion, model_variance, t
+            )
 
         def process_xstart(x):
             if denoised_fn is not None:
@@ -385,10 +398,15 @@ class GaussianDiffusion:
             "pred_xstart": pred_xstart,
         }
 
-
-
     def p_mean_variance(
-        self, model, x, t, clip_denoised=True, denoised_fn=None, model_kwargs=None, model_output=None
+        self,
+        model,
+        x,
+        t,
+        clip_denoised=True,
+        denoised_fn=None,
+        model_kwargs=None,
+        model_output=None,
     ):
         """
         Apply the model to get p(x_{t-1} | x_t), as well as a prediction of
@@ -415,7 +433,7 @@ class GaussianDiffusion:
 
         B, C = x.shape[:2]
         assert t.shape == (B,), (t.shape, B, x.shape)
-        
+
         if model_output is None:
             model_output = model(x, self._scale_timesteps(t), **model_kwargs)
             aux_output = {}
@@ -444,8 +462,12 @@ class GaussianDiffusion:
                 # for fixedlarge, we set the initial (log-)variance like so
                 # to get a better decoder log likelihood.
                 ModelVarType.FIXED_LARGE: (
-                    np.append(self.posterior_variance[1], self.betas[1:]) if len(self.posterior_variance) > 1 else self.betas,
-                    np.log(np.append(self.posterior_variance[1], self.betas[1:])) if len(self.posterior_variance) > 1 else np.log(self.betas),
+                    np.append(self.posterior_variance[1], self.betas[1:])
+                    if len(self.posterior_variance) > 1
+                    else self.betas,
+                    np.log(np.append(self.posterior_variance[1], self.betas[1:]))
+                    if len(self.posterior_variance) > 1
+                    else np.log(self.betas),
                 ),
                 ModelVarType.FIXED_SMALL: (
                     self.posterior_variance,
@@ -456,8 +478,8 @@ class GaussianDiffusion:
             model_log_variance = _extract_into_tensor(model_log_variance, t, x.shape)
 
         # perturb model output according to the guidance objective
-        # alpha = 0.0001 
-        # model_output = model_output - alpha * grad 
+        # alpha = 0.0001
+        # model_output = model_output - alpha * grad
 
         def process_xstart(x):
             if denoised_fn is not None:
@@ -590,9 +612,7 @@ class GaussianDiffusion:
         alpha_bar = _extract_into_tensor(self.alphas_cumprod, t, x.shape)
 
         eps = self._predict_eps_from_xstart(x, t, p_mean_var["pred_xstart"])
-        eps = eps - (1 - alpha_bar).sqrt() * cond_fn(
-            x, t, p_mean_var, **model_kwargs
-        )
+        eps = eps - (1 - alpha_bar).sqrt() * cond_fn(x, t, p_mean_var, **model_kwargs)
 
         out = p_mean_var.copy()
         out["pred_xstart"] = self._predict_xstart_from_eps(x, t, eps)
@@ -742,22 +762,24 @@ class GaussianDiffusion:
         if dump_steps is not None:
             dump = []
 
-        for i, sample in enumerate(self.p_sample_loop_progressive(
-            model,
-            shape,
-            noise=noise,
-            clip_denoised=clip_denoised,
-            denoised_fn=denoised_fn,
-            cond_fn=cond_fn,
-            model_kwargs=model_kwargs,
-            device=device,
-            progress=progress,
-            skip_timesteps=skip_timesteps,
-            init_image=init_image,
-            randomize_class=randomize_class,
-            cond_fn_with_grad=cond_fn_with_grad,
-            const_noise=const_noise,
-        )):
+        for i, sample in enumerate(
+            self.p_sample_loop_progressive(
+                model,
+                shape,
+                noise=noise,
+                clip_denoised=clip_denoised,
+                denoised_fn=denoised_fn,
+                cond_fn=cond_fn,
+                model_kwargs=model_kwargs,
+                device=device,
+                progress=progress,
+                skip_timesteps=skip_timesteps,
+                init_image=init_image,
+                randomize_class=randomize_class,
+                cond_fn_with_grad=cond_fn_with_grad,
+                const_noise=const_noise,
+            )
+        ):
             if dump_steps is not None and i in dump_steps:
                 dump.append(deepcopy(sample["sample"]))
             final = sample
@@ -815,12 +837,17 @@ class GaussianDiffusion:
 
         for i in indices:
             t = th.tensor([i] * shape[0], device=device)
-            if randomize_class and 'y' in model_kwargs:
-                model_kwargs['y'] = th.randint(low=0, high=model.num_classes,
-                                               size=model_kwargs['y'].shape,
-                                               device=model_kwargs['y'].device)
+            if randomize_class and "y" in model_kwargs:
+                model_kwargs["y"] = th.randint(
+                    low=0,
+                    high=model.num_classes,
+                    size=model_kwargs["y"].shape,
+                    device=model_kwargs["y"].device,
+                )
             with th.no_grad():
-                sample_fn = self.p_sample_with_grad if cond_fn_with_grad else self.p_sample
+                sample_fn = (
+                    self.p_sample_with_grad if cond_fn_with_grad else self.p_sample
+                )
                 out = sample_fn(
                     model,
                     img,
@@ -856,13 +883,12 @@ class GaussianDiffusion:
 
         Same usage as p_sample().
         """
-        if guide_2d or 'encoder' in model_kwargs:
-
+        if guide_2d or "encoder" in model_kwargs:
             var = _extract_into_tensor(self.posterior_variance, t, x.shape)
             sqrt_alphas = _extract_into_tensor(self.sqrt_alphas_cumprod, t, x.shape)
             bs = x.shape[0]
-            endecoder = model_kwargs['encoder']
-            inputs = model_kwargs['inputs']
+            endecoder = model_kwargs["encoder"]
+            inputs = model_kwargs["inputs"]
 
             with torch.enable_grad():
                 x = x.detach().requires_grad_()
@@ -879,7 +905,9 @@ class GaussianDiffusion:
                 pred_xstart = out_orig["pred_xstart"]
                 samples = pred_xstart
                 pred_cam = out_orig["pred_cam"]
-                static_conf_logits = samples[:, :, model.s_pred_ind:model.s_pred_ind + 6]
+                static_conf_logits = samples[
+                    :, :, model.s_pred_ind : model.s_pred_ind + 6
+                ]
                 assert samples.shape[-1] == model.s_pred_ind + 6 + 151, samples.shape
                 sample = samples[:, :, -151:]
                 decode_dict = endecoder.decode(sample)
@@ -890,31 +918,50 @@ class GaussianDiffusion:
                     "body_pose": decode_dict["body_pose"],  # (B, L, 63)
                     "betas": decode_dict["betas"],  # (B, L, 10)
                     "global_orient": decode_dict["global_orient"],  # (B, L, 3)
-                    "transl": compute_transl_full_cam(pred_cam, inputs["bbx_xys"], inputs["K_fullimg"]),
+                    "transl": compute_transl_full_cam(
+                        pred_cam, inputs["bbx_xys"], inputs["K_fullimg"]
+                    ),
                 }
-                clean_obs_kp2d = inputs['clean_f_condition']['obs']
-                clean_kp2d = unnormalize_kp2d(clean_obs_kp2d, inputs['bbx_xys'], inputs["K_fullimg"])
-                bbx_lurb = convert_bbx_xys_to_lurb(inputs['bbx_xys'])
+                clean_obs_kp2d = inputs["clean_f_condition"]["obs"]
+                clean_kp2d = unnormalize_kp2d(
+                    clean_obs_kp2d, inputs["bbx_xys"], inputs["K_fullimg"]
+                )
+                bbx_lurb = convert_bbx_xys_to_lurb(inputs["bbx_xys"])
                 clean_kp2d_bi01 = cvt_to_bi01_p2d(clean_kp2d[..., :2], bbx_lurb)
                 conf = clean_kp2d[..., 2:3]
 
-                if 'mask' in inputs:
+                if "mask" in inputs:
                     mask = inputs["mask"]["valid"]  # effective length mask
-                    mask_reproj = ~inputs["mask"]["spv_incam_only"]  # do not supervise reproj for 3DPW
+                    mask_reproj = ~inputs["mask"][
+                        "spv_incam_only"
+                    ]  # do not supervise reproj for 3DPW
 
                 pred_c_j3d = endecoder.fk_v2(**outputs["pred_smpl_params_incam"])
                 reproj_z_thr = 0.3
                 pred_c_j3d_z0_mask = pred_c_j3d[..., 2].abs() <= reproj_z_thr
                 # pred_c_j3d[pred_c_j3d_z0_mask] = reproj_z_thr
-                pred_j2d_01 = project_to_bi01(pred_c_j3d, inputs["bbx_xys"], inputs["K_fullimg"])  # 22 joints
+                pred_j2d_01 = project_to_bi01(
+                    pred_c_j3d, inputs["bbx_xys"], inputs["K_fullimg"]
+                )  # 22 joints
 
                 # 22 -> 10
                 select_smplx = [16, 17, 18, 19, 20, 21, 4, 5, 7, 8]
                 select_coco = [5, 6, 7, 8, 9, 10, 13, 14, 15, 16]
-                loss2d = (conf[..., select_coco, :] * ((clean_kp2d_bi01[..., select_coco, :] - pred_j2d_01[..., select_smplx, :])**2)).mean()
+                loss2d = (
+                    conf[..., select_coco, :]
+                    * (
+                        (
+                            clean_kp2d_bi01[..., select_coco, :]
+                            - pred_j2d_01[..., select_smplx, :]
+                        )
+                        ** 2
+                    )
+                ).mean()
 
-                if 'vimo_smpl_params' in inputs:
-                    import ipdb; ipdb.set_trace()
+                if "vimo_smpl_params" in inputs:
+                    import ipdb
+
+                    ipdb.set_trace()
 
                 slam_scales = inputs["scales"]
                 mean_scale = inputs["mean_scale"]
@@ -946,7 +993,9 @@ class GaussianDiffusion:
                 # pred_xstart = pred_xstart.detach() - grad
                 # import ipdb; ipdb.set_trace()
                 # x = x - torch.clamp(grad * 3e7, min=-1, max=1) # * out["variance"]
-                pred_xstart = pred_xstart - torch.clamp(grad * 3e6, min=-1, max=1) # * out["variance"]
+                pred_xstart = pred_xstart - torch.clamp(
+                    grad * 3e6, min=-1, max=1
+                )  # * out["variance"]
                 # x[:, :-9] = x[:, :-9] - torch.clamp(grad[:, :-9] * 3e7, min=-1, max=1) # * out["variance"]
                 # pred_xstart = pred_xstart.detach() - grad * 3e6
 
@@ -966,7 +1015,7 @@ class GaussianDiffusion:
                     denoised_fn=denoised_fn,
                     model_kwargs=model_kwargs,
                     guide=guide,
-                    target_motion=target_motion
+                    target_motion=target_motion,
                 )
             else:
                 out_orig = self.p_mean_variance(
@@ -976,10 +1025,12 @@ class GaussianDiffusion:
                     clip_denoised=clip_denoised,
                     denoised_fn=denoised_fn,
                     model_kwargs=model_kwargs,
-                    model_output=model_output
+                    model_output=model_output,
                 )
             if cond_fn is not None:
-                out = self.condition_score(cond_fn, out_orig, x, t, model_kwargs=model_kwargs)
+                out = self.condition_score(
+                    cond_fn, out_orig, x, t, model_kwargs=model_kwargs
+                )
             else:
                 out = out_orig
 
@@ -1007,12 +1058,13 @@ class GaussianDiffusion:
             alpha_bar = _extract_into_tensor(self.alphas_cumprod, t, x.shape)
 
             # var = _extract_into_tensor(self.posterior_variance, t, x.shape)
-            pred_xstart = out["pred_xstart"]    # [B, C, 1, T]
+            pred_xstart = out["pred_xstart"]  # [B, C, 1, T]
             mask = overwrite_data["mask"]
             obs_motion = overwrite_data["obs_motion"]
 
             use_optimize = False
             if use_optimize:
+
                 def f(xt):
                     out_orig = self.p_mean_variance(
                         model,
@@ -1033,7 +1085,9 @@ class GaussianDiffusion:
                             smpl=self.smpl,
                             return_joints17=True,
                         )
-                        joints17 = (R0 @ joints17.transpose(2, 3)).transpose(2, 3) + t0[..., None, :]
+                        joints17 = (R0 @ joints17.transpose(2, 3)).transpose(2, 3) + t0[
+                            ..., None, :
+                        ]
                     else:
                         smpl_pose, smpl_transl = self.motion2global(
                             pred_xstart,
@@ -1060,29 +1114,48 @@ class GaussianDiffusion:
                             orig_joints=True,
                             pose2rot=False,
                         )
-                        joints17 = torch.einsum("bik,ji->bjk", [sout.vertices, self.smpl.J_regressor_wham])[:, :17]
+                        joints17 = torch.einsum(
+                            "bik,ji->bjk", [sout.vertices, self.smpl.J_regressor_wham]
+                        )[:, :17]
                         joints17 = joints17.reshape(bs, seqlen, 17, 3)
                     # project 3D joints to 2D
-                    joints = (cam_orient.transpose(2, 3) @ (joints17 - cam_pos[:, :, None]).transpose(2, 3)).transpose(2, 3)
+                    joints = (
+                        cam_orient.transpose(2, 3)
+                        @ (joints17 - cam_pos[:, :, None]).transpose(2, 3)
+                    ).transpose(2, 3)
                     joints = joints / joints[..., 2:3]
                     joints = (intrinsics @ joints.transpose(2, 3)).transpose(2, 3)
                     joints = joints[..., :2]
-                    diff = (joints - local_kpt2d)
+                    diff = joints - local_kpt2d
                     robust_sqr_dist = gmof(diff, sigma=100)
-                    robust_sqr_dist = ((kpt2d_score**2) * robust_sqr_dist) / scale[..., None, None]
+                    robust_sqr_dist = ((kpt2d_score**2) * robust_sqr_dist) / scale[
+                        ..., None, None
+                    ]
                     # coeff = torch.where(robust_sqr_dist > 10, 10 / robust_sqr_dist.detach(), torch.ones_like(robust_sqr_dist))
-                    alpha_bar_batch = _extract_into_tensor(self.alphas_cumprod, t, robust_sqr_dist.shape[:1])
-                    alpha_bar_batch = alpha_bar_batch[:, None, None, None].clamp(min=0.01, max=0.5)
+                    alpha_bar_batch = _extract_into_tensor(
+                        self.alphas_cumprod, t, robust_sqr_dist.shape[:1]
+                    )
+                    alpha_bar_batch = alpha_bar_batch[:, None, None, None].clamp(
+                        min=0.01, max=0.5
+                    )
                     # robust_sqr_dist = robust_sqr_dist * coeff
-                    loss = (((pred_xstart - obs_motion) * mask) **2).mean() + (robust_sqr_dist * alpha_bar_batch ** 2).mean()
+                    loss = (((pred_xstart - obs_motion) * mask) ** 2).mean() + (
+                        robust_sqr_dist * alpha_bar_batch**2
+                    ).mean()
                     return loss
 
                 xt = Variable(x.detach().requires_grad_(), requires_grad=True)
                 use_lbfgs = True
                 with torch.enable_grad():
                     if use_lbfgs:
-                        optimizer = torch.optim.LBFGS([xt], max_iter=4, history_size=10, line_search_fn='strong_wolfe')
+                        optimizer = torch.optim.LBFGS(
+                            [xt],
+                            max_iter=4,
+                            history_size=10,
+                            line_search_fn="strong_wolfe",
+                        )
                         loop_bar = range(5)
+
                         def closure():
                             optimizer.zero_grad()
                             loss = f(xt)
@@ -1093,6 +1166,7 @@ class GaussianDiffusion:
                             # xt.grad.mul_(clip_coef.view(-1, 1, 1, 1))
 
                             return loss
+
                         for _ in loop_bar:
                             optimizer.step(closure)
                     else:
@@ -1130,7 +1204,7 @@ class GaussianDiffusion:
                     )
                     out = out_orig
                     pred_xstart = out["pred_xstart"]
-                    loss_mask = (((pred_xstart - obs_motion) * mask) **2).mean()
+                    loss_mask = (((pred_xstart - obs_motion) * mask) ** 2).mean()
                     # loss.backward()
                     # grad = xt.grad
                     # grad_mask = torch.autograd.grad([-loss_mask], [xt])[0]
@@ -1142,17 +1216,24 @@ class GaussianDiffusion:
                         smpl=self.smpl,
                         return_joints17=True,
                     )
-                    joints17 = (R0 @ joints17.transpose(2, 3)).transpose(2, 3) + t0[..., None, :]
+                    joints17 = (R0 @ joints17.transpose(2, 3)).transpose(2, 3) + t0[
+                        ..., None, :
+                    ]
                     # project 3D joints to 2D
-                    joints = (cam_orient.transpose(2, 3) @ (joints17 - cam_pos[:, :, None]).transpose(2, 3)).transpose(2, 3)
+                    joints = (
+                        cam_orient.transpose(2, 3)
+                        @ (joints17 - cam_pos[:, :, None]).transpose(2, 3)
+                    ).transpose(2, 3)
                     joints = joints / joints[..., 2:3]
                     joints = (intrinsics @ joints.transpose(2, 3)).transpose(2, 3)
                     joints = joints[..., :2]
-                    diff = (joints - local_kpt2d)
+                    diff = joints - local_kpt2d
                     robust_sqr_dist = gmof(diff, sigma=100)
                     # import ipdb; ipdb.set_trace()
                     # loss_reproj = ((diff.abs() * kpt2d_score) / scale[..., None, None]).mean()
-                    robust_sqr_dist = ((kpt2d_score**2) * robust_sqr_dist) / scale[..., None, None]
+                    robust_sqr_dist = ((kpt2d_score**2) * robust_sqr_dist) / scale[
+                        ..., None, None
+                    ]
                     # robust_sqr_dist = robust_sqr_dist * coeff
                     loss_reproj = robust_sqr_dist.mean()
 
@@ -1218,8 +1299,8 @@ class GaussianDiffusion:
                     #     # print(s)
                     #     # for those motions with quantile over thresh, clamp and then scale so they are clip_val at most
                     #     s = s[:,None,None,None].expand_as(pred)
-                    #     pred = torch.where(s > clip_val, 
-                    #                     torch.clamp(pred, min=-s, max=s) / ((1. / clip_val) * s + 1e-6), 
+                    #     pred = torch.where(s > clip_val,
+                    #                     torch.clamp(pred, min=-s, max=s) / ((1. / clip_val) * s + 1e-6),
                     #                     pred)
                     # pred_xstart = pred
             pred_xstart = obs_motion * mask + pred_xstart * (1 - mask)
@@ -1239,7 +1320,7 @@ class GaussianDiffusion:
         noise = th.randn_like(x)
         mean_pred = (
             out["pred_xstart"] * th.sqrt(alpha_bar_prev)
-            + th.sqrt(1 - alpha_bar_prev - sigma ** 2) * eps
+            + th.sqrt(1 - alpha_bar_prev - sigma**2) * eps
         )
         nonzero_mask = (
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
@@ -1854,7 +1935,7 @@ class GaussianDiffusion:
         # Equation 12.
         mean_pred = (
             pred_xstart * th.sqrt(alpha_bar_prev)
-            + th.sqrt(1 - alpha_bar_prev - sigma ** 2) * eps
+            + th.sqrt(1 - alpha_bar_prev - sigma**2) * eps
         )
         nonzero_mask = (
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
@@ -1874,7 +1955,7 @@ class GaussianDiffusion:
         cond_fn=None,
         model_kwargs=None,
         eta=0.0,
-        guide=None
+        guide=None,
     ):
         """
         Sample x_{t-1} from the model using DDIM.
@@ -1892,8 +1973,9 @@ class GaussianDiffusion:
                 model_kwargs=model_kwargs,
             )
             if cond_fn is not None:
-                out = self.condition_score_with_grad(cond_fn, out_orig, x, t,
-                                                     model_kwargs=model_kwargs)
+                out = self.condition_score_with_grad(
+                    cond_fn, out_orig, x, t, model_kwargs=model_kwargs
+                )
             else:
                 out = out_orig
 
@@ -1914,7 +1996,7 @@ class GaussianDiffusion:
         noise = th.randn_like(x)
         mean_pred = (
             out["pred_xstart"] * th.sqrt(alpha_bar_prev)
-            + th.sqrt(1 - alpha_bar_prev - sigma ** 2) * eps
+            + th.sqrt(1 - alpha_bar_prev - sigma**2) * eps
         )
         nonzero_mask = (
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
@@ -2142,8 +2224,10 @@ class GaussianDiffusion:
 
         indices = list(range(self.num_timesteps - skip_timesteps))[::-1]
         if repeat_final_timesteps is not None:
-            if '%' in repeat_final_timesteps:
-                num_repeat_steps = int(int(repeat_final_timesteps.replace('%', '')) / 100 * len(indices))
+            if "%" in repeat_final_timesteps:
+                num_repeat_steps = int(
+                    int(repeat_final_timesteps.replace("%", "")) / 100 * len(indices)
+                )
             else:
                 num_repeat_steps = int(repeat_final_timesteps)
             indices = indices + indices[-num_repeat_steps:]
@@ -2160,18 +2244,27 @@ class GaussianDiffusion:
 
         for k, i in enumerate(indices):
             t = th.tensor([i] * shape[0], device=device)
-            if randomize_class and 'y' in model_kwargs:
-                model_kwargs['y'] = th.randint(low=0, high=model.num_classes,
-                                               size=model_kwargs['y'].shape,
-                                               device=model_kwargs['y'].device)
+            if randomize_class and "y" in model_kwargs:
+                model_kwargs["y"] = th.randint(
+                    low=0,
+                    high=model.num_classes,
+                    size=model_kwargs["y"].shape,
+                    device=model_kwargs["y"].device,
+                )
             if model_kwargs_modify_fn is not None:
                 is_final_repeat_timestep = k >= len(indices) - num_repeat_steps
-                cur_model_kwargs = model_kwargs_modify_fn(model_kwargs, img, i, is_final_repeat_timestep)
+                cur_model_kwargs = model_kwargs_modify_fn(
+                    model_kwargs, img, i, is_final_repeat_timestep
+                )
             else:
                 cur_model_kwargs = model_kwargs
-                
+
             with th.no_grad():
-                sample_fn = self.ddim_sample_with_grad if cond_fn_with_grad else self.ddim_sample
+                sample_fn = (
+                    self.ddim_sample_with_grad
+                    if cond_fn_with_grad
+                    else self.ddim_sample
+                )
                 out = sample_fn(
                     model,
                     img,
@@ -2190,7 +2283,14 @@ class GaussianDiffusion:
                 yield out
                 if update_sample_fn is not None:
                     before_repeat_timesteps = k == len(indices) - num_repeat_steps - 1
-                    img = update_sample_fn(img, out, i, is_final_repeat_timestep, before_repeat_timesteps, img_start)
+                    img = update_sample_fn(
+                        img,
+                        out,
+                        i,
+                        is_final_repeat_timestep,
+                        before_repeat_timesteps,
+                        img_start,
+                    )
                 else:
                     img = out["sample"]
 
@@ -2199,7 +2299,7 @@ class GaussianDiffusion:
         model,
         x0,
         shape,
-        sds_weight_type='alphas',
+        sds_weight_type="alphas",
         noise=None,
         clip_denoised=True,
         denoised_fn=None,
@@ -2271,7 +2371,7 @@ class GaussianDiffusion:
         model,
         x0,
         shape,
-        sds_weight_type='alphas',
+        sds_weight_type="alphas",
         noise=None,
         clip_denoised=True,
         denoised_fn=None,
@@ -2308,61 +2408,79 @@ class GaussianDiffusion:
             mean=self.motion_mean,
             std=self.motion_std,
             smpl=self.smpl,
-            return_jts=False
+            return_jts=False,
         )
         init_smpl_pose_6d = matrix_to_rotation_6d(init_smpl_pose)
-        init_smpl_pose_6d = Variable(init_smpl_pose_6d.clone().contiguous().detach(), requires_grad=True)
-        init_smpl_transl = Variable(init_smpl_transl.clone().contiguous().detach(), requires_grad=True)
+        init_smpl_pose_6d = Variable(
+            init_smpl_pose_6d.clone().contiguous().detach(), requires_grad=True
+        )
+        init_smpl_transl = Variable(
+            init_smpl_transl.clone().contiguous().detach(), requires_grad=True
+        )
         # x_start = Variable(x0.clone().contiguous().detach(), requires_grad=True)
         # optim_type = 'LBFGS'
-        optim_type = 'SGD'
+        optim_type = "SGD"
         bs, seqlen = init_smpl_pose_6d.shape[:2]
-        if optim_type == 'LBFGS':
+        if optim_type == "LBFGS":
             opt_steps = opt_steps // 10
             # optimizer = torch.optim.LBFGS([x_start], max_iter=4, history_size=10, line_search_fn='strong_wolfe')
-            optimizer = torch.optim.LBFGS([init_smpl_pose_6d, init_smpl_transl], max_iter=4, history_size=10, line_search_fn='strong_wolfe')
-        elif optim_type == 'Adam':
+            optimizer = torch.optim.LBFGS(
+                [init_smpl_pose_6d, init_smpl_transl],
+                max_iter=4,
+                history_size=10,
+                line_search_fn="strong_wolfe",
+            )
+        elif optim_type == "Adam":
             # optimizer = torch.optim.Adam([x_start], lr=1e-2)
             optimizer = torch.optim.Adam([init_smpl_pose_6d, init_smpl_transl], lr=1e-2)
-        elif optim_type == 'SGD':
+        elif optim_type == "SGD":
             # optimizer = torch.optim.SGD([x_start], lr=1e-3)
             optimizer = torch.optim.SGD([init_smpl_pose_6d, init_smpl_transl], lr=1e-3)
         else:
-            raise ValueError(f'Unknown optimizer type: {optim_type}')
+            raise ValueError(f"Unknown optimizer type: {optim_type}")
 
         indices = list(range(self.num_timesteps - skip_timesteps))[::-1]
 
         pbar = range(opt_steps)
         if progress:
             from tqdm.auto import tqdm
+
             pbar = tqdm(pbar)
 
         for _ in pbar:
             ind = random.randint(0, len(indices) - 1)
             t = th.tensor([indices[ind]] * shape[0], device=device)
             cur_model_kwargs = model_kwargs
-            if sds_weight_type == 'alphas':
+            if sds_weight_type == "alphas":
                 w_t = _extract_into_tensor(self.alphas_cumprod, t, x0.shape)
-            elif sds_weight_type == 'sqrt_alphas':
+            elif sds_weight_type == "sqrt_alphas":
                 w_t = _extract_into_tensor(self.sqrt_alphas_cumprod, t, x0.shape)
-            elif sds_weight_type == '1minus_alphas':
+            elif sds_weight_type == "1minus_alphas":
                 w_t = _extract_into_tensor(1 - self.alphas_cumprod, t, x0.shape)
-            elif sds_weight_type == 'sqrt_1minus_alphas':
-                w_t = _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x0.shape)
-            elif sds_weight_type == 'log_one_minus_alphas_cumprod':
-                w_t = _extract_into_tensor(self.log_one_minus_alphas_cumprod, t, x0.shape)
-            elif sds_weight_type == 'constant':
+            elif sds_weight_type == "sqrt_1minus_alphas":
+                w_t = _extract_into_tensor(
+                    self.sqrt_one_minus_alphas_cumprod, t, x0.shape
+                )
+            elif sds_weight_type == "log_one_minus_alphas_cumprod":
+                w_t = _extract_into_tensor(
+                    self.log_one_minus_alphas_cumprod, t, x0.shape
+                )
+            elif sds_weight_type == "constant":
                 w_t = th.ones_like(x0)
             else:
-                raise ValueError(f'Unknown sds weight type: {sds_weight_type}')
+                raise ValueError(f"Unknown sds weight type: {sds_weight_type}")
 
             w_t = w_t[:, :1, :1, :1]
 
             init_smpl_pose = rotation_6d_to_matrix(init_smpl_pose_6d)
             with th.no_grad():
                 orient_mat = init_smpl_pose[:, :, 0]
-                pose_feat = matrix_to_rotation_6d(init_smpl_pose[:, :, 1:]).reshape(bs, seqlen, 23 * 6)
-                x_start = self.smpl2motion(orient_mat, init_smpl_transl, pose_feat, None, None)
+                pose_feat = matrix_to_rotation_6d(init_smpl_pose[:, :, 1:]).reshape(
+                    bs, seqlen, 23 * 6
+                )
+                x_start = self.smpl2motion(
+                    orient_mat, init_smpl_transl, pose_feat, None, None
+                )
                 x_start = (x_start - self.motion_mean) / self.motion_std
                 x_start = x_start.transpose(1, 2)[:, :, None, :]
                 xt = self.q_sample(x_start, t)
@@ -2383,7 +2501,7 @@ class GaussianDiffusion:
                     overwrite_data=overwrite_data,
                 )
                 sampled_x0 = out["pred_xstart"]
-            
+
             def closure():
                 optimizer.zero_grad()
                 cam2world = cur_model_kwargs["y"]["cam2world"]
@@ -2437,19 +2555,26 @@ class GaussianDiffusion:
                     orig_joints=True,
                     pose2rot=False,
                 )
-                joints17 = torch.einsum("bik,ji->bjk", [sout.vertices, self.smpl.J_regressor_wham])[:, :17]
+                joints17 = torch.einsum(
+                    "bik,ji->bjk", [sout.vertices, self.smpl.J_regressor_wham]
+                )[:, :17]
                 joints17 = joints17.reshape(bs, new_len, 17, 3)
 
                 select_cam_orient = cam_orient[:, select_idx]
                 select_cam_pos = cam_pos[:, select_idx]
                 # project 3D joints to 2D
-                joints = (select_cam_orient.transpose(2, 3) @ (joints17 - select_cam_pos[:, :, None]).transpose(2, 3)).transpose(2, 3)
+                joints = (
+                    select_cam_orient.transpose(2, 3)
+                    @ (joints17 - select_cam_pos[:, :, None]).transpose(2, 3)
+                ).transpose(2, 3)
                 joints = joints / joints[..., 2:3]
                 joints = (intrinsics @ joints.transpose(2, 3)).transpose(2, 3)
                 joints = joints[..., :2]
-                diff = (joints - select_local_kpt2d)
+                diff = joints - select_local_kpt2d
                 robust_sqr_dist = gmof(diff, sigma=scale[..., None, None])
-                robust_sqr_dist = ((select_kpt2d_score**2) * robust_sqr_dist) #/ scale[..., None, None]
+                robust_sqr_dist = (
+                    select_kpt2d_score**2
+                ) * robust_sqr_dist  # / scale[..., None, None]
                 # coeff = torch.where(robust_sqr_dist > 10, 10 / robust_sqr_dist.detach(), torch.ones_like(robust_sqr_dist))
                 # alpha_bar_batch = _extract_into_tensor(self.alphas_cumprod, t, robust_sqr_dist.shape[:1])
                 # alpha_bar_batch = alpha_bar_batch[:, None, None, None].clamp(min=0.01, max=0.5)
@@ -2460,7 +2585,7 @@ class GaussianDiffusion:
                 loss_reproj = robust_sqr_dist.reshape(bs, -1).mean(dim=-1).sum()
 
                 # loss_reproj = (diff.abs() * kpt2d_score / scale[..., None, None]).reshape(x_start.shape[0], -1).mean(dim=-1).sum()
-                loss_sds = (((sampled_x0 - x_start) ** 2) * w_t)
+                loss_sds = ((sampled_x0 - x_start) ** 2) * w_t
                 # loss_sds[:, select_idx] = loss_sds[:, select_idx] * 0.0
                 loss_sds = loss_sds.reshape(bs, -1).mean(dim=-1).sum()
 
@@ -2469,17 +2594,23 @@ class GaussianDiffusion:
                     mean=self.motion_mean,
                     std=self.motion_std,
                     smpl=self.smpl,
-                    return_jts=False
+                    return_jts=False,
                 )
-                loss_sds_pose = ((sampled_x0_pose - smpl_pose) ** 2 * w_t.reshape(bs, 1, 1, 1, 1))[:, :, 1:]
-                loss_sds_transl = ((sampled_x0_transl - smpl_transl) ** 2 * w_t.reshape(bs, 1, 1))
+                loss_sds_pose = (
+                    (sampled_x0_pose - smpl_pose) ** 2 * w_t.reshape(bs, 1, 1, 1, 1)
+                )[:, :, 1:]
+                loss_sds_transl = (sampled_x0_transl - smpl_transl) ** 2 * w_t.reshape(
+                    bs, 1, 1
+                )
                 # loss_sds_pose[:, select_idx] = loss_sds_pose[:, select_idx] * 0.0
                 # loss_sds_transl[:, select_idx] = loss_sds_transl[:, select_idx] * 0.0
 
                 loss_sds_pose = loss_sds_pose.reshape(bs, -1).mean(dim=-1).sum()
                 loss_sds_transl = loss_sds_transl.reshape(bs, -1).mean(dim=-1).sum()
                 # loss = loss_reproj * 0.1 + loss_sds * 0.001 + loss_sds_pose * 1 + loss_sds_transl * 1
-                loss = loss_sds * 0.1 + loss_sds_pose * 0.0001 + loss_sds_transl * 0.0001
+                loss = (
+                    loss_sds * 0.1 + loss_sds_pose * 0.0001 + loss_sds_transl * 0.0001
+                )
                 # loss = loss_reproj * 0.1
                 # loss = loss_reproj * 0.01 + loss_sds * 1 # + loss_sds_pose * 1 + loss_sds_transl * 1
 
@@ -2487,7 +2618,7 @@ class GaussianDiffusion:
                 # gradient clipping
                 optimizer.step()
                 return loss_sds
-            
+
             optimizer.step(closure)
             yield x_start.detach()
 
@@ -2510,7 +2641,7 @@ class GaussianDiffusion:
         Same usage as p_sample().
         """
         if not int(order) or not 1 <= order <= 4:
-            raise ValueError('order is invalid (should be int from 1-4).')
+            raise ValueError("order is invalid (should be int from 1-4).")
 
         def get_model_output(x, t):
             with th.set_grad_enabled(cond_fn_with_grad and cond_fn is not None):
@@ -2525,10 +2656,14 @@ class GaussianDiffusion:
                 )
                 if cond_fn is not None:
                     if cond_fn_with_grad:
-                        out = self.condition_score_with_grad(cond_fn, out_orig, x, t, model_kwargs=model_kwargs)
+                        out = self.condition_score_with_grad(
+                            cond_fn, out_orig, x, t, model_kwargs=model_kwargs
+                        )
                         x = x.detach()
                     else:
-                        out = self.condition_score(cond_fn, out_orig, x, t, model_kwargs=model_kwargs)
+                        out = self.condition_score(
+                            cond_fn, out_orig, x, t, model_kwargs=model_kwargs
+                        )
                 else:
                     out = out_orig
 
@@ -2544,11 +2679,17 @@ class GaussianDiffusion:
         if order > 1 and old_out is None:
             # Pseudo Improved Euler
             old_eps = [eps]
-            mean_pred = out["pred_xstart"] * th.sqrt(alpha_bar_prev) + th.sqrt(1 - alpha_bar_prev) * eps
+            mean_pred = (
+                out["pred_xstart"] * th.sqrt(alpha_bar_prev)
+                + th.sqrt(1 - alpha_bar_prev) * eps
+            )
             eps_2, _, _ = get_model_output(mean_pred, t - 1)
             eps_prime = (eps + eps_2) / 2
             pred_prime = self._predict_xstart_from_eps(x, t, eps_prime)
-            mean_pred = pred_prime * th.sqrt(alpha_bar_prev) + th.sqrt(1 - alpha_bar_prev) * eps_prime
+            mean_pred = (
+                pred_prime * th.sqrt(alpha_bar_prev)
+                + th.sqrt(1 - alpha_bar_prev) * eps_prime
+            )
         else:
             # Pseudo Linear Multistep (Adams-Bashforth)
             old_eps = old_out["old_eps"]
@@ -2561,11 +2702,19 @@ class GaussianDiffusion:
             elif cur_order == 3:
                 eps_prime = (23 * old_eps[-1] - 16 * old_eps[-2] + 5 * old_eps[-3]) / 12
             elif cur_order == 4:
-                eps_prime = (55 * old_eps[-1] - 59 * old_eps[-2] + 37 * old_eps[-3] - 9 * old_eps[-4]) / 24
+                eps_prime = (
+                    55 * old_eps[-1]
+                    - 59 * old_eps[-2]
+                    + 37 * old_eps[-3]
+                    - 9 * old_eps[-4]
+                ) / 24
             else:
-                raise RuntimeError('cur_order is invalid.')
+                raise RuntimeError("cur_order is invalid.")
             pred_prime = self._predict_xstart_from_eps(x, t, eps_prime)
-            mean_pred = pred_prime * th.sqrt(alpha_bar_prev) + th.sqrt(1 - alpha_bar_prev) * eps_prime
+            mean_pred = (
+                pred_prime * th.sqrt(alpha_bar_prev)
+                + th.sqrt(1 - alpha_bar_prev) * eps_prime
+            )
 
         if len(old_eps) >= order:
             old_eps.pop(0)
@@ -2573,7 +2722,11 @@ class GaussianDiffusion:
         nonzero_mask = (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
         sample = mean_pred * nonzero_mask + out["pred_xstart"] * (1 - nonzero_mask)
 
-        return {"sample": sample, "pred_xstart": out_orig["pred_xstart"], "old_eps": old_eps}
+        return {
+            "sample": sample,
+            "pred_xstart": out_orig["pred_xstart"],
+            "old_eps": old_eps,
+        }
 
     def plms_sample_loop(
         self,
@@ -2667,10 +2820,13 @@ class GaussianDiffusion:
 
         for i in indices:
             t = th.tensor([i] * shape[0], device=device)
-            if randomize_class and 'y' in model_kwargs:
-                model_kwargs['y'] = th.randint(low=0, high=model.num_classes,
-                                               size=model_kwargs['y'].shape,
-                                               device=model_kwargs['y'].device)
+            if randomize_class and "y" in model_kwargs:
+                model_kwargs["y"] = th.randint(
+                    low=0,
+                    high=model.num_classes,
+                    size=model_kwargs["y"].shape,
+                    device=model_kwargs["y"].device,
+                )
             with th.no_grad():
                 out = self.plms_sample(
                     model,
@@ -2723,7 +2879,9 @@ class GaussianDiffusion:
         output = th.where((t == 0), decoder_nll, kl)
         return {"output": output, "pred_xstart": out["pred_xstart"]}
 
-    def training_losses(self, model, x_start, t, model_kwargs=None, noise=None, dataset=None):
+    def training_losses(
+        self, model, x_start, t, model_kwargs=None, noise=None, dataset=None
+    ):
         """
         Compute training losses for a single timestep.
 
@@ -2787,12 +2945,16 @@ class GaussianDiffusion:
                 ModelMeanType.START_X: x_start,
                 ModelMeanType.EPSILON: noise,
             }[self.model_mean_type]
-            assert model_output.shape == target.shape == x_start.shape  # [bs, njoints, nfeats, nframes]
+            assert (
+                model_output.shape == target.shape == x_start.shape
+            )  # [bs, njoints, nfeats, nframes]
 
-            mask = model_kwargs['y']['mask']
-            terms["rot_mse"] = self.masked_l2(target, model_output, mask) # mean_flat(rot_mse)
+            mask = model_kwargs["y"]["mask"]
+            terms["rot_mse"] = self.masked_l2(
+                target, model_output, mask
+            )  # mean_flat(rot_mse)
 
-            terms["loss"] = terms["rot_mse"] + terms.get('vb', 0.)
+            terms["loss"] = terms["rot_mse"] + terms.get("vb", 0.0)
 
         else:
             raise NotImplementedError(self.loss_type)

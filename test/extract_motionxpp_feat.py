@@ -4,19 +4,20 @@ import random
 
 os.environ["PYOPENGL_PLATFORM"] = "egl"
 
+import contextlib
 import json
 
 import cv2
 import numpy as np
 import torch
-from pycocotools.coco import COCO
 import torch.multiprocessing as mp
-
+from pycocotools.coco import COCO
 from tqdm import tqdm
-import contextlib
-from hmr4d.utils.smplx_utils import make_smplx
-from hmr4d.utils.preproc import Tracker, Extractor, VitPoseExtractor, SLAMModel
+
 from hmr4d.utils.geo.hmr_cam import get_bbx_xys_from_xyxy
+from hmr4d.utils.preproc import Extractor, SLAMModel, Tracker, VitPoseExtractor
+from hmr4d.utils.smplx_utils import make_smplx
+
 
 def draw_bbox(frame, bbox, color=(0, 255, 0), thickness=2):
     """
@@ -44,7 +45,7 @@ if __name__ == "__main__":
 
     motionx_db_feat = {}
     motionx_db = torch.load("/mnt/disk3/motion-x++/motionxpp_smplxposev2.pth")
-    extractor = Extractor('cuda:0')
+    extractor = Extractor("cuda:0")
     keys = list(motionx_db.keys())
     random.shuffle(keys)
     for vid in tqdm(keys):
@@ -60,9 +61,13 @@ if __name__ == "__main__":
         x1, y1, w, h = bbx_xywh[:, 0], bbx_xywh[:, 1], bbx_xywh[:, 2], bbx_xywh[:, 3]
         bbx_xyxy = torch.stack([x1, y1, x1 + w, y1 + h], dim=1)
 
-        bbx_xys = get_bbx_xys_from_xyxy(bbx_xyxy, base_enlarge=1.2).float()  # (L, 3) apply aspect ratio and enlarge
+        bbx_xys = get_bbx_xys_from_xyxy(
+            bbx_xyxy, base_enlarge=1.2
+        ).float()  # (L, 3) apply aspect ratio and enlarge
 
-        vit_features = extractor.extract_video_features(video_file, bbx_xys, batch_size=32)
+        vit_features = extractor.extract_video_features(
+            video_file, bbx_xys, batch_size=32
+        )
         # torch.save(vit_features, paths.vit_features)
         motionx_db_feat[vid_name] = vit_features
         # assert vit_features.shape[0] == bbx_xys.shape[0], (vit_features.shape, bbx_xys.shape)
@@ -71,7 +76,9 @@ if __name__ == "__main__":
             vit_features = vit_features[: data["pose"].shape[0]]
         motionx_db_feat[vid_name] = vit_features.float()
         os.makedirs(f"/mnt/disk3/motion-x++/hmr4d_feat/{subset}", exist_ok=True)
-        torch.save(vit_features, f"/mnt/disk3/motion-x++/hmr4d_feat/{subset}/{file_name}.pth")
+        torch.save(
+            vit_features, f"/mnt/disk3/motion-x++/hmr4d_feat/{subset}/{file_name}.pth"
+        )
 
 print(f"total {len(motionx_db_feat)} samples")
 torch.save(motionx_db_feat, "/mnt/disk3/motion-x++/motionxpp_feat.pth")

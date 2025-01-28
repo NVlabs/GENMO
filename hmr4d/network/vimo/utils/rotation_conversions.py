@@ -7,7 +7,6 @@ from typing import Optional
 import torch
 import torch.nn.functional as F
 
-
 """
 The transformation matrices returned from the functions in this file assume
 the points on which the transformation will be applied are column vectors.
@@ -551,37 +550,32 @@ def matrix_to_rotation_6d(matrix: torch.Tensor) -> torch.Tensor:
     return matrix[..., :2, :].clone().reshape(*matrix.size()[:-2], 6)
 
 
-def convert_to_rotmat(rot, rep='aa'):
-    '''
+def convert_to_rotmat(rot, rep="aa"):
+    """
     Converts rotation rep to rotation matrix based on the given type.
     pred_rot : B x T x N
-    '''
+    """
     B, T = rot.shape[:2]
 
-    if rep == 'aa':
+    if rep == "aa":
         rot = axis_angle_to_matrix(rot.reshape(B, T, -1, 3))
-    elif rep == 'rot6d':
+    elif rep == "rot6d":
         rot = rotation_6d_to_matrix(rot.reshape(B, T, -1, 6))
 
     return rot
 
 
-def convert_from_rotmat(rot, rep='aa'):
-    '''
+def convert_from_rotmat(rot, rep="aa"):
+    """
     Converts rotation rep from rotation matrix to the given type.
     pred_rot : (B, T, D) or (B, T, J, 3, 3)
-    '''
+    """
     B, T = rot.shape[:2]
     rot = rot.reshape(B, T, -1, 3, 3)
 
-    if rep == 'aa':
+    if rep == "aa":
         rot = matrix_to_axis_angle(rot)
-    elif rep == 'rot6d':
+    elif rep == "rot6d":
         rot = matrix_to_rotation_6d(rot)
 
     return rot.reshape(B, T, -1)
-
-
-
-
-

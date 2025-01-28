@@ -1,11 +1,12 @@
-import torch
 import pytorch_lightning as pl
+import torch
 from yacs.config import CfgNode
-from .vit import ViT
-from .smpl_head import SMPLTransformerDecoderHead
 
-from motiondiff.models.mdm.rotation_conversions import matrix_to_axis_angle
 from hmr4d.utils.geo.hmr_cam import compute_transl_full_cam
+from motiondiff.models.mdm.rotation_conversions import matrix_to_axis_angle
+
+from .smpl_head import SMPLTransformerDecoderHead
+from .vit import ViT
 
 
 class HMR2(pl.LightningModule):
@@ -38,18 +39,28 @@ class HMR2(pl.LightningModule):
 
         # Output head
         if feat_mode:
-            token_out = self.smpl_head(vit_feats, only_return_token_out=True)  # (B, 1024)
+            token_out = self.smpl_head(
+                vit_feats, only_return_token_out=True
+            )  # (B, 1024)
             return token_out
 
         # return full process
-        pred_smpl_params, pred_cam, _, token_out = self.smpl_head(vit_feats, only_return_token_out=False)
+        pred_smpl_params, pred_cam, _, token_out = self.smpl_head(
+            vit_feats, only_return_token_out=False
+        )
         output = {}
         output["token_out"] = token_out
         output["smpl_params"] = {
-            "body_pose": matrix_to_axis_angle(pred_smpl_params["body_pose"]).flatten(-2),  # (B, 23, 3)
+            "body_pose": matrix_to_axis_angle(pred_smpl_params["body_pose"]).flatten(
+                -2
+            ),  # (B, 23, 3)
             "betas": pred_smpl_params["betas"],  # (B, 10)
-            "global_orient": matrix_to_axis_angle(pred_smpl_params["global_orient"])[:, 0],  # (B, 3)
-            "transl": compute_transl_full_cam(pred_cam, batch["bbx_xys"], batch["K_fullimg"]),  # (B, 3)
+            "global_orient": matrix_to_axis_angle(pred_smpl_params["global_orient"])[
+                :, 0
+            ],  # (B, 3)
+            "transl": compute_transl_full_cam(
+                pred_cam, batch["bbx_xys"], batch["K_fullimg"]
+            ),  # (B, 3)
         }
 
         return output

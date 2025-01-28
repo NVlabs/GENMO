@@ -1,29 +1,40 @@
+import cv2
+import numpy as np
 import torch
 from torch.utils.data import Dataset
-from torchvision.transforms import Normalize, ToTensor, Compose
-import numpy as np
-import cv2
+from torchvision.transforms import Compose, Normalize, ToTensor
 
 import hmr4d.constants as constants
-from hmr4d.network.vimo.utils.imutils import crop, boxes_2_cs
+from hmr4d.network.vimo.utils.imutils import boxes_2_cs, crop
 
 
 class DetectDataset(Dataset):
     """
     Detection Dataset Class - Handles data loading from detections.
     """
-    def __init__(self, img, boxes, crop_size=256, dilate=1.2,
-                img_focal=None, img_center=None, normalize=True):
+
+    def __init__(
+        self,
+        img,
+        boxes,
+        crop_size=256,
+        dilate=1.2,
+        img_focal=None,
+        img_center=None,
+        normalize=True,
+    ):
         super(DetectDataset, self).__init__()
 
         self.img = img
         self.crop_size = crop_size
         self.orig_shape = img.shape[:2]
         self.normalize = normalize
-        self.normalize_img = Compose([
-                            ToTensor(),
-                            Normalize(mean=constants.IMG_NORM_MEAN, std=constants.IMG_NORM_STD)
-                        ])
+        self.normalize_img = Compose(
+            [
+                ToTensor(),
+                Normalize(mean=constants.IMG_NORM_MEAN, std=constants.IMG_NORM_STD),
+            ]
+        )
 
         self.boxes = boxes
         self.box_dilate = dilate
@@ -39,7 +50,6 @@ class DetectDataset(Dataset):
         else:
             self.img_center = img_center
 
-
     def __getitem__(self, index):
         item = {}
         scale = self.scales[index] * self.box_dilate
@@ -47,27 +57,25 @@ class DetectDataset(Dataset):
         img_focal = self.img_focal
         img_center = self.img_center
 
-        img = crop(self.img, center, scale, 
-                  [self.crop_size, self.crop_size], rot=0).astype('uint8')
+        img = crop(
+            self.img, center, scale, [self.crop_size, self.crop_size], rot=0
+        ).astype("uint8")
         origin_crop = img.copy()
         if self.normalize:
             img = self.normalize_img(img)
 
-
-        item['img'] = img
-        item['origin_crop'] = origin_crop
-        item['scale'] = torch.tensor(scale).float()
-        item['center'] = torch.tensor(center).float()
-        item['img_focal'] = torch.tensor(img_focal).float()
-        item['img_center'] = torch.tensor(img_center).float()
-        item['orig_shape'] = torch.tensor(self.orig_shape).float()
+        item["img"] = img
+        item["origin_crop"] = origin_crop
+        item["scale"] = torch.tensor(scale).float()
+        item["center"] = torch.tensor(center).float()
+        item["img_focal"] = torch.tensor(img_focal).float()
+        item["img_center"] = torch.tensor(img_center).float()
+        item["orig_shape"] = torch.tensor(self.orig_shape).float()
 
         return item
 
-
     def __len__(self):
         return len(self.boxes)
-
 
     def est_focal(self, orig_shape):
         h, w = orig_shape
@@ -76,7 +84,5 @@ class DetectDataset(Dataset):
 
     def est_center(self, orig_shape):
         h, w = orig_shape
-        center = np.array([w/2., h/2.])
+        center = np.array([w / 2.0, h / 2.0])
         return center
-
-

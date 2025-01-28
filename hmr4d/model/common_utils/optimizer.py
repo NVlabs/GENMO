@@ -1,6 +1,6 @@
-from torch.optim import AdamW, Adam
-from hmr4d.configs import MainStore, builds
+from torch.optim import Adam, AdamW
 
+from hmr4d.configs import MainStore, builds
 
 optimizer_cfgs = {
     "adam_1e-3": builds(Adam, lr=1e-3, zen_partial=True),

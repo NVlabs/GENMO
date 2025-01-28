@@ -4,11 +4,10 @@ from collections import OrderedDict
 
 import torch.nn as nn
 import torch.nn.functional as F
-from mmcv.cnn import (ConvModule, MaxPool2d, constant_init, kaiming_init,
-                      normal_init)
+from mmcv.cnn import ConvModule, MaxPool2d, constant_init, kaiming_init, normal_init
 from mmcv.runner.checkpoint import load_state_dict
-
 from mmpose.utils import get_root_logger
+
 from ..builder import BACKBONES
 from .base_backbone import BaseBackbone
 from .resnet import Bottleneck as _Bottleneck
@@ -48,13 +47,15 @@ class DownsampleModule(nn.Module):
             downsample module. Default: 64
     """
 
-    def __init__(self,
-                 block,
-                 num_blocks,
-                 num_units=4,
-                 has_skip=False,
-                 norm_cfg=dict(type='BN'),
-                 in_channels=64):
+    def __init__(
+        self,
+        block,
+        num_blocks,
+        num_units=4,
+        has_skip=False,
+        norm_cfg=dict(type="BN"),
+        in_channels=64,
+    ):
         # Protect mutable default arguments
         norm_cfg = cp.deepcopy(norm_cfg)
         super().__init__()
@@ -66,11 +67,13 @@ class DownsampleModule(nn.Module):
         self.norm_cfg = norm_cfg
         self.layer1 = self._make_layer(block, in_channels, num_blocks[0])
         for i in range(1, num_units):
-            module_name = f'layer{i + 1}'
+            module_name = f"layer{i + 1}"
             self.add_module(
                 module_name,
                 self._make_layer(
-                    block, in_channels * pow(2, i), num_blocks[i], stride=2))
+                    block, in_channels * pow(2, i), num_blocks[i], stride=2
+                ),
+            )
 
     def _make_layer(self, block, out_channels, blocks, stride=1):
         downsample = None
@@ -83,7 +86,8 @@ class DownsampleModule(nn.Module):
                 padding=0,
                 norm_cfg=self.norm_cfg,
                 act_cfg=None,
-                inplace=True)
+                inplace=True,
+            )
 
         units = list()
         units.append(
@@ -92,7 +96,9 @@ class DownsampleModule(nn.Module):
                 out_channels,
                 stride=stride,
                 downsample=downsample,
-                norm_cfg=self.norm_cfg))
+                norm_cfg=self.norm_cfg,
+            )
+        )
         self.in_channels = out_channels * block.expansion
         for _ in range(1, blocks):
             units.append(block(self.in_channels, out_channels))
@@ -102,7 +108,7 @@ class DownsampleModule(nn.Module):
     def forward(self, x, skip1, skip2):
         out = list()
         for i in range(self.num_units):
-            module_name = f'layer{i + 1}'
+            module_name = f"layer{i + 1}"
             module_i = getattr(self, module_name)
             x = module_i(x)
             if self.has_skip:
@@ -135,15 +141,17 @@ class UpsampleUnit(nn.Module):
             module. Must equal to in_channels of downsample module. Default:64
     """
 
-    def __init__(self,
-                 ind,
-                 num_units,
-                 in_channels,
-                 unit_channels=256,
-                 gen_skip=False,
-                 gen_cross_conv=False,
-                 norm_cfg=dict(type='BN'),
-                 out_channels=64):
+    def __init__(
+        self,
+        ind,
+        num_units,
+        in_channels,
+        unit_channels=256,
+        gen_skip=False,
+        gen_cross_conv=False,
+        norm_cfg=dict(type="BN"),
+        out_channels=64,
+    ):
         # Protect mutable default arguments
         norm_cfg = cp.deepcopy(norm_cfg)
         super().__init__()
@@ -157,7 +165,8 @@ class UpsampleUnit(nn.Module):
             padding=0,
             norm_cfg=self.norm_cfg,
             act_cfg=None,
-            inplace=True)
+            inplace=True,
+        )
         self.relu = nn.ReLU(inplace=True)
 
         self.ind = ind
@@ -170,7 +179,8 @@ class UpsampleUnit(nn.Module):
                 padding=0,
                 norm_cfg=self.norm_cfg,
                 act_cfg=None,
-                inplace=True)
+                inplace=True,
+            )
 
         self.gen_skip = gen_skip
         if self.gen_skip:
@@ -181,7 +191,8 @@ class UpsampleUnit(nn.Module):
                 stride=1,
                 padding=0,
                 norm_cfg=self.norm_cfg,
-                inplace=True)
+                inplace=True,
+            )
 
             self.out_skip2 = ConvModule(
                 unit_channels,
@@ -190,7 +201,8 @@ class UpsampleUnit(nn.Module):
                 stride=1,
                 padding=0,
                 norm_cfg=self.norm_cfg,
-                inplace=True)
+                inplace=True,
+            )
 
         self.gen_cross_conv = gen_cross_conv
         if self.ind == num_units - 1 and self.gen_cross_conv:
@@ -201,17 +213,16 @@ class UpsampleUnit(nn.Module):
                 stride=1,
                 padding=0,
                 norm_cfg=self.norm_cfg,
-                inplace=True)
+                inplace=True,
+            )
 
     def forward(self, x, up_x):
         out = self.in_skip(x)
 
         if self.ind > 0:
             up_x = F.interpolate(
-                up_x,
-                size=(x.size(2), x.size(3)),
-                mode='bilinear',
-                align_corners=True)
+                up_x, size=(x.size(2), x.size(3)), mode="bilinear", align_corners=True
+            )
             up_x = self.up_conv(up_x)
             out = out + up_x
         out = self.relu(out)
@@ -246,27 +257,28 @@ class UpsampleModule(nn.Module):
             module. Must equal to in_channels of downsample module. Default:64
     """
 
-    def __init__(self,
-                 unit_channels=256,
-                 num_units=4,
-                 gen_skip=False,
-                 gen_cross_conv=False,
-                 norm_cfg=dict(type='BN'),
-                 out_channels=64):
+    def __init__(
+        self,
+        unit_channels=256,
+        num_units=4,
+        gen_skip=False,
+        gen_cross_conv=False,
+        norm_cfg=dict(type="BN"),
+        out_channels=64,
+    ):
         # Protect mutable default arguments
         norm_cfg = cp.deepcopy(norm_cfg)
         super().__init__()
         self.in_channels = list()
         for i in range(num_units):
-            self.in_channels.append(Bottleneck.expansion * out_channels *
-                                    pow(2, i))
+            self.in_channels.append(Bottleneck.expansion * out_channels * pow(2, i))
         self.in_channels.reverse()
         self.num_units = num_units
         self.gen_skip = gen_skip
         self.gen_cross_conv = gen_cross_conv
         self.norm_cfg = norm_cfg
         for i in range(num_units):
-            module_name = f'up{i + 1}'
+            module_name = f"up{i + 1}"
             self.add_module(
                 module_name,
                 UpsampleUnit(
@@ -277,7 +289,9 @@ class UpsampleModule(nn.Module):
                     self.gen_skip,
                     self.gen_cross_conv,
                     norm_cfg=self.norm_cfg,
-                    out_channels=64))
+                    out_channels=64,
+                ),
+            )
 
     def forward(self, x):
         out = list()
@@ -285,7 +299,7 @@ class UpsampleModule(nn.Module):
         skip2 = list()
         cross_conv = None
         for i in range(self.num_units):
-            module_i = getattr(self, f'up{i + 1}')
+            module_i = getattr(self, f"up{i + 1}")
             if i == 0:
                 outi, skip1_i, skip2_i, _ = module_i(x[i], None)
             elif i == self.num_units - 1:
@@ -321,15 +335,17 @@ class SingleStageNetwork(nn.Module):
             Default: 64.
     """
 
-    def __init__(self,
-                 has_skip=False,
-                 gen_skip=False,
-                 gen_cross_conv=False,
-                 unit_channels=256,
-                 num_units=4,
-                 num_blocks=[2, 2, 2, 2],
-                 norm_cfg=dict(type='BN'),
-                 in_channels=64):
+    def __init__(
+        self,
+        has_skip=False,
+        gen_skip=False,
+        gen_cross_conv=False,
+        unit_channels=256,
+        num_units=4,
+        num_blocks=[2, 2, 2, 2],
+        norm_cfg=dict(type="BN"),
+        in_channels=64,
+    ):
         # Protect mutable default arguments
         norm_cfg = cp.deepcopy(norm_cfg)
         num_blocks = cp.deepcopy(num_blocks)
@@ -343,10 +359,12 @@ class SingleStageNetwork(nn.Module):
         self.num_blocks = num_blocks
         self.norm_cfg = norm_cfg
 
-        self.downsample = DownsampleModule(Bottleneck, num_blocks, num_units,
-                                           has_skip, norm_cfg, in_channels)
-        self.upsample = UpsampleModule(unit_channels, num_units, gen_skip,
-                                       gen_cross_conv, norm_cfg, in_channels)
+        self.downsample = DownsampleModule(
+            Bottleneck, num_blocks, num_units, has_skip, norm_cfg, in_channels
+        )
+        self.upsample = UpsampleModule(
+            unit_channels, num_units, gen_skip, gen_cross_conv, norm_cfg, in_channels
+        )
 
     def forward(self, x, skip1, skip2):
         mid = self.downsample(x, skip1, skip2)
@@ -364,7 +382,7 @@ class ResNetTop(nn.Module):
         channels (int): Number of channels of the feature output by ResNetTop.
     """
 
-    def __init__(self, norm_cfg=dict(type='BN'), channels=64):
+    def __init__(self, norm_cfg=dict(type="BN"), channels=64):
         # Protect mutable default arguments
         norm_cfg = cp.deepcopy(norm_cfg)
         super().__init__()
@@ -376,7 +394,10 @@ class ResNetTop(nn.Module):
                 stride=2,
                 padding=3,
                 norm_cfg=norm_cfg,
-                inplace=True), MaxPool2d(kernel_size=3, stride=2, padding=1))
+                inplace=True,
+            ),
+            MaxPool2d(kernel_size=3, stride=2, padding=1),
+        )
 
     def forward(self, img):
         return self.top(img)
@@ -418,13 +439,15 @@ class MSPN(BaseBackbone):
         (1, 256, 128, 128)
     """
 
-    def __init__(self,
-                 unit_channels=256,
-                 num_stages=4,
-                 num_units=4,
-                 num_blocks=[2, 2, 2, 2],
-                 norm_cfg=dict(type='BN'),
-                 res_top_channels=64):
+    def __init__(
+        self,
+        unit_channels=256,
+        num_stages=4,
+        num_units=4,
+        num_blocks=[2, 2, 2, 2],
+        norm_cfg=dict(type="BN"),
+        res_top_channels=64,
+    ):
         # Protect mutable default arguments
         norm_cfg = cp.deepcopy(norm_cfg)
         num_blocks = cp.deepcopy(num_blocks)
@@ -452,9 +475,17 @@ class MSPN(BaseBackbone):
                 gen_skip = False
                 gen_cross_conv = False
             self.multi_stage_mspn.append(
-                SingleStageNetwork(has_skip, gen_skip, gen_cross_conv,
-                                   unit_channels, num_units, num_blocks,
-                                   norm_cfg, res_top_channels))
+                SingleStageNetwork(
+                    has_skip,
+                    gen_skip,
+                    gen_cross_conv,
+                    unit_channels,
+                    num_units,
+                    num_blocks,
+                    norm_cfg,
+                    res_top_channels,
+                )
+            )
 
     def forward(self, x):
         """Model forward function."""
@@ -474,31 +505,33 @@ class MSPN(BaseBackbone):
             logger = get_root_logger()
             state_dict_tmp = get_state_dict(pretrained)
             state_dict = OrderedDict()
-            state_dict['top'] = OrderedDict()
-            state_dict['bottlenecks'] = OrderedDict()
+            state_dict["top"] = OrderedDict()
+            state_dict["bottlenecks"] = OrderedDict()
             for k, v in state_dict_tmp.items():
-                if k.startswith('layer'):
-                    if 'downsample.0' in k:
-                        state_dict['bottlenecks'][k.replace(
-                            'downsample.0', 'downsample.conv')] = v
-                    elif 'downsample.1' in k:
-                        state_dict['bottlenecks'][k.replace(
-                            'downsample.1', 'downsample.bn')] = v
+                if k.startswith("layer"):
+                    if "downsample.0" in k:
+                        state_dict["bottlenecks"][
+                            k.replace("downsample.0", "downsample.conv")
+                        ] = v
+                    elif "downsample.1" in k:
+                        state_dict["bottlenecks"][
+                            k.replace("downsample.1", "downsample.bn")
+                        ] = v
                     else:
-                        state_dict['bottlenecks'][k] = v
-                elif k.startswith('conv1'):
-                    state_dict['top'][k.replace('conv1', 'top.0.conv')] = v
-                elif k.startswith('bn1'):
-                    state_dict['top'][k.replace('bn1', 'top.0.bn')] = v
+                        state_dict["bottlenecks"][k] = v
+                elif k.startswith("conv1"):
+                    state_dict["top"][k.replace("conv1", "top.0.conv")] = v
+                elif k.startswith("bn1"):
+                    state_dict["top"][k.replace("bn1", "top.0.bn")] = v
 
-            load_state_dict(
-                self.top, state_dict['top'], strict=False, logger=logger)
+            load_state_dict(self.top, state_dict["top"], strict=False, logger=logger)
             for i in range(self.num_stages):
                 load_state_dict(
                     self.multi_stage_mspn[i].downsample,
-                    state_dict['bottlenecks'],
+                    state_dict["bottlenecks"],
                     strict=False,
-                    logger=logger)
+                    logger=logger,
+                )
         else:
             for m in self.multi_stage_mspn.modules():
                 if isinstance(m, nn.Conv2d):

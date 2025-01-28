@@ -1,18 +1,19 @@
+import numpy as np
 import torch
 import torch.nn.functional as F
-import numpy as np
+from einops import rearrange
 from numpy.random import rand, randn
+
+import hmr4d.utils.matrix as matrix
+from hmr4d.utils.geo.hmr_cam import create_camera_sensor
+from hmr4d.utils.geo.transforms import axis_rotate_to_matrix
+from hmr4d.utils.geo_transform import apply_T_on_points, transform_mat
 from motiondiff.models.mdm.rotation_conversions import (
     axis_angle_to_matrix,
     matrix_to_axis_angle,
     matrix_to_rotation_6d,
     rotation_6d_to_matrix,
 )
-from einops import rearrange
-from hmr4d.utils.geo.hmr_cam import create_camera_sensor
-from hmr4d.utils.geo_transform import transform_mat, apply_T_on_points
-from hmr4d.utils.geo.transforms import axis_rotate_to_matrix
-import hmr4d.utils.matrix as matrix
 
 halfpi = np.pi / 2
 R_y_upsidedown = torch.tensor([[-1, 0, 0], [0, -1, 0], [0, 0, 1]]).float()
@@ -51,7 +52,9 @@ def noisy_impluse_interpolation(data1, data2, step_noise_perc=0.2):
     linspace2 = np.stack([np.linspace(0, 1, L // 2)[::-1] for _ in range(dim)])
     linspace = np.concatenate([linspace1, linspace2], axis=-1)
     noise = (linspace[0, 1] - linspace[0, 0]) * step_noise_perc
-    space_noise = np.stack([np.random.uniform(-noise, noise, L - 2) for _ in range(dim)])
+    space_noise = np.stack(
+        [np.random.uniform(-noise, noise, L - 2) for _ in range(dim)]
+    )
 
     linspace[:, 1:-1] = linspace[:, 1:-1] + space_noise
     linspace = linspace.T
@@ -193,7 +196,9 @@ class CameraAugmentorV11:
         self.f = create_camera_sensor(1000, 1000, 24)[2][0, 0]  # use 24mm camera
         self.half_fov_tol = (self.w / 2) / self.f
 
-    def create_rotation_track(self, cam_mat, root, rx_factor=1.0, ry_factor=1.0, rz_factor=1.0):
+    def create_rotation_track(
+        self, cam_mat, root, rx_factor=1.0, ry_factor=1.0, rz_factor=1.0
+    ):
         """Create rotational move for the camera with rotating human"""
         human_mat = matrix.get_TRS(matrix.identity_mat()[None, :3, :3], root)
         cam2human_mat = matrix.get_mat_BtoA(human_mat, cam_mat)
@@ -222,7 +227,11 @@ class CameraAugmentorV11:
         delta_T0 = matrix.get_position(cam_mat)[0] - root[0]
         T_new = matrix.get_position(cam_mat)
 
-        tz_bias = delta_T0.norm(dim=-1) * tz_bias_factor * np.clip(1 + np.random.normal(scale=0.1), 0.67, 1.5)
+        tz_bias = (
+            delta_T0.norm(dim=-1)
+            * tz_bias_factor
+            * np.clip(1 + np.random.normal(scale=0.1), 0.67, 1.5)
+        )
 
         T_new[1:] = root[1:] + delta_T0
         cam_mat = matrix.get_TRS(matrix.get_rotation(cam_mat), T_new)
@@ -253,7 +262,9 @@ class CameraAugmentorV11:
             rx = np.random.normal(scale=self.rotx_impluse_noise, size=N)
             ry = np.random.normal(scale=self.roty_impluse_noise, size=N)
             rz = np.random.normal(scale=self.rotz_impluse_noise, size=N)
-            R_impluse_noise = axis_angle_to_matrix(torch.from_numpy(np.array([rx, ry, rz])).float().transpose(0, 1))
+            R_impluse_noise = axis_angle_to_matrix(
+                torch.from_numpy(np.array([rx, ry, rz])).float().transpose(0, 1)
+            )
             R_noise = R_new.clone()
             last_i = 0
             for i in range(N):
@@ -268,7 +279,9 @@ class CameraAugmentorV11:
                 window_impluse_r = matrix_to_rotation_6d(window_impluse_R).numpy()
 
                 window_new_r = noisy_impluse_interpolation(window_r, window_impluse_r)
-                window_new_R = rotation_6d_to_matrix(torch.from_numpy(window_new_r).float())
+                window_new_R = rotation_6d_to_matrix(
+                    torch.from_numpy(window_new_r).float()
+                )
                 R_noise[n_i - window : n_i + window] = window_new_R
                 last_i = n_i
             R_new = R_noise
@@ -279,7 +292,9 @@ class CameraAugmentorV11:
             tx = np.random.normal(scale=self.tx_impluse_noise, size=N)
             ty = np.random.normal(scale=self.ty_impluse_noise, size=N)
             tz = np.random.normal(scale=self.tz_impluse_noise, size=N)
-            T_impluse_noise = torch.from_numpy(np.array([tx, ty, tz])).float().transpose(0, 1)
+            T_impluse_noise = (
+                torch.from_numpy(np.array([tx, ty, tz])).float().transpose(0, 1)
+            )
             T_noise = T_new.clone()
             last_i = 0
             for i in range(N):
@@ -305,7 +320,9 @@ class CameraAugmentorV11:
             "both": 0.1,
             "pass": 0.5,
         }
-        impulse_type = np.random.choice(list(impulse_type_prob.keys()), p=list(impulse_type_prob.values()))
+        impulse_type = np.random.choice(
+            list(impulse_type_prob.keys()), p=list(impulse_type_prob.values())
+        )
         if impulse_type == "t":
             # impluse translation only
             T_new = add_impulse_t(T_new)
@@ -358,7 +375,9 @@ class CameraAugmentorV11:
             "static": 0.4,
         }
         if camera_type is None:
-            camera_type = np.random.choice(list(camera_type_prob.keys()), p=list(camera_type_prob.values()))
+            camera_type = np.random.choice(
+                list(camera_type_prob.keys()), p=list(camera_type_prob.values())
+            )
         if camera_type == "random":  # random move + add noise on cam
             R_w2c = create_rotation_move(R0_w2c, length, self.r_xyz_w_std)
             t_w2c = create_translation_move(R0_w2c, t0_w2c, length, self.t_xyz_w_std)
@@ -366,29 +385,43 @@ class CameraAugmentorV11:
 
         elif camera_type == "track":  # track human
             R_w2c = create_rotation_move(R0_w2c, length, self.r_xyz_w_std_half)
-            cam_mat = torch.inverse(transform_mat(R0_w2c, t0_w2c)).repeat(length, 1, 1)  # (F, 4, 4)
+            cam_mat = torch.inverse(transform_mat(R0_w2c, t0_w2c)).repeat(
+                length, 1, 1
+            )  # (F, 4, 4)
             t_w2c = self.create_translation_track(cam_mat, w_root, 0.5)
             R_w2c, t_w2c = self.add_stepnoise(R_w2c, t_w2c)
 
         elif camera_type == "trackrotate":  # track human and rotate
-            cam_mat = torch.inverse(transform_mat(R0_w2c, t0_w2c)).repeat(length, 1, 1)  # (F, 4, 4)
+            cam_mat = torch.inverse(transform_mat(R0_w2c, t0_w2c)).repeat(
+                length, 1, 1
+            )  # (F, 4, 4)
             t_w2c = self.create_translation_track(cam_mat, w_root, 0.5)
             cam_mat = matrix.get_TRS(matrix.get_rotation(cam_mat), t_w2c)
-            R_w2c = self.create_rotation_track(cam_mat, w_root, np.pi / 16, np.pi, np.pi / 16)
+            R_w2c = self.create_rotation_track(
+                cam_mat, w_root, np.pi / 16, np.pi, np.pi / 16
+            )
             R_w2c, t_w2c = self.add_stepnoise(R_w2c, t_w2c)
 
         elif camera_type == "trackpush":  # track human and push close to human
             R_w2c = create_rotation_move(R0_w2c, length, self.r_xyz_w_std_half)
             # [1/tz_bias_factor, 1] * dist
-            cam_mat = torch.inverse(transform_mat(R0_w2c, t0_w2c)).repeat(length, 1, 1)  # (F, 4, 4)
-            t_w2c = self.create_translation_track(cam_mat, w_root, 0.5, (1.0 / (1 + self.tz_bias_factor) - 1))
+            cam_mat = torch.inverse(transform_mat(R0_w2c, t0_w2c)).repeat(
+                length, 1, 1
+            )  # (F, 4, 4)
+            t_w2c = self.create_translation_track(
+                cam_mat, w_root, 0.5, (1.0 / (1 + self.tz_bias_factor) - 1)
+            )
             R_w2c, t_w2c = self.add_stepnoise(R_w2c, t_w2c)
 
         elif camera_type == "trackpull":  # track human and pull far from human
             R_w2c = create_rotation_move(R0_w2c, length, self.r_xyz_w_std_half)
             # [1, (tz_bias_factor + 1)] * dist
-            cam_mat = torch.inverse(transform_mat(R0_w2c, t0_w2c)).repeat(length, 1, 1)  # (F, 4, 4)
-            t_w2c = self.create_translation_track(cam_mat, w_root, 0.5, self.tz_bias_factor)
+            cam_mat = torch.inverse(transform_mat(R0_w2c, t0_w2c)).repeat(
+                length, 1, 1
+            )  # (F, 4, 4)
+            t_w2c = self.create_translation_track(
+                cam_mat, w_root, 0.5, self.tz_bias_factor
+            )
             R_w2c, t_w2c = self.add_stepnoise(R_w2c, t_w2c)
 
         else:
@@ -419,7 +452,9 @@ class CameraAugmentorV11:
         if half_fov.max() > self.half_fov_tol:
             max_idx1, max_idx2 = torch.where(torch.max(half_fov) == half_fov)
             max_idx1, max_idx2 = max_idx1[0], max_idx2[0]
-            z_trg = c_root[max_idx1, max_idx2].abs() / self.half_fov_tol  # extreme fitted z in the fov
+            z_trg = (
+                c_root[max_idx1, max_idx2].abs() / self.half_fov_tol
+            )  # extreme fitted z in the fov
             push_away = z_trg - c_root[max_idx1, 2]
             delta[..., 2] += push_away
         t_w2c += delta

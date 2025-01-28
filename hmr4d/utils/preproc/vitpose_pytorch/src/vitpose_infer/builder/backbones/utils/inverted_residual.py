@@ -38,24 +38,26 @@ class InvertedResidual(nn.Module):
         Tensor: The output tensor.
     """
 
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 mid_channels,
-                 kernel_size=3,
-                 groups=None,
-                 stride=1,
-                 se_cfg=None,
-                 with_expand_conv=True,
-                 conv_cfg=None,
-                 norm_cfg=dict(type='BN'),
-                 act_cfg=dict(type='ReLU'),
-                 with_cp=False):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        mid_channels,
+        kernel_size=3,
+        groups=None,
+        stride=1,
+        se_cfg=None,
+        with_expand_conv=True,
+        conv_cfg=None,
+        norm_cfg=dict(type="BN"),
+        act_cfg=dict(type="ReLU"),
+        with_cp=False,
+    ):
         # Protect mutable default arguments
         norm_cfg = copy.deepcopy(norm_cfg)
         act_cfg = copy.deepcopy(act_cfg)
         super().__init__()
-        self.with_res_shortcut = (stride == 1 and in_channels == out_channels)
+        self.with_res_shortcut = stride == 1 and in_channels == out_channels
         assert stride in [1, 2]
         self.with_cp = with_cp
         self.with_se = se_cfg is not None
@@ -78,7 +80,8 @@ class InvertedResidual(nn.Module):
                 padding=0,
                 conv_cfg=conv_cfg,
                 norm_cfg=norm_cfg,
-                act_cfg=act_cfg)
+                act_cfg=act_cfg,
+            )
         self.depthwise_conv = ConvModule(
             in_channels=mid_channels,
             out_channels=mid_channels,
@@ -88,7 +91,8 @@ class InvertedResidual(nn.Module):
             groups=groups,
             conv_cfg=conv_cfg,
             norm_cfg=norm_cfg,
-            act_cfg=act_cfg)
+            act_cfg=act_cfg,
+        )
         if self.with_se:
             self.se = SELayer(**se_cfg)
         self.linear_conv = ConvModule(
@@ -99,10 +103,10 @@ class InvertedResidual(nn.Module):
             padding=0,
             conv_cfg=conv_cfg,
             norm_cfg=norm_cfg,
-            act_cfg=None)
+            act_cfg=None,
+        )
 
     def forward(self, x):
-
         def _inner_forward(x):
             out = x
 

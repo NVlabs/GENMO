@@ -1,14 +1,19 @@
-import numpy as np
 import cv2
+import numpy as np
 import torch
 import torch.nn.functional as F
-from motiondiff.models.mdm.so3 import so3_exp_map, so3_log_map
-from motiondiff.models.mdm.rotation_conversions import matrix_to_quaternion, quaternion_to_axis_angle, matrix_to_rotation_6d
-from hmr4d.utils.pylogger import Log
-from motiondiff.models.mdm.rotation_conversions import euler_angles_to_matrix
-import hmr4d.utils.matrix as matrix
 from einops import einsum, rearrange, repeat
+
+import hmr4d.utils.matrix as matrix
 from hmr4d.utils.geo.quaternion import qbetween
+from hmr4d.utils.pylogger import Log
+from motiondiff.models.mdm.rotation_conversions import (
+    euler_angles_to_matrix,
+    matrix_to_quaternion,
+    matrix_to_rotation_6d,
+    quaternion_to_axis_angle,
+)
+from motiondiff.models.mdm.so3 import so3_exp_map, so3_log_map
 
 
 def homo_points(points):
@@ -28,7 +33,9 @@ def apply_Ts_on_seq_points(points, Ts):
         Ts: (..., N, 4, 4)
     Returns: (..., N, 3)
     """
-    points = torch.torch.einsum("...ki,...i->...k", Ts[..., :3, :3], points) + Ts[..., :3, 3]
+    points = (
+        torch.torch.einsum("...ki,...i->...k", Ts[..., :3, :3], points) + Ts[..., :3, 3]
+    )
     return points
 
 
@@ -39,7 +46,9 @@ def apply_T_on_points(points, T):
         T: (..., 4, 4)
     Returns: (..., N, 3)
     """
-    points_T = torch.einsum("...ki,...ji->...jk", T[..., :3, :3], points) + T[..., None, :3, 3]
+    points_T = (
+        torch.einsum("...ki,...ji->...jk", T[..., :3, :3], points) + T[..., None, :3, 3]
+    )
     return points_T
 
 
@@ -215,7 +224,9 @@ def matrix_to_axis_angle_log_map(R):
     Returns:
         R: (*, 3)
     """
-    print("WARINING! I met singularity problem with this function, use matrix_to_axis_angle instead!")
+    print(
+        "WARINING! I met singularity problem with this function, use matrix_to_axis_angle instead!"
+    )
     ori_shape = R.shape[:-2]
     return so3_log_map(R.reshape(-1, 3, 3)).reshape(*ori_shape, 3)
 
@@ -240,7 +251,13 @@ def ransac_PnP(K, pts_2d, pts_3d, err_thr=10):
 
     try:
         _, rvec, tvec, inliers = cv2.solvePnPRansac(
-            pts_3d, pts_2d, K, dist_coeffs, reprojectionError=err_thr, iterationsCount=10000, flags=cv2.SOLVEPNP_EPNP
+            pts_3d,
+            pts_2d,
+            K,
+            dist_coeffs,
+            reprojectionError=err_thr,
+            iterationsCount=10000,
+            flags=cv2.SOLVEPNP_EPNP,
         )
 
         rotation = cv2.Rodrigues(rvec)[0]
@@ -283,6 +300,7 @@ def triangulate_point_ortho(Ts_w2c, c_p2d, **kwargs):
 
 def get_nearby_points(points, query_verts, padding=0.0, p=1):
     import pytorch3d.ops.knn as knn
+
     """
     points: (S, 3)
     query_verts: (V, 3)
@@ -290,10 +308,19 @@ def get_nearby_points(points, query_verts, padding=0.0, p=1):
     if p == 1:
         max_xyz = query_verts.max(0)[0] + padding
         min_xyz = query_verts.min(0)[0] - padding
-        idx = (((points - min_xyz) > 0).all(dim=-1) * ((points - max_xyz) < 0).all(dim=-1)).nonzero().squeeze(-1)
+        idx = (
+            (
+                ((points - min_xyz) > 0).all(dim=-1)
+                * ((points - max_xyz) < 0).all(dim=-1)
+            )
+            .nonzero()
+            .squeeze(-1)
+        )
         nearby_points = points[idx]
     elif p == 2:
-        squared_dist, _, _ = knn.knn_points(points[None], query_verts[None], K=1, return_nn=False)
+        squared_dist, _, _ = knn.knn_points(
+            points[None], query_verts[None], K=1, return_nn=False
+        )
         mask = squared_dist[0, :, 0] < padding**2  # (S,)
         nearby_points = points[mask]
 
@@ -306,7 +333,13 @@ def unproj_bbx_to_fst(bbx_lurb, K, near_z=0.5, far_z=12.5):
     if isinstance(near_z, float):
         z = uv.new([near_z] * 4 + [far_z] * 4).reshape(1, 8, 1).repeat(B, 1, 1)
     else:
-        z = torch.cat([near_z[:, None, None].repeat(1, 4, 1), far_z[:, None, None].repeat(1, 4, 1)], dim=1)
+        z = torch.cat(
+            [
+                near_z[:, None, None].repeat(1, 4, 1),
+                far_z[:, None, None].repeat(1, 4, 1),
+            ],
+            dim=1,
+        )
     c_frustum_points = unproject_p2d(uv, z, K)  # (B, 8, 3)
     return c_frustum_points
 
@@ -347,10 +380,16 @@ def compute_T_ayf2az(joints, inverse=False):
     t_ayf2az = joints[:, 0, :].detach().clone()
     t_ayf2az[:, 2] = 0  # do not modify z
 
-    RL_xy_h = joints[:, 1, [0, 1]] - joints[:, 2, [0, 1]]  # (B, 2), hip point to left side
-    RL_xy_s = joints[:, 16, [0, 1]] - joints[:, 17, [0, 1]]  # (B, 2), shoulder point to left side
+    RL_xy_h = (
+        joints[:, 1, [0, 1]] - joints[:, 2, [0, 1]]
+    )  # (B, 2), hip point to left side
+    RL_xy_s = (
+        joints[:, 16, [0, 1]] - joints[:, 17, [0, 1]]
+    )  # (B, 2), shoulder point to left side
     RL_xy = RL_xy_h + RL_xy_s
-    I_mask = RL_xy.pow(2).sum(-1) < 1e-4  # do not rotate, when can't decided the face direction
+    I_mask = (
+        RL_xy.pow(2).sum(-1) < 1e-4
+    )  # do not rotate, when can't decided the face direction
     if I_mask.sum() > 0:
         Log.warn("{} samples can't decide the face direction".format(I_mask.sum()))
     x_dir = F.pad(F.normalize(RL_xy, 2, -1), (0, 1), value=0)  # (B, 3)
@@ -381,10 +420,16 @@ def compute_T_ayfz2ay(joints, inverse=False):
     t_ayfz2ay = joints[:, 0, :].detach().clone()
     t_ayfz2ay[:, 1] = 0  # do not modify y
 
-    RL_xz_h = joints[:, 1, [0, 2]] - joints[:, 2, [0, 2]]  # (B, 2), hip point to left side
-    RL_xz_s = joints[:, 16, [0, 2]] - joints[:, 17, [0, 2]]  # (B, 2), shoulder point to left side
+    RL_xz_h = (
+        joints[:, 1, [0, 2]] - joints[:, 2, [0, 2]]
+    )  # (B, 2), hip point to left side
+    RL_xz_s = (
+        joints[:, 16, [0, 2]] - joints[:, 17, [0, 2]]
+    )  # (B, 2), shoulder point to left side
     RL_xz = RL_xz_h + RL_xz_s
-    I_mask = RL_xz.pow(2).sum(-1) < 1e-4  # do not rotate, when can't decided the face direction
+    I_mask = (
+        RL_xz.pow(2).sum(-1) < 1e-4
+    )  # do not rotate, when can't decided the face direction
     if I_mask.sum() > 0:
         Log.warn("{} samples can't decide the face direction".format(I_mask.sum()))
 
@@ -437,10 +482,16 @@ def compute_root_quaternion_ay(joints):
     t_ayfz2ay = joints[:, 0, :].detach().clone()
     t_ayfz2ay[:, 1] = 0  # do not modify y
 
-    RL_xz_h = joints[:, 1, [0, 2]] - joints[:, 2, [0, 2]]  # (B, 2), hip point to left side
-    RL_xz_s = joints[:, 16, [0, 2]] - joints[:, 17, [0, 2]]  # (B, 2), shoulder point to left side
+    RL_xz_h = (
+        joints[:, 1, [0, 2]] - joints[:, 2, [0, 2]]
+    )  # (B, 2), hip point to left side
+    RL_xz_s = (
+        joints[:, 16, [0, 2]] - joints[:, 17, [0, 2]]
+    )  # (B, 2), shoulder point to left side
     RL_xz = RL_xz_h + RL_xz_s
-    I_mask = RL_xz.pow(2).sum(-1) < 1e-4  # do not rotate, when can't decided the face direction
+    I_mask = (
+        RL_xz.pow(2).sum(-1) < 1e-4
+    )  # do not rotate, when can't decided the face direction
     if I_mask.sum() > 0:
         Log.warn("{} samples can't decide the face direction".format(I_mask.sum()))
 
@@ -569,7 +620,9 @@ def compute_cam_angvel(R_w2c, padding_last=True):
     R_w2c : (F, 3, 3)
     """
     # R @ R0 = R1, so R = R1 @ R0^T
-    cam_angvel = matrix_to_rotation_6d(R_w2c[1:] @ R_w2c[:-1].transpose(-1, -2))  # (F-1, 6)
+    cam_angvel = matrix_to_rotation_6d(
+        R_w2c[1:] @ R_w2c[:-1].transpose(-1, -2)
+    )  # (F-1, 6)
     # cam_angvel = (cam_angvel - torch.tensor([[1, 0, 0, 0, 1, 0]])) * FPS
     assert padding_last
     cam_angvel = torch.cat([cam_angvel, cam_angvel[-1:]], dim=0)  # (F, 6)
@@ -580,7 +633,7 @@ def compute_cam_tvel(t_w2c, padding_last=True):
     """
     t_w2c : (F, 3)
     """
-    cam_tvel = (t_w2c[1:] - t_w2c[:-1])
+    cam_tvel = t_w2c[1:] - t_w2c[:-1]
     assert padding_last
     cam_tvel = torch.cat([cam_tvel, cam_tvel[-1:]], dim=0)  # (F, 3)
     return cam_tvel.float()
@@ -596,7 +649,6 @@ def compute_cam_tcw2_vel(T_w2c, padding_last=True):
     assert padding_last
     cam_tvel = torch.cat([cam_tvel, cam_tvel[-1:]], dim=0)  # (F, 3)
     return cam_tvel.float()
-
 
 
 def ransac_gravity_vec(xyz, num_iterations=100, threshold=0.05, verbose=False):
@@ -650,7 +702,9 @@ def sequence_best_cammat(w_j3d, c_j3d, cam_rot):
     w_j3d_expand = w_j3d_expand.reshape(L, -1, 3)  # (L, L*J, 3)
 
     # get reproject error
-    w_j3d_expand_in_c = matrix.get_relative_position_to(w_j3d_expand, cam_mat)  # (L, L*J, 3)
+    w_j3d_expand_in_c = matrix.get_relative_position_to(
+        w_j3d_expand, cam_mat
+    )  # (L, L*J, 3)
     w_j2d_expand_in_c = project_p2d(w_j3d_expand_in_c)  # (L, L*J, 2)
     w_j2d_expand_in_c = w_j2d_expand_in_c.reshape(L, L, J, 2)  # (L, L, J, 2)
     c_j2d = project_p2d(c_j3d)  # (L, J, 2)

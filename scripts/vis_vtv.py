@@ -1,24 +1,24 @@
-import torch
-import os
-import cv2
-
-import open3d as o3d
-import numpy as np
-from tqdm import tqdm
 import json
+import os
+
+import cv2
 import matplotlib.pyplot as plt
-from hmr4d.utils.smplx_utils import make_smplx
+import numpy as np
 import open3d as o3d
-from hmr4d.utils.vis.o3d_render import get_ground, create_meshes, Settings
-from hmr4d.utils.geo_transform import apply_T_on_points, compute_T_ayfz2ay
+import torch
 from einops import einsum, rearrange
+from tqdm import tqdm
+
+from hmr4d.utils.geo_transform import apply_T_on_points, compute_T_ayfz2ay
+from hmr4d.utils.smplx_utils import make_smplx
+from hmr4d.utils.video_io_utils import get_video_lwh, get_video_reader, get_writer
+from hmr4d.utils.vis.o3d_render import Settings, create_meshes, get_ground
 from hmr4d.utils.vis.renderer import (
     Renderer,
     get_global_cameras_static,
     get_global_cameras_static_v2,
     get_ground_params_from_points,
 )
-from hmr4d.utils.video_io_utils import get_video_lwh, get_video_reader, get_writer
 
 CRF = 23  # 17 is lossless, every +6 halves the mp4 size
 
@@ -61,9 +61,9 @@ def compute_look_at(cam_R, cam_T):
     return camera_position, camera_target, world_up_vector
 
 
-
 def convert_image_to_mesh(img, offset, R_c2w):
     import open3d as o3d
+
     img = np.asarray(img)
 
     # Instead of backprojecting, just convert img to an actual 3D plane with Z=0
@@ -76,13 +76,15 @@ def convert_image_to_mesh(img, offset, R_c2w):
 
     # Scale down before making 3D vertices
     x_loc = x_loc / xvalues.shape[0] * 1.5
-    y_loc = y_loc / xvalues.shape[0] * 1.5  # Keep aspect ratio same by dividing with same denominator. Now image width is 1 meter in 3d.
+    y_loc = (
+        y_loc / xvalues.shape[0] * 1.5
+    )  # Keep aspect ratio same by dividing with same denominator. Now image width is 1 meter in 3d.
 
     vertices = np.stack((x_loc, y_loc, z_loc), axis=2).reshape(-1, 3)
     vertices = np.matmul(R_c2w, vertices.T).T
     vertices = vertices + offset[None]
 
-    vertex_colors = img.reshape(-1, 3)/255.0
+    vertex_colors = img.reshape(-1, 3) / 255.0
 
     # Create triangles between each pair of neighboring vertices
     # Connect positions (i,j), (i+1,j) and (i,j+1) to make one triangle and (i, j+1), (i+1,j) and (i+1,j+1) to make
@@ -91,13 +93,21 @@ def convert_image_to_mesh(img, offset, R_c2w):
 
     vertex_positions = np.arange(xvalues.size * yvalues.size)
     # Reshape into 2D grid and discard last row and column
-    vertex_positions = vertex_positions.reshape(yvalues.size, xvalues.size)[:-1, :-1].flatten()
+    vertex_positions = vertex_positions.reshape(yvalues.size, xvalues.size)[
+        :-1, :-1
+    ].flatten()
 
     # Now create triangles (keep vertices in anticlockwise order when making triangles)
-    top_triangles = np.vstack(((vertex_positions+1, vertex_positions, vertex_positions+xvalues.shape[0]))).transpose(1, 0)
+    top_triangles = np.vstack(
+        ((vertex_positions + 1, vertex_positions, vertex_positions + xvalues.shape[0]))
+    ).transpose(1, 0)
     vertex_positions = np.arange(xvalues.size * yvalues.size)
-    vertex_positions = vertex_positions.reshape(yvalues.size, xvalues.size)[1:, 1:].flatten()
-    bottom_triangles = np.vstack(((vertex_positions-1, vertex_positions, vertex_positions-xvalues.shape[0]))).transpose(1, 0)
+    vertex_positions = vertex_positions.reshape(yvalues.size, xvalues.size)[
+        1:, 1:
+    ].flatten()
+    bottom_triangles = np.vstack(
+        ((vertex_positions - 1, vertex_positions, vertex_positions - xvalues.shape[0]))
+    ).transpose(1, 0)
     triangles = np.vstack((top_triangles, bottom_triangles))
 
     mesh: o3d.geometry.TriangleMesh = o3d.geometry.TriangleMesh(

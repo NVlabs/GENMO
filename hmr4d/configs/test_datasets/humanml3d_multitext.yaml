@@ -7,12 +7,13 @@ humanml3d_eval:
   random_subset_seed: 7
   use_multi_text: true
   limit_size: 1
-  # multi_text_vid: ['006120', 'M008933', '005521'] 
+  # multi_text_vid: ['006120', 'M008933', '005521']
   # multi_text_vid: ['011102', 'M008933', '005521']
   # multi_text_vid: ['M010779', 'M008036', 'M003882', '010708', '005521', 'M003633']
   # ['a person waves their right hand over their head in a friendly gesture.', 'a person attempts to do a handstand.', 'a figure does jumping jacks standing in place. it lifts its arms to shoulder length while jumping and spreading their legs to about shoulder length as well before returning to its starting position and dose this a total of three times.', 'this person does a high kick with his right leg.', 'a person dancing around like a monkey.', 'person is walking ahead.']
   # multi_text_vid: ['M010779', 'M010623', 'M008036', '010708', '005521', 'M002841']
-  # 
+  #
   # multi_text_vid: ['M006962', 'M010623', 'M008036', '010708', '005521', 'M003633']
   # multi_text_vid: ['M010779', 'M010623', 'M008036', '010708', '005521', 'M003917']
-  multi_text_vid: ['M010779', 'M003918', 'M008036', '010708', '005521', 'M003917']
+  multi_text_vid:
+    ["M010779", "M003918", "M008036", "010708", "005521", "M003917"]

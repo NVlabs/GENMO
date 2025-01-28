@@ -1,23 +1,29 @@
-import torch
-from tqdm import tqdm
 import glob
+import os
+import random
+import time
+
 import cv2
 import numpy as np
-import time
-import os
+import torch
 from occ_utils import rand_img_clip_transforms2
-from hmr4d.utils.preproc import Tracker, Extractor, VitPoseExtractor, SLAMModel
-import random
+from tqdm import tqdm
+
+from hmr4d.utils.preproc import Extractor, SLAMModel, Tracker, VitPoseExtractor
 
 emdb_root = "/mnt/dhd/body-pose-dataset/EMDB"
 
 
 def draw_bbox(img, bbx_xys):
     x, y, s = bbx_xys
-    cv2.rectangle(img, (int(x-s/2), int(y-s/2)), (int(x+s/2), int(y+s/2)), (0, 0, 255), 2)
+    cv2.rectangle(
+        img,
+        (int(x - s / 2), int(y - s / 2)),
+        (int(x + s / 2), int(y + s / 2)),
+        (0, 0, 255),
+        2,
+    )
     return img
-
-
 
 
 if __name__ == "__main__":
@@ -25,7 +31,7 @@ if __name__ == "__main__":
     device = "cuda:1"
     tic = time.time()
     feat_extractor = Extractor(device=device, tqdm_leave=True)
-    print('Finished loading features extractor:', time.time() - tic)
+    print("Finished loading features extractor:", time.time() - tic)
     tic = time.time()
     os.makedirs("outputs/tmp_emdb_occ_flip/f_dict", exist_ok=True)
 
@@ -36,13 +42,13 @@ if __name__ == "__main__":
         if os.path.exists(f"outputs/tmp_emdb_occ_flip/f_dict/{vid}.pt"):
             label_occ = torch.load(f"outputs/tmp_emdb_occ_flip/f_dict/{vid}.pt")
             continue
-        bar.set_description(f'Processing {vid}:')
-        pid = vid.split('_')[0]
+        bar.set_description(f"Processing {vid}:")
+        pid = vid.split("_")[0]
         dir_name = "_".join(vid.split("_")[1:])
         label = labels[vid]
 
         bbx_xys = label["bbx_xys"]
-        img_dir = f'{emdb_root}/{pid}/{dir_name}/images'
+        img_dir = f"{emdb_root}/{pid}/{dir_name}/images"
 
         imgnames = sorted(glob.glob(f"{img_dir}/*.jpg"))
 
@@ -56,8 +62,11 @@ if __name__ == "__main__":
                 imgnames, bbx_xys, batch_size=32, path_type="image_list", flip=True
             )
         flipped_bbx_xys = bbx_xys.clone()
-        flipped_bbx_xys[..., 0] = width - bbx_xys[..., 0] - 1 
-        assert vit_features.shape == label['features'].shape, (vit_features.shape, label['features'].shape)
+        flipped_bbx_xys[..., 0] = width - bbx_xys[..., 0] - 1
+        assert vit_features.shape == label["features"].shape, (
+            vit_features.shape,
+            label["features"].shape,
+        )
 
         data = {
             "features": vit_features,

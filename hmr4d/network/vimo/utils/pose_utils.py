@@ -2,10 +2,10 @@
 Code adapted from: https://github.com/akanazawa/hmr/blob/master/src/benchmark/eval_util.py
 """
 
-import torch
-import numpy as np
-from typing import Optional, Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
+import numpy as np
+import torch
 from lib.core import constants
 
 
@@ -39,6 +39,7 @@ def compute_error_accel(joints_gt, joints_pred, vis=None):
 
     return np.mean(normed[new_vis], axis=1)
 
+
 def compute_similarity_transform(S1: torch.Tensor, S2: torch.Tensor) -> torch.Tensor:
     """
     Computes a similarity transform (sR, t) in a batched way that takes
@@ -62,7 +63,7 @@ def compute_similarity_transform(S1: torch.Tensor, S2: torch.Tensor) -> torch.Te
     X2 = S2 - mu2
 
     # 2. Compute variance of X1 used for scale.
-    var1 = (X1**2).sum(dim=(1,2))
+    var1 = (X1**2).sum(dim=(1, 2))
 
     # 3. The outer product of X1 and X2.
     K = torch.matmul(X1, X2.permute(0, 2, 1))
@@ -83,12 +84,13 @@ def compute_similarity_transform(S1: torch.Tensor, S2: torch.Tensor) -> torch.Te
     scale = (trace / var1).unsqueeze(dim=-1).unsqueeze(dim=-1)
 
     # 6. Recover translation.
-    t = mu2 - scale*torch.matmul(R, mu1)
+    t = mu2 - scale * torch.matmul(R, mu1)
 
     # 7. Error:
-    S1_hat = scale*torch.matmul(R, S1) + t
+    S1_hat = scale * torch.matmul(R, S1) + t
 
     return S1_hat.permute(0, 2, 1)
+
 
 def reconstruction_error(S1, S2) -> np.array:
     """
@@ -100,8 +102,9 @@ def reconstruction_error(S1, S2) -> np.array:
         (np.array): Reconstruction error.
     """
     S1_hat = compute_similarity_transform(S1, S2)
-    re = torch.sqrt( ((S1_hat - S2)** 2).sum(dim=-1)).mean(dim=-1)
+    re = torch.sqrt(((S1_hat - S2) ** 2).sum(dim=-1)).mean(dim=-1)
     return re.cpu().numpy()
+
 
 def eval_pose(pred_joints, gt_joints) -> Tuple[np.array, np.array]:
     """
@@ -113,14 +116,19 @@ def eval_pose(pred_joints, gt_joints) -> Tuple[np.array, np.array]:
         Tuple[np.array, np.array]: Joint errors in mm before and after alignment.
     """
     # Absolute error (MPJPE)
-    mpjpe = torch.sqrt(((pred_joints - gt_joints) ** 2).sum(dim=-1)).mean(dim=-1).cpu().numpy()
+    mpjpe = (
+        torch.sqrt(((pred_joints - gt_joints) ** 2).sum(dim=-1))
+        .mean(dim=-1)
+        .cpu()
+        .numpy()
+    )
 
     # Reconstuction_error
     r_error = reconstruction_error(pred_joints.cpu(), gt_joints.cpu())
     return 1000 * mpjpe, 1000 * r_error
 
-class Evaluator:
 
+class Evaluator:
     def __init__(self, dataset_length=None, seq_len=None):
         """
         Class used for evaluating trained models on different 3D pose datasets.
@@ -132,7 +140,7 @@ class Evaluator:
         """
         self.dataset_length = dataset_length
         self.seq_len = seq_len
-        
+
         self.mpjpe = np.zeros((dataset_length,))
         self.re = np.zeros((dataset_length,))
         self.pve = np.zeros((dataset_length,))
@@ -145,30 +153,33 @@ class Evaluator:
         self.H36M_TO_J14 = constants.H36M_TO_J14
         self.all_acc = []
 
-
-    def __call__(self, gt_keypoints_3d, pred_keypoints_3d, dataset='3dpw', 
-                gt_verts=None, pred_verts=None):
-
+    def __call__(
+        self,
+        gt_keypoints_3d,
+        pred_keypoints_3d,
+        dataset="3dpw",
+        gt_verts=None,
+        pred_verts=None,
+    ):
         batch_size = gt_keypoints_3d.shape[0]
 
         gt_keypoints_3d = gt_keypoints_3d[:, :, :3].detach()
         pred_keypoints_3d = pred_keypoints_3d[:, :, :3].detach()
         num_j = gt_keypoints_3d.shape[1]
-        
-        gt_valid, pred_valid = self.get_valid_joints(gt_keypoints_3d, 
-                                                     pred_keypoints_3d, 
-                                                     dataset)
 
+        gt_valid, pred_valid = self.get_valid_joints(
+            gt_keypoints_3d, pred_keypoints_3d, dataset
+        )
 
         # Compute joint errors
         mpjpe, re = eval_pose(pred_valid, gt_valid)
 
-        self.mpjpe[self.counter:self.counter+batch_size] = mpjpe
-        self.re[self.counter:self.counter+batch_size] = re
-        
+        self.mpjpe[self.counter : self.counter + batch_size] = mpjpe
+        self.re[self.counter : self.counter + batch_size] = re
+
         if gt_verts is not None and pred_verts is not None:
             pve = (pred_verts - gt_verts).norm(dim=-1).mean(dim=-1).cpu().numpy()
-            self.pve[self.counter:self.counter+batch_size] = pve * 1000
+            self.pve[self.counter : self.counter + batch_size] = pve * 1000
 
         if self.seq_len is not None:
             gt = gt_keypoints_3d.reshape(-1, self.seq_len, num_j, 3).cpu()
@@ -176,14 +187,13 @@ class Evaluator:
             acc = 0
             for i in range(len(gt)):
                 acc += compute_error_accel(gt[i], pred[i]).mean() / len(gt)
-            
-            self.acc[self.counter:self.counter+batch_size] = acc * 1000 #(30**2)
-            
+
+            self.acc[self.counter : self.counter + batch_size] = acc * 1000  # (30**2)
+
         self.counter += batch_size
 
-
     def get_valid_joints(self, gt_keypoints_3d, pred_keypoints_3d, dataset):
-        if 'emdb' in dataset:
+        if "emdb" in dataset:
             gt_valid = gt_keypoints_3d
             pred_valid = pred_keypoints_3d
 
@@ -196,48 +206,41 @@ class Evaluator:
 
         return gt_valid, pred_valid
 
-
     def get_gt_mapper(self, dataset):
-
-        if dataset == 'mpi-inf-3dhp':
+        if dataset == "mpi-inf-3dhp":
             j_mapper = self.J24_TO_J17
 
-        elif dataset == 'h36m':
+        elif dataset == "h36m":
             j_mapper = self.J24_TO_J14
 
-        elif dataset == '3dpw':
+        elif dataset == "3dpw":
             j_mapper = self.H36M_TO_J14
 
         return j_mapper
-
 
     def get_pred_mapper(self, dataset):
-        
-        if dataset == 'mpi-inf-3dhp':
+        if dataset == "mpi-inf-3dhp":
             j_mapper = self.H36M_TO_J17
 
-        elif dataset == 'h36m':
+        elif dataset == "h36m":
             j_mapper = self.H36M_TO_J14
 
-        elif dataset == '3dpw':
+        elif dataset == "3dpw":
             j_mapper = self.H36M_TO_J14
 
         return j_mapper
-
 
     def log(self):
         """
         Print current evaluation metrics
         """
         if self.counter == 0:
-            print('Evaluation has not started')
+            print("Evaluation has not started")
             return
 
-        print(f'{self.counter} / {self.dataset_length} samples')
-        print(f're: {self.re[:self.counter].mean()} mm')
-        print(f'mpjpe: {self.mpjpe[:self.counter].mean()} mm')
-        print(f'pve: {self.pve[:self.counter].mean()} mm')
-        print(f'accel: {self.acc[:self.counter].mean()} mm')
-        print('***')
-
-
+        print(f"{self.counter} / {self.dataset_length} samples")
+        print(f"re: {self.re[: self.counter].mean()} mm")
+        print(f"mpjpe: {self.mpjpe[: self.counter].mean()} mm")
+        print(f"pve: {self.pve[: self.counter].mean()} mm")
+        print(f"accel: {self.acc[: self.counter].mean()} mm")
+        print("***")

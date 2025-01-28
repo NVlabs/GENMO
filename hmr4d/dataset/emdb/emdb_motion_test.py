@@ -1,21 +1,24 @@
 from pathlib import Path
+
 import numpy as np
 import torch
 from torch.utils import data
-from hmr4d.utils.pylogger import Log
-from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
 
-from hmr4d.utils.geo_transform import compute_cam_angvel, compute_cam_tvel
-from motiondiff.models.mdm.rotation_conversions import quaternion_to_matrix
-from hmr4d.utils.geo.hmr_cam import estimate_K, resize_K
 from hmr4d.utils.geo.flip_utils import flip_kp2d_coco17
+from hmr4d.utils.geo.hmr_cam import estimate_K, resize_K
+from hmr4d.utils.geo_transform import (
+    compute_cam_angvel,
+    compute_cam_tvel,
+    normalize_T_w2c,
+)
+from hmr4d.utils.pylogger import Log
+from hmr4d.utils.wis3d_utils import add_motion_as_lines, make_wis3d
 from motiondiff.models.mdm.rotation_conversions import (
     axis_angle_to_matrix,
     matrix_to_axis_angle,
     matrix_to_quaternion,
     quaternion_to_matrix,
 )
-from hmr4d.utils.geo_transform import normalize_T_w2c
 
 from .utils import EMDB1_NAMES, EMDB2_NAMES
 
@@ -23,6 +26,7 @@ VID_PRESETS = {1: EMDB1_NAMES, 2: EMDB2_NAMES}
 
 
 from hmr4d.configs import MainStore, builds
+
 
 def as_identity(R):
     is_I = matrix_to_axis_angle(R).norm(dim=-1) < 1e-5
@@ -47,17 +51,23 @@ class EmdbSmplFullSeqDataset(data.Dataset):
         self.emdb_dir = Path("inputs/EMDB/hmr4d_support")
         # 'name', 'gender', 'smpl_params', 'mask', 'K_fullimg', 'T_w2c', 'bbx_xys', 'kp2d', 'features'
         self.labels = torch.load(self.emdb_dir / "emdb_vit_v4.pt")
-        self.cam_traj = torch.load(self.emdb_dir / "emdb_dpvo_traj.pt")  # estimated with DPVO
+        self.cam_traj = torch.load(
+            self.emdb_dir / "emdb_dpvo_traj.pt"
+        )  # estimated with DPVO
 
         self.vimo_labels = torch.load(self.emdb_dir / "emdb_vimo.pt")
-        self.droid_cam_traj = torch.load(self.emdb_dir / "emdb_slam_traj.pt")  # estimated with SLAM
+        self.droid_cam_traj = torch.load(
+            self.emdb_dir / "emdb_slam_traj.pt"
+        )  # estimated with SLAM
 
         # Setup dataset index
         self.idx2meta = []
         for vid in VID_PRESETS[split]:
             seq_length = len(self.labels[vid]["mask"])
             self.idx2meta.append((vid, 0, seq_length))  # start=0, end=seq_length
-        Log.info(f"[{self.dataset_name}] {len(self.idx2meta)} sequences. Elapsed: {Log.time() - tic:.2f}s")
+        Log.info(
+            f"[{self.dataset_name}] {len(self.idx2meta)} sequences. Elapsed: {Log.time() - tic:.2f}s"
+        )
 
         # If flip_test is enabled, we will return extra data for flipped test
         self.flip_test = flip_test
@@ -73,7 +83,11 @@ class EmdbSmplFullSeqDataset(data.Dataset):
         # [vid, start, end]
         vid, start, end = self.idx2meta[idx]
         length = end - start
-        meta = {"dataset_id": self.dataset_id, "vid": vid, "vid-start-end": (start, end)}
+        meta = {
+            "dataset_id": self.dataset_id,
+            "vid": vid,
+            "vid-start-end": (start, end),
+        }
         data.update({"meta": meta, "length": length})
 
         label = self.labels[vid]
@@ -86,13 +100,13 @@ class EmdbSmplFullSeqDataset(data.Dataset):
         mask = label["mask"]
         data.update({"smpl_params": smpl_params, "gender": gender, "mask": mask})
         vimo_smpl_params = {
-            'pred_cam': vimo_label['vimo_params']['pred_cam'],
-            'pred_pose': vimo_label['vimo_params']['pred_pose'],
-            'pred_shape': vimo_label['vimo_params']['pred_shape'],
-            'pred_trans_c': vimo_label['vimo_params']['pred_trans'],
+            "pred_cam": vimo_label["vimo_params"]["pred_cam"],
+            "pred_pose": vimo_label["vimo_params"]["pred_pose"],
+            "pred_shape": vimo_label["vimo_params"]["pred_shape"],
+            "pred_trans_c": vimo_label["vimo_params"]["pred_trans"],
         }
 
-        data.update({'vimo_smpl_params': vimo_smpl_params})
+        data.update({"vimo_smpl_params": vimo_smpl_params})
 
         # camera
         # load droid slam
@@ -110,17 +124,19 @@ class EmdbSmplFullSeqDataset(data.Dataset):
         K_fullimg = estimate_K(*width_height)
         # T_w2c = label["T_w2c"]  # use GT camera trajectory
         gt_T_w2c = label["T_w2c"]
-        data.update({
-            "K_fullimg": K_fullimg,
-            "T_w2c": T_w2c,
-            'scales': scales,
-            'mean_scale': mean_scale,
-            'gt_T_w2c': gt_T_w2c
-        })
+        data.update(
+            {
+                "K_fullimg": K_fullimg,
+                "T_w2c": T_w2c,
+                "scales": scales,
+                "mean_scale": mean_scale,
+                "gt_T_w2c": gt_T_w2c,
+            }
+        )
 
-        if 'vimo_params_flip' in vimo_label:
-            flipped_trans_c = vimo_label['vimo_params_flip']['pred_trans']
-            orig_trans_c = data['vimo_smpl_params']['pred_trans_c']
+        if "vimo_params_flip" in vimo_label:
+            flipped_trans_c = vimo_label["vimo_params_flip"]["pred_trans"]
+            orig_trans_c = data["vimo_smpl_params"]["pred_trans_c"]
             tz = flipped_trans_c[..., 2]
             tx = flipped_trans_c[..., 0]
             focal = K_fullimg[0, 0]
@@ -133,7 +149,7 @@ class EmdbSmplFullSeqDataset(data.Dataset):
             avg_trans_c[..., 0] = orig_trans_c[..., 0]
             avg_trans_c[..., 1] = (flipped_trans_c[..., 1] + orig_trans_c[..., 1]) / 2
             avg_trans_c[..., 2] = (tz + orig_trans_c[..., 2]) / 2
-            data['vimo_smpl_params']['pred_trans_c'] = avg_trans_c
+            data["vimo_smpl_params"]["pred_trans_c"] = avg_trans_c
 
         # R_w2c -> cam_angvel
         use_DPVO = False
@@ -254,6 +270,8 @@ MainStore.store(
 )
 MainStore.store(
     name="v1_fliptest",
-    node=builds(EmdbSmplFullSeqDataset, split=2, flip_test=True, populate_full_signature=True),
+    node=builds(
+        EmdbSmplFullSeqDataset, split=2, flip_test=True, populate_full_signature=True
+    ),
     group="test_datasets/emdb2",
 )

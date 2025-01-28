@@ -53,18 +53,20 @@ class SplitAttentionConv2d(nn.Module):
         norm_cfg (dict): Config dict for normalization layer. Default: None.
     """
 
-    def __init__(self,
-                 in_channels,
-                 channels,
-                 kernel_size,
-                 stride=1,
-                 padding=0,
-                 dilation=1,
-                 groups=1,
-                 radix=2,
-                 reduction_factor=4,
-                 conv_cfg=None,
-                 norm_cfg=dict(type='BN')):
+    def __init__(
+        self,
+        in_channels,
+        channels,
+        kernel_size,
+        stride=1,
+        padding=0,
+        dilation=1,
+        groups=1,
+        radix=2,
+        reduction_factor=4,
+        conv_cfg=None,
+        norm_cfg=dict(type="BN"),
+    ):
         super().__init__()
         inter_channels = max(in_channels * radix // reduction_factor, 32)
         self.radix = radix
@@ -79,18 +81,19 @@ class SplitAttentionConv2d(nn.Module):
             padding=padding,
             dilation=dilation,
             groups=groups * radix,
-            bias=False)
-        self.norm0_name, norm0 = build_norm_layer(
-            norm_cfg, channels * radix, postfix=0)
+            bias=False,
+        )
+        self.norm0_name, norm0 = build_norm_layer(norm_cfg, channels * radix, postfix=0)
         self.add_module(self.norm0_name, norm0)
         self.relu = nn.ReLU(inplace=True)
         self.fc1 = build_conv_layer(
-            None, channels, inter_channels, 1, groups=self.groups)
-        self.norm1_name, norm1 = build_norm_layer(
-            norm_cfg, inter_channels, postfix=1)
+            None, channels, inter_channels, 1, groups=self.groups
+        )
+        self.norm1_name, norm1 = build_norm_layer(norm_cfg, inter_channels, postfix=1)
         self.add_module(self.norm1_name, norm1)
         self.fc2 = build_conv_layer(
-            None, inter_channels, channels * radix, 1, groups=self.groups)
+            None, inter_channels, channels * radix, 1, groups=self.groups
+        )
         self.rsoftmax = RSoftmax(radix, groups)
 
     @property
@@ -159,16 +162,18 @@ class Bottleneck(_Bottleneck):
             memory while slowing down the training speed.
     """
 
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 groups=1,
-                 width_per_group=4,
-                 base_channels=64,
-                 radix=2,
-                 reduction_factor=4,
-                 avg_down_stride=True,
-                 **kwargs):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        groups=1,
+        width_per_group=4,
+        base_channels=64,
+        radix=2,
+        reduction_factor=4,
+        avg_down_stride=True,
+        **kwargs,
+    ):
         super().__init__(in_channels, out_channels, **kwargs)
 
         self.groups = groups
@@ -180,14 +185,17 @@ class Bottleneck(_Bottleneck):
         if groups != 1:
             assert self.mid_channels % base_channels == 0
             self.mid_channels = (
-                groups * width_per_group * self.mid_channels // base_channels)
+                groups * width_per_group * self.mid_channels // base_channels
+            )
 
         self.avg_down_stride = avg_down_stride and self.conv2_stride > 1
 
         self.norm1_name, norm1 = build_norm_layer(
-            self.norm_cfg, self.mid_channels, postfix=1)
+            self.norm_cfg, self.mid_channels, postfix=1
+        )
         self.norm3_name, norm3 = build_norm_layer(
-            self.norm_cfg, self.out_channels, postfix=3)
+            self.norm_cfg, self.out_channels, postfix=3
+        )
 
         self.conv1 = build_conv_layer(
             self.conv_cfg,
@@ -195,7 +203,8 @@ class Bottleneck(_Bottleneck):
             self.mid_channels,
             kernel_size=1,
             stride=self.conv1_stride,
-            bias=False)
+            bias=False,
+        )
         self.add_module(self.norm1_name, norm1)
         self.conv2 = SplitAttentionConv2d(
             self.mid_channels,
@@ -208,7 +217,8 @@ class Bottleneck(_Bottleneck):
             radix=radix,
             reduction_factor=reduction_factor,
             conv_cfg=self.conv_cfg,
-            norm_cfg=self.norm_cfg)
+            norm_cfg=self.norm_cfg,
+        )
         delattr(self, self.norm2_name)
 
         if self.avg_down_stride:
@@ -219,11 +229,11 @@ class Bottleneck(_Bottleneck):
             self.mid_channels,
             self.out_channels,
             kernel_size=1,
-            bias=False)
+            bias=False,
+        )
         self.add_module(self.norm3_name, norm3)
 
     def forward(self, x):
-
         def _inner_forward(x):
             identity = x
 
@@ -309,17 +319,19 @@ class ResNeSt(ResNetV1d):
         101: (Bottleneck, (3, 4, 23, 3)),
         152: (Bottleneck, (3, 8, 36, 3)),
         200: (Bottleneck, (3, 24, 36, 3)),
-        269: (Bottleneck, (3, 30, 48, 8))
+        269: (Bottleneck, (3, 30, 48, 8)),
     }
 
-    def __init__(self,
-                 depth,
-                 groups=1,
-                 width_per_group=4,
-                 radix=2,
-                 reduction_factor=4,
-                 avg_down_stride=True,
-                 **kwargs):
+    def __init__(
+        self,
+        depth,
+        groups=1,
+        width_per_group=4,
+        radix=2,
+        reduction_factor=4,
+        avg_down_stride=True,
+        **kwargs,
+    ):
         self.groups = groups
         self.width_per_group = width_per_group
         self.radix = radix
@@ -335,4 +347,5 @@ class ResNeSt(ResNetV1d):
             radix=self.radix,
             reduction_factor=self.reduction_factor,
             avg_down_stride=self.avg_down_stride,
-            **kwargs)
+            **kwargs,
+        )

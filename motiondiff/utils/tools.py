@@ -1,18 +1,19 @@
+import datetime
+import glob
+import importlib
+import itertools
 import os
 import os.path as osp
-import numpy as np
-import glob
-import datetime
-import itertools
 import subprocess
-import importlib
-import wandb
 import time
+
+import numpy as np
+import wandb
+
 # from torch.utils.data import DataLoader, Dataset, Sampler
 
 
 class AverageMeter(object):
-
     def __init__(self, avg=None, count=1):
         self.reset()
         if avg is not None:
@@ -20,9 +21,9 @@ class AverageMeter(object):
             self.avg = avg
             self.count = count
             self.sum = avg * count
-    
+
     def __repr__(self) -> str:
-        return f'{self.avg: .4f}'
+        return f"{self.avg: .4f}"
 
     def reset(self):
         self.val = 0
@@ -39,7 +40,7 @@ class AverageMeter(object):
 
 
 # class IndexSampler(Sampler):
-    
+
 #     def __init__(self, index):
 #         self.index = index
 
@@ -51,23 +52,27 @@ class AverageMeter(object):
 
 
 def worker_init_fn(worker_id):
-    os.environ['worker_id'] = str(worker_id)
+    os.environ["worker_id"] = str(worker_id)
     np.random.seed(np.random.get_state()[1][0] + worker_id * 7)
 
 
-def find_last_version(folder, prefix='version_', cp='last'):
-    version_folders = glob.glob(f'{folder}/{prefix}*')
+def find_last_version(folder, prefix="version_", cp="last"):
+    version_folders = glob.glob(f"{folder}/{prefix}*")
     if cp is not None:
-        if cp == 'last':
-            suffix = 'last.ckpt'
-        elif cp == 'best':
-            suffix = '*best*.ckpt'
+        if cp == "last":
+            suffix = "last.ckpt"
+        elif cp == "best":
+            suffix = "*best*.ckpt"
         elif cp.isdigit():
-            suffix = f'*{int(cp):07d}.ckpt'
+            suffix = f"*{int(cp):07d}.ckpt"
         else:
-            suffix = f'{cp}.ckpt'
-        version_folders = [x for x in version_folders if len(glob.glob(f'{x}/**/{suffix}')) > 0]
-    version_numbers = sorted([int(osp.basename(x)[len(prefix):]) for x in version_folders])
+            suffix = f"{cp}.ckpt"
+        version_folders = [
+            x for x in version_folders if len(glob.glob(f"{x}/**/{suffix}")) > 0
+        ]
+    version_numbers = sorted(
+        [int(osp.basename(x)[len(prefix) :]) for x in version_folders]
+    )
     if len(version_numbers) == 0:
         return None
     last_version = version_numbers[-1]
@@ -93,7 +98,7 @@ def find_consecutive_runs(x, min_len=1):
     # ensure array
     x = np.asanyarray(x)
     if x.ndim != 1:
-        raise ValueError('only 1D array supported')
+        raise ValueError("only 1D array supported")
     n = x.shape[0]
 
     # handle empty array
@@ -114,20 +119,22 @@ def find_consecutive_runs(x, min_len=1):
         run_lengths = run_lengths[ind]
 
         # find run values
-        run_values = [x[start: start + length] for start, length in zip(run_starts, run_lengths)]
+        run_values = [
+            x[start : start + length] for start, length in zip(run_starts, run_lengths)
+        ]
         # assert np.allclose(np.concatenate(run_values), x)
 
         return run_values, run_starts, run_lengths
 
 
 def get_checkpoint_path(checkpoint_dir, cp, return_name=False):
-    if cp == 'last':   # use last epoch
-        cp_name = 'last.ckpt'
-    elif cp == 'best': # use best epoch
-        cp_name = osp.basename(sorted(glob.glob(f'{checkpoint_dir}/*best*.ckpt'))[-1])
+    if cp == "last":  # use last epoch
+        cp_name = "last.ckpt"
+    elif cp == "best":  # use best epoch
+        cp_name = osp.basename(sorted(glob.glob(f"{checkpoint_dir}/*best*.ckpt"))[-1])
     else:
-        cp_name = osp.basename(sorted(glob.glob(f'{checkpoint_dir}/{cp}.ckpt'))[-1])
-    cp_path = f'{checkpoint_dir}/{cp_name}'
+        cp_name = osp.basename(sorted(glob.glob(f"{checkpoint_dir}/{cp}.ckpt"))[-1])
+    cp_path = f"{checkpoint_dir}/{cp_name}"
     if return_name:
         return cp_path, cp_name
     return cp_path
@@ -136,32 +143,32 @@ def get_checkpoint_path(checkpoint_dir, cp, return_name=False):
 def subprocess_run(cmd, ignore_err=False, **kwargs):
     try:
         result = subprocess.run(cmd, **kwargs)
-    except subprocess.CalledProcessError as err:    
+    except subprocess.CalledProcessError as err:
         print("####### subprocess-run error message ######")
         print(f"{err} {err.stderr.decode('utf8')}")
     if result.returncode != 0:
         if not ignore_err:
-            raise Exception('error in subprocess_run!')
+            raise Exception("error in subprocess_run!")
     return result
 
 
 def import_type_from_str(s):
-    module_name, type_name = s.rsplit('.', 1)
+    module_name, type_name = s.rsplit(".", 1)
     module = importlib.import_module(module_name)
     type_to_import = getattr(module, type_name)
     return type_to_import
 
 
-def build_object_from_dict(d, type_field='type', **add_kwargs):
+def build_object_from_dict(d, type_field="type", **add_kwargs):
     d = d.copy()
     _type = import_type_from_str(d.pop(type_field))
     return _type(**d, **add_kwargs)
 
 
 def write_list_to_file(filename, string_list):
-    with open(filename, 'w') as file:
+    with open(filename, "w") as file:
         for item in string_list:
-            file.write(item + '\n')
+            file.write(item + "\n")
 
 
 def are_arrays_equal(array1, array2, sort=False):
@@ -190,15 +197,15 @@ def wandb_run_exists():
 
 
 def load_ema_weights_from_checkpoint(model, checkpoint):
-    ema_params = checkpoint['optimizer_states'][0]['ema']
+    ema_params = checkpoint["optimizer_states"][0]["ema"]
     for param, ema_param in zip(model.parameters(), ema_params):
         param.data.copy_(ema_param.data)
     return
 
 
 def rsync_file_from_remote(fname, remote_dir, local_dir, hostname):
-    remote_fname = fname.replace(local_dir, f'{remote_dir}/./')
-    cmd = f'rsync -avzP -m --relative {hostname}:{remote_fname} {local_dir}/'
+    remote_fname = fname.replace(local_dir, f"{remote_dir}/./")
+    cmd = f"rsync -avzP -m --relative {hostname}:{remote_fname} {local_dir}/"
     subprocess_run(cmd, shell=True)
     return
 
@@ -206,14 +213,15 @@ def rsync_file_from_remote(fname, remote_dir, local_dir, hostname):
 # Global variable for timing indentation level
 timer_indent_level = 0
 
+
 # Context manager for timing
 class Timer:
     def __init__(self, name="", enabled=True, show_rank=False, rank_zero_only=True):
         self.name = name
         self.start_time = None
         self.enabled = enabled
-        if 'LOCAL_RANK' in os.environ:
-            self.rank = int(os.environ['LOCAL_RANK'])
+        if "LOCAL_RANK" in os.environ:
+            self.rank = int(os.environ["LOCAL_RANK"])
         else:
             self.rank = 0
         self.show_rank = show_rank
@@ -235,7 +243,7 @@ class Timer:
             return self
         global timer_indent_level
         elapsed_time = time.perf_counter() - self.start_time
-        indent = '    ' * self.current_indent  # 4 spaces per indent level
+        indent = "    " * self.current_indent  # 4 spaces per indent level
         rank_str = f"[rank{self.rank}] " if self.show_rank else ""
         print(f"{indent}{rank_str}[{self.name}] time: {elapsed_time:.4f} seconds")
         timer_indent_level -= 1  # Decrement global indent level after finishing

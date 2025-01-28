@@ -1,8 +1,10 @@
-import torch
-import numpy as np
 from pathlib import Path
-from hmr4d.network.vimo.hmr_vimo import HMR_VIMO
+
+import numpy as np
+import torch
+
 from hmr4d.network.vimo.config import update_cfg
+from hmr4d.network.vimo.hmr_vimo import HMR_VIMO
 
 
 def load_vimo(device="cuda"):

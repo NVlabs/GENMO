@@ -1,14 +1,18 @@
+from pathlib import Path
+from time import time
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from pathlib import Path
-from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix, rotation_6d_to_matrix
-from smplx.utils import Struct, to_np, to_tensor
 from einops import einsum, rearrange
-from time import time
+from smplx.utils import Struct, to_np, to_tensor
 
 from hmr4d import PROJ_ROOT
+from motiondiff.models.mdm.rotation_conversions import (
+    axis_angle_to_matrix,
+    rotation_6d_to_matrix,
+)
 
 
 class SmplxLite(nn.Module):
@@ -76,8 +80,12 @@ class SmplxLite(nn.Module):
 
     def register_smplh_buffers(self, data_struct, num_pca_comps, flat_hand_mean):
         # hand_pca, (N_pca, 45)
-        left_hand_components = to_tensor(data_struct.hands_componentsl[:num_pca_comps]).float()
-        right_hand_components = to_tensor(data_struct.hands_componentsr[:num_pca_comps]).float()
+        left_hand_components = to_tensor(
+            data_struct.hands_componentsl[:num_pca_comps]
+        ).float()
+        right_hand_components = to_tensor(
+            data_struct.hands_componentsr[:num_pca_comps]
+        ).float()
         self.register_buffer("left_hand_components", left_hand_components, False)
         self.register_buffer("right_hand_components", right_hand_components, False)
 
@@ -98,12 +106,16 @@ class SmplxLite(nn.Module):
     def register_fast_skeleton_computing_buffers(self):
         # For fast computing of skeleton under beta
         J_template = self.J_regressor @ self.v_template  # (J, 3)
-        J_shapedirs = torch.einsum("jv, vcd -> jcd", self.J_regressor, self.shapedirs)  # (J, 3, 10)
+        J_shapedirs = torch.einsum(
+            "jv, vcd -> jcd", self.J_regressor, self.shapedirs
+        )  # (J, 3, 10)
         self.register_buffer("J_template", J_template, False)
         self.register_buffer("J_shapedirs", J_shapedirs, False)
 
     def get_skeleton(self, betas):
-        return self.J_template + einsum(betas, self.J_shapedirs, "... k, j c k -> ... j c")
+        return self.J_template + einsum(
+            betas, self.J_shapedirs, "... k, j c k -> ... j c"
+        )
 
     def forward(
         self,
@@ -126,15 +138,23 @@ class SmplxLite(nn.Module):
         other_default_pose = self.other_default_pose  # (99,)
         if rotation_type == "aa":
             other_default_pose = other_default_pose.expand(*body_pose.shape[:-1], -1)
-            full_pose = torch.cat([global_orient, body_pose, other_default_pose], dim=-1)
-            rot_mats = axis_angle_to_matrix(full_pose.reshape(*full_pose.shape[:-1], 55, 3))
+            full_pose = torch.cat(
+                [global_orient, body_pose, other_default_pose], dim=-1
+            )
+            rot_mats = axis_angle_to_matrix(
+                full_pose.reshape(*full_pose.shape[:-1], 55, 3)
+            )
             del full_pose, other_default_pose
         else:
             assert rotation_type == "r6d"  # useful when doing smplify
             other_default_pose = axis_angle_to_matrix(other_default_pose.view(33, 3))
             part_full_pose = torch.cat([global_orient, body_pose], dim=-1)
-            rot_mats = rotation_6d_to_matrix(part_full_pose.view(*part_full_pose.shape[:-1], 22, 6))
-            other_default_pose = other_default_pose.expand(*rot_mats.shape[:-3], -1, -1, -1)
+            rot_mats = rotation_6d_to_matrix(
+                part_full_pose.view(*part_full_pose.shape[:-1], 22, 6)
+            )
+            other_default_pose = other_default_pose.expand(
+                *rot_mats.shape[:-3], -1, -1, -1
+            )
             rot_mats = torch.cat([rot_mats, other_default_pose], dim=-3)
             del part_full_pose, other_default_pose
 
@@ -143,7 +163,9 @@ class SmplxLite(nn.Module):
         A = batch_rigid_transform_v2(rot_mats, J, self.parents)[1]
 
         # 3. Canonical v_posed = v_template + shaped_offsets + pose_offsets
-        pose_feature = rot_mats[..., 1:, :, :] - rot_mats.new([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        pose_feature = rot_mats[..., 1:, :, :] - rot_mats.new(
+            [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+        )
         pose_feature = pose_feature.view(*pose_feature.shape[:-3], -1)  # (*, 55*3*3)
         v_posed = (
             self.v_template
@@ -154,7 +176,10 @@ class SmplxLite(nn.Module):
 
         # 4. Skinning
         T = einsum(self.lbs_weights, A, "v j, ... j c d -> ... v c d")
-        verts = einsum(T[..., :3, :3], v_posed, "... v c d, ... v d -> ... v c") + T[..., :3, 3]
+        verts = (
+            einsum(T[..., :3, :3], v_posed, "... v c d, ... v d -> ... v c")
+            + T[..., :3, 3]
+        )
 
         # 5. Translation
         if transl is not None:
@@ -169,15 +194,21 @@ class SmplxLiteCoco17(SmplxLite):
         super().__init__(**kwargs)
 
         # Compute mapping
-        smplx2smpl = torch.load(PROJ_ROOT / "hmr4d/utils/body_model/smplx2smpl_sparse.pt")
-        COCO17_regressor = torch.load(PROJ_ROOT / "hmr4d/utils/body_model/smpl_coco17_J_regressor.pt")
+        smplx2smpl = torch.load(
+            PROJ_ROOT / "hmr4d/utils/body_model/smplx2smpl_sparse.pt"
+        )
+        COCO17_regressor = torch.load(
+            PROJ_ROOT / "hmr4d/utils/body_model/smpl_coco17_J_regressor.pt"
+        )
         smplx2coco17 = torch.matmul(COCO17_regressor, smplx2smpl.to_dense())
 
         jids, smplx_vids = torch.where(smplx2coco17 != 0)
         smplx2coco17_interestd = torch.zeros([len(smplx_vids), 17])
         for idx, (jid, smplx_vid) in enumerate(zip(jids, smplx_vids)):
             smplx2coco17_interestd[idx, jid] = smplx2coco17[jid, smplx_vid]
-        self.register_buffer("smplx2coco17_interestd", smplx2coco17_interestd, False)  # (132, 17)
+        self.register_buffer(
+            "smplx2coco17_interestd", smplx2coco17_interestd, False
+        )  # (132, 17)
 
         # Update to vertices of interest
         self.v_template = self.v_template[smplx_vids].clone()  # (V', 3)
@@ -198,15 +229,21 @@ class SmplxLiteV437Coco17(SmplxLite):
         super().__init__(**kwargs)
 
         # Compute mapping (COCO17)
-        smplx2smpl = torch.load(PROJ_ROOT / "hmr4d/utils/body_model/smplx2smpl_sparse.pt")
-        COCO17_regressor = torch.load(PROJ_ROOT / "hmr4d/utils/body_model/smpl_coco17_J_regressor.pt")
+        smplx2smpl = torch.load(
+            PROJ_ROOT / "hmr4d/utils/body_model/smplx2smpl_sparse.pt"
+        )
+        COCO17_regressor = torch.load(
+            PROJ_ROOT / "hmr4d/utils/body_model/smpl_coco17_J_regressor.pt"
+        )
         smplx2coco17 = torch.matmul(COCO17_regressor, smplx2smpl.to_dense())
 
         jids, smplx_vids = torch.where(smplx2coco17 != 0)
         smplx2coco17_interestd = torch.zeros([len(smplx_vids), 17])
         for idx, (jid, smplx_vid) in enumerate(zip(jids, smplx_vids)):
             smplx2coco17_interestd[idx, jid] = smplx2coco17[jid, smplx_vid]
-        self.register_buffer("smplx2coco17_interestd", smplx2coco17_interestd, False)  # (132, 17)
+        self.register_buffer(
+            "smplx2coco17_interestd", smplx2coco17_interestd, False
+        )  # (132, 17)
         assert len(smplx_vids) == 132
 
         # Verts437
@@ -226,10 +263,14 @@ class SmplxLiteV437Coco17(SmplxLite):
             joints (*, 17, 3). (B, L) or  (B,) are both supported.
         """
         # Use super class's forward to get verts
-        verts = super().forward(body_pose, betas, global_orient, transl)  # (*, 132+437, 3)
+        verts = super().forward(
+            body_pose, betas, global_orient, transl
+        )  # (*, 132+437, 3)
 
         verts_437 = verts[..., 132:, :].clone()
-        joints = einsum(self.smplx2coco17_interestd, verts[..., :132, :], "v j, ... v c -> ... j c")
+        joints = einsum(
+            self.smplx2coco17_interestd, verts[..., :132, :], "v j, ... v c -> ... j c"
+        )
         return verts_437, joints
 
 
@@ -240,15 +281,21 @@ class SmplxLiteSmplN24(SmplxLite):
         super().__init__(**kwargs)
 
         # Compute mapping
-        smplx2smpl = torch.load(PROJ_ROOT / "hmr4d/utils/body_model/smplx2smpl_sparse.pt")
-        smpl2joints = torch.load(PROJ_ROOT / "hmr4d/utils/body_model/smpl_neutral_J_regressor.pt")
+        smplx2smpl = torch.load(
+            PROJ_ROOT / "hmr4d/utils/body_model/smplx2smpl_sparse.pt"
+        )
+        smpl2joints = torch.load(
+            PROJ_ROOT / "hmr4d/utils/body_model/smpl_neutral_J_regressor.pt"
+        )
         smplx2joints = torch.matmul(smpl2joints, smplx2smpl.to_dense())
 
         jids, smplx_vids = torch.where(smplx2joints != 0)
         smplx2joints_interested = torch.zeros([len(smplx_vids), smplx2joints.size(0)])
         for idx, (jid, smplx_vid) in enumerate(zip(jids, smplx_vids)):
             smplx2joints_interested[idx, jid] = smplx2joints[jid, smplx_vid]
-        self.register_buffer("smplx2joints_interested", smplx2joints_interested, False)  # (V', J)
+        self.register_buffer(
+            "smplx2joints_interested", smplx2joints_interested, False
+        )  # (V', J)
 
         # Update to vertices of interest
         self.v_template = self.v_template[smplx_vids].clone()  # (V', 3)
@@ -277,7 +324,9 @@ def batch_rigid_transform_v2(rot_mats, joints, parents):
 
     rel_joints = joints.clone()
     rel_joints[..., 1:, :] -= joints[..., parents[1:], :]
-    transforms_mat = torch.cat([rot_mats, rel_joints[..., :, None]], dim=-1)  # (*, J, 3, 4)
+    transforms_mat = torch.cat(
+        [rot_mats, rel_joints[..., :, None]], dim=-1
+    )  # (*, J, 3, 4)
     transforms_mat = F.pad(transforms_mat, [0, 0, 0, 1], value=0.0)
     transforms_mat[..., 3, 3] = 1.0  # (*, J, 4, 4)
 
@@ -285,7 +334,9 @@ def batch_rigid_transform_v2(rot_mats, joints, parents):
     for i in range(1, parents.shape[0]):
         # Subtract the joint location at the rest pose
         # No need for rotation, since it's identity when at rest
-        curr_res = torch.matmul(transform_chain[parents[i]], transforms_mat[..., i, :, :])
+        curr_res = torch.matmul(
+            transform_chain[parents[i]], transforms_mat[..., i, :, :]
+        )
         transform_chain.append(curr_res)
 
     transforms = torch.stack(transform_chain, dim=-3)  # (*, J, 4, 4)
@@ -293,7 +344,9 @@ def batch_rigid_transform_v2(rot_mats, joints, parents):
     # The last column of the transformations contains the posed joints
     posed_joints = transforms[..., :3, 3].clone()
     rel_transforms = transforms.clone()
-    rel_transforms[..., :3, 3] -= einsum(transforms[..., :3, :3], joints, "... j c d, ... j d -> ... j c")
+    rel_transforms[..., :3, 3] -= einsum(
+        transforms[..., :3, :3], joints, "... j c d, ... j d -> ... j c"
+    )
     return posed_joints, rel_transforms
 
 

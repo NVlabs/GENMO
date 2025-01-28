@@ -1,24 +1,24 @@
 import cv2
-import torch
 import numpy as np
-
+import torch
+from PIL import Image
 from pytorch3d.renderer import (
-    PerspectiveCameras,
-    TexturesVertex,
-    PointLights,
     Materials,
-    RasterizationSettings,
-    MeshRenderer,
     MeshRasterizer,
+    MeshRenderer,
+    PerspectiveCameras,
+    PointLights,
+    RasterizationSettings,
     SoftPhongShader,
+    TexturesVertex,
 )
+from pytorch3d.renderer.cameras import look_at_rotation
 from pytorch3d.structures import Meshes
 from pytorch3d.structures.meshes import join_meshes_as_scene
-from pytorch3d.renderer.cameras import look_at_rotation
-from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix
-from PIL import Image
-from .renderer_tools import get_colors, checkerboard_geometry
 
+from motiondiff.models.mdm.rotation_conversions import axis_angle_to_matrix
+
+from .renderer_tools import checkerboard_geometry, get_colors
 
 colors_str_map = {
     "gray": [0.8, 0.8, 0.8],
@@ -97,18 +97,41 @@ def compute_bbox_from_points(X, img_w, img_h, scaleFactor=1.2):
     new_top = torch.clamp(cy - height / 2 * scaleFactor, min=0, max=img_h - 1)
     new_bottom = torch.clamp(cy + height / 2 * scaleFactor, min=1, max=img_h)
 
-    bbox = torch.stack((new_left.detach(), new_top.detach(), new_right.detach(), new_bottom.detach())).int().float().T
+    bbox = (
+        torch.stack(
+            (
+                new_left.detach(),
+                new_top.detach(),
+                new_right.detach(),
+                new_bottom.detach(),
+            )
+        )
+        .int()
+        .float()
+        .T
+    )
 
     return bbox
 
 
 class Renderer:
-    def __init__(self, width, height, focal_length=None, device="cuda", faces=None, K=None, bin_size=None):
+    def __init__(
+        self,
+        width,
+        height,
+        focal_length=None,
+        device="cuda",
+        faces=None,
+        K=None,
+        bin_size=None,
+    ):
         """set bin_size to 0 for no binning"""
         self.width = width
         self.height = height
         self.bin_size = bin_size
-        assert (focal_length is not None) ^ (K is not None), "focal_length and K are mutually exclusive"
+        assert (focal_length is not None) ^ (K is not None), (
+            "focal_length and K are mutually exclusive"
+        )
 
         self.device = device
         if faces is not None:
@@ -124,7 +147,9 @@ class Renderer:
         self.renderer = MeshRenderer(
             rasterizer=MeshRasterizer(
                 raster_settings=RasterizationSettings(
-                    image_size=self.image_sizes[0], blur_radius=1e-5, bin_size=self.bin_size
+                    image_size=self.image_sizes[0],
+                    blur_radius=1e-5,
+                    bin_size=self.bin_size,
                 ),
             ),
             shader=SoftPhongShader(
@@ -140,12 +165,19 @@ class Renderer:
             self.T = T.clone().view(1, 3).to(self.device)
 
         return PerspectiveCameras(
-            device=self.device, R=self.R.mT, T=self.T, K=self.K_full, image_size=self.image_sizes, in_ndc=False
+            device=self.device,
+            R=self.R.mT,
+            T=self.T,
+            K=self.K_full,
+            image_size=self.image_sizes,
+            in_ndc=False,
         )
 
     def initialize_camera_params(self, focal_length, K):
         # Extrinsics
-        self.R = torch.diag(torch.tensor([1, 1, 1])).float().to(self.device).unsqueeze(0)
+        self.R = (
+            torch.diag(torch.tensor([1, 1, 1])).float().to(self.device).unsqueeze(0)
+        )
 
         self.T = torch.tensor([0, 0, 0]).unsqueeze(0).float().to(self.device)
 
@@ -155,7 +187,13 @@ class Renderer:
         else:
             assert focal_length is not None, "focal_length or K should be provided"
             self.K = (
-                torch.tensor([[focal_length, 0, self.width / 2], [0, focal_length, self.height / 2], [0, 0, 1]])
+                torch.tensor(
+                    [
+                        [focal_length, 0, self.width / 2],
+                        [0, focal_length, self.height / 2],
+                        [0, 0, 1],
+                    ]
+                )
                 .float()
                 .reshape(1, 3, 3)
                 .to(self.device)
@@ -170,7 +208,10 @@ class Renderer:
     def set_ground(self, length, center_x, center_z):
         device = self.device
         length, center_x, center_z = map(float, (length, center_x, center_z))
-        v, f, vc, fc = map(torch.from_numpy, checkerboard_geometry(length=length, c1=center_x, c2=center_z, up="y"))
+        v, f, vc, fc = map(
+            torch.from_numpy,
+            checkerboard_geometry(length=length, c1=center_x, c2=center_z, up="y"),
+        )
         v, f, vc = v.to(device), f.to(device), vc.to(device)
         self.ground_geometry = [v, f, vc]
 
@@ -183,7 +224,9 @@ class Renderer:
         if x3d.size(-1) != 3:
             x2d = x3d.unsqueeze(0)
         else:
-            x2d = perspective_projection(x3d.unsqueeze(0), self.K, self.R, self.T.reshape(1, 3, 1))
+            x2d = perspective_projection(
+                x3d.unsqueeze(0), self.K, self.R, self.T.reshape(1, 3, 1)
+            )
 
         if mask is not None:
             x2d = x2d[:, ~mask]
@@ -218,7 +261,11 @@ class Renderer:
         else:
             if colors[0] > 1:
                 colors = [c / 255.0 for c in colors]
-            verts_features = torch.tensor(colors).reshape(1, 1, 3).to(device=vertices.device, dtype=vertices.dtype)
+            verts_features = (
+                torch.tensor(colors)
+                .reshape(1, 1, 3)
+                .to(device=vertices.device, dtype=vertices.dtype)
+            )
             verts_features = verts_features.repeat(1, vertices.shape[1], 1)
         textures = TexturesVertex(verts_features=verts_features)
 
@@ -230,18 +277,27 @@ class Renderer:
 
         materials = Materials(device=self.device, specular_color=(colors,), shininess=0)
 
-        results = torch.flip(self.renderer(mesh, materials=materials, cameras=self.cameras, lights=self.lights), [1, 2])
+        results = torch.flip(
+            self.renderer(
+                mesh, materials=materials, cameras=self.cameras, lights=self.lights
+            ),
+            [1, 2],
+        )
         image = results[0, ..., :3] * 255
         mask = results[0, ..., -1] > 1e-3
 
         if background is None:
             background = np.ones((self.height, self.width, 3)).astype(np.uint8) * 255
 
-        image = overlay_image_onto_background(image, mask, self.bboxes, background.copy())
+        image = overlay_image_onto_background(
+            image, mask, self.bboxes, background.copy()
+        )
         self.reset_bbox()
         return image
 
-    def render_with_ground(self, verts, colors, cameras, lights, faces=None, opacity=1.0):
+    def render_with_ground(
+        self, verts, colors, cameras, lights, faces=None, opacity=1.0
+    ):
         """
         :param verts (N, V, 3), potential multiple people
         :param colors (N, 3) or (N, V, 3)
@@ -269,12 +325,16 @@ class Renderer:
 
         materials = Materials(device=self.device, shininess=0)
 
-        results = self.renderer(mesh, cameras=cameras, lights=lights, materials=materials)
+        results = self.renderer(
+            mesh, cameras=cameras, lights=lights, materials=materials
+        )
         image = (results[0, ..., :3].cpu().numpy() * 255).astype(np.uint8)
 
         return image
 
-    def render_with_ground_timeline(self, verts_list, colors, cameras, lights, faces=None):
+    def render_with_ground_timeline(
+        self, verts_list, colors, cameras, lights, faces=None
+    ):
         """
         :param verts (N, V, 3), potential multiple people
         :param colors (N, 3) or (N, V, 3)
@@ -289,15 +349,20 @@ class Renderer:
         final_img = Image.new("RGBA", (self.width, self.height))
         t_weights = torch.tensor([t / len(verts_list) for t in range(len(verts_list))])
         # t_weights = (t_weights) / torch.sum(t_weights)
-        import ipdb; ipdb.set_trace()
-        torch.save({
-            "verts_list": verts_list,
-            "colors": colors,
-            "cameras": cameras,
-            "lights": lights,
-            "faces": faces,
-            'ground_geometry': self.ground_geometry,
-        }, "tmp.pth")
+        import ipdb
+
+        ipdb.set_trace()
+        torch.save(
+            {
+                "verts_list": verts_list,
+                "colors": colors,
+                "cameras": cameras,
+                "lights": lights,
+                "faces": faces,
+                "ground_geometry": self.ground_geometry,
+            },
+            "tmp.pth",
+        )
         for t, verts in enumerate(verts_list):
             N, V, _ = verts.shape
 
@@ -315,16 +380,19 @@ class Renderer:
             mesh = create_meshes(verts, faces_list, colors_list)
 
             materials = Materials(device=self.device, shininess=0)
-            results = self.renderer(mesh, cameras=cameras, lights=lights, materials=materials)
+            results = self.renderer(
+                mesh, cameras=cameras, lights=lights, materials=materials
+            )
             # image = (results[0, ..., :3].cpu().numpy() * 255).astype(np.uint8)
-            image = (results[0, ..., :4].cpu().numpy() * 255)
+            image = results[0, ..., :4].cpu().numpy() * 255
             image[..., 3] *= int(t_weights[t].item() * 255)
             image = image.astype(np.uint8)
-            image = Image.fromarray(image, 'RGBA')
+            image = Image.fromarray(image, "RGBA")
             # image.putalpha(int(t_weights[t].item() * 255))
             final_img = Image.alpha_composite(final_img, image)
             # tmp_list.append(image)
         return final_img
+
 
 def create_meshes(verts, faces, colors):
     """
@@ -354,7 +422,13 @@ def get_global_cameras(verts, device="cuda", distance=5, position=(-5.0, 5.0, 0.
 
 
 def get_global_cameras_static(
-    verts, beta=4.0, cam_height_degree=30, target_center_height=1.0, use_long_axis=False, vec_rot=45, device="cuda"
+    verts,
+    beta=4.0,
+    cam_height_degree=30,
+    target_center_height=1.0,
+    use_long_axis=False,
+    vec_rot=45,
+    device="cuda",
 ):
     L, V, _ = verts.shape
 
@@ -378,7 +452,9 @@ def get_global_cameras_static(
     # Compute camera position (center + scale * vec * beta) + y=4
     target_scale = max(target_scale, 1.0) * beta
     position = target_center + vec * target_scale
-    position[1] = target_scale * np.tan(np.pi * cam_height_degree / 180) + target_center_height
+    position[1] = (
+        target_scale * np.tan(np.pi * cam_height_degree / 180) + target_center_height
+    )
 
     # Compute camera rotation and translation
     positions = position.unsqueeze(0).repeat(L, 1)
@@ -392,7 +468,13 @@ def get_global_cameras_static(
 
 
 def get_global_cameras_static_v2(
-    verts, beta=4.0, cam_height_degree=30, target_center_height=1.0, use_long_axis=False, vec_rot=45, device="cuda"
+    verts,
+    beta=4.0,
+    cam_height_degree=30,
+    target_center_height=1.0,
+    use_long_axis=False,
+    vec_rot=45,
+    device="cuda",
 ):
     L, V, _ = verts.shape
 
@@ -416,7 +498,9 @@ def get_global_cameras_static_v2(
     # Compute camera position (center + scale * vec * beta) + y=4
     target_scale = max(target_scale, 1.0) * beta
     position = target_center + vec * target_scale
-    position[1] = target_scale * np.tan(np.pi * cam_height_degree / 180) + target_center_height
+    position[1] = (
+        target_scale * np.tan(np.pi * cam_height_degree / 180) + target_center_height
+    )
 
     # Compute camera rotation and translation
     # positions = position.unsqueeze(0).repeat(L, 1)

@@ -1,21 +1,33 @@
 # This code is based on https://github.com/Mathux/ACTOR.git
 import torch
+
 import motiondiff.models.mdm.rotation_conversions as geometry
-
-
 from motiondiff.models.common.smpl import SMPL
+
 # from .get_model import JOINTSTYPES
 JOINTSTYPES = ["a2m", "a2mpl", "smpl", "vibe", "vertices"]
 
 
 class Rotation2xyz:
-    def __init__(self, dataset='amass'):
+    def __init__(self, dataset="amass"):
         self.dataset = dataset
-        self.smpl_model = SMPL(SMPL_MODEL_PATH='data/smpl_data').eval()
+        self.smpl_model = SMPL(SMPL_MODEL_PATH="data/smpl_data").eval()
 
-    def __call__(self, x, mask, pose_rep, translation, glob,
-                 jointstype, vertstrans, betas=None, beta=0,
-                 glob_rot=None, get_rotations_back=False, **kwargs):
+    def __call__(
+        self,
+        x,
+        mask,
+        pose_rep,
+        translation,
+        glob,
+        jointstype,
+        vertstrans,
+        betas=None,
+        beta=0,
+        glob_rot=None,
+        get_rotations_back=False,
+        **kwargs,
+    ):
         if pose_rep == "xyz":
             return x
 
@@ -51,23 +63,32 @@ class Rotation2xyz:
 
         if not glob:
             global_orient = torch.tensor(glob_rot, device=x.device)
-            global_orient = geometry.axis_angle_to_matrix(global_orient).view(1, 1, 3, 3)
+            global_orient = geometry.axis_angle_to_matrix(global_orient).view(
+                1, 1, 3, 3
+            )
             global_orient = global_orient.repeat(len(rotations), 1, 1, 1)
         else:
             global_orient = rotations[:, 0]
             rotations = rotations[:, 1:]
 
         if betas is None:
-            betas = torch.zeros([rotations.shape[0], self.smpl_model.num_betas],
-                                dtype=rotations.dtype, device=rotations.device)
+            betas = torch.zeros(
+                [rotations.shape[0], self.smpl_model.num_betas],
+                dtype=rotations.dtype,
+                device=rotations.device,
+            )
             betas[:, 1] = beta
             # import ipdb; ipdb.set_trace()
-        out = self.smpl_model(body_pose=rotations, global_orient=global_orient, betas=betas)
+        out = self.smpl_model(
+            body_pose=rotations, global_orient=global_orient, betas=betas
+        )
 
         # get the desirable joints
         joints = out[jointstype]
 
-        x_xyz = torch.empty(nsamples, time, joints.shape[1], 3, device=x.device, dtype=x.dtype)
+        x_xyz = torch.empty(
+            nsamples, time, joints.shape[1], 3, device=x.device, dtype=x.dtype
+        )
         x_xyz[~mask] = 0
         x_xyz[mask] = joints
 

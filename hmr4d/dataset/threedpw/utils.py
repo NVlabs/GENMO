@@ -1,10 +1,11 @@
 import json
-import numpy as np
-from pathlib import Path
-from collections import defaultdict
 import pickle
-import torch
+from collections import defaultdict
+from pathlib import Path
+
 import joblib
+import numpy as np
+import torch
 
 RESOURCE_FOLDER = Path(__file__).resolve().parent / "resource"
 
@@ -19,9 +20,15 @@ def read_raw_pkl(pkl_path):
     for i in range(num_subjects):
         smpl_params.append(
             {
-                "body_pose": torch.from_numpy(data[b"poses"][i][:, 3:72]).float(),  # (F, 69)
-                "betas": torch.from_numpy(data[b"betas"][i][:10]).repeat(F, 1).float(),  # (F, 10)
-                "global_orient": torch.from_numpy(data[b"poses"][i][:, :3]).float(),  # (F, 3)
+                "body_pose": torch.from_numpy(
+                    data[b"poses"][i][:, 3:72]
+                ).float(),  # (F, 69)
+                "betas": torch.from_numpy(data[b"betas"][i][:10])
+                .repeat(F, 1)
+                .float(),  # (F, 10)
+                "global_orient": torch.from_numpy(
+                    data[b"poses"][i][:, :3]
+                ).float(),  # (F, 3)
                 "transl": torch.from_numpy(data[b"trans"][i]).float(),  # (F, 3)
             }
         )

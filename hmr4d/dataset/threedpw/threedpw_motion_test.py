@@ -1,15 +1,18 @@
-import torch
-from torch.utils import data
 from pathlib import Path
 
-from hmr4d.utils.pylogger import Log
-from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
-from hmr4d.utils.geo_transform import compute_cam_angvel, compute_cam_tvel
-from hmr4d.utils.geo.hmr_cam import estimate_K, resize_K
-from hmr4d.utils.geo.flip_utils import flip_kp2d_coco17
-from hmr4d.utils.geo_transform import normalize_T_w2c
+import torch
+from torch.utils import data
 
 from hmr4d.configs import MainStore, builds
+from hmr4d.utils.geo.flip_utils import flip_kp2d_coco17
+from hmr4d.utils.geo.hmr_cam import estimate_K, resize_K
+from hmr4d.utils.geo_transform import (
+    compute_cam_angvel,
+    compute_cam_tvel,
+    normalize_T_w2c,
+)
+from hmr4d.utils.pylogger import Log
+from hmr4d.utils.wis3d_utils import add_motion_as_lines, make_wis3d
 
 VID_HARD = []
 # VID_HARD = ["downtown_bar_00_1"]
@@ -93,12 +96,14 @@ class ThreedpwSmplFullSeqDataset(data.Dataset):
         if False:
             K_fullimg = estimate_K(*width_height)
         data["K_fullimg"] = K_fullimg
-        data.update({
-            "T_w2c": T_w2c,
-            "scales": scales,
-            "mean_scale": mean_scale,
-            'gt_T_w2c': gt_T_w2c
-        })
+        data.update(
+            {
+                "T_w2c": T_w2c,
+                "scales": scales,
+                "mean_scale": mean_scale,
+                "gt_T_w2c": gt_T_w2c,
+            }
+        )
 
         if "vimo_params_flip" in vimo_label:
             flipped_trans_c = vimo_label["vimo_params_flip"]["pred_trans"]
@@ -123,7 +128,14 @@ class ThreedpwSmplFullSeqDataset(data.Dataset):
         norm_T_w2c = normalize_T_w2c(data["T_w2c"])
         cam_angvel = compute_cam_angvel(norm_T_w2c[:, :3, :3])  # (L, 6)
         cam_tvel = compute_cam_tvel(norm_T_w2c[:, :3, 3])  # (L, 3)
-        data.update({"bbx_xys": bbx_xys, "kp2d": kp2d, "cam_angvel": cam_angvel, "cam_tvel": cam_tvel})
+        data.update(
+            {
+                "bbx_xys": bbx_xys,
+                "kp2d": kp2d,
+                "cam_angvel": cam_angvel,
+                "cam_tvel": cam_tvel,
+            }
+        )
         data["R_w2c"] = norm_T_w2c[:, :3, :3]
 
         imgfeat_dir = self.threedpw_dir / "imgfeats/3dpw_test"
@@ -201,7 +213,9 @@ class ThreedpwSmplFullSeqDataset(data.Dataset):
         if self.skip_invalid:  # Drop all invalid frames
             mask = data["mask"].clone()
             data["length"] = sum(mask)
-            data["smpl_params"] = {k: v[mask].clone() for k, v in data["smpl_params"].items()}
+            data["smpl_params"] = {
+                k: v[mask].clone() for k, v in data["smpl_params"].items()
+            }
             data["T_w2c"] = data["T_w2c"][mask].clone()
             data["mask"] = data["mask"][mask].clone()
             data["K_fullimg"] = data["K_fullimg"][mask].clone()
@@ -210,7 +224,9 @@ class ThreedpwSmplFullSeqDataset(data.Dataset):
             data["cam_angvel"] = data["cam_angvel"][mask].clone()
             data["cam_tvel"] = data["cam_tvel"][mask].clone()
             data["f_imgseq"] = data["f_imgseq"][mask].clone()
-            data["flip_test"] = {k: v[mask].clone() for k, v in data["flip_test"].items()}
+            data["flip_test"] = {
+                k: v[mask].clone() for k, v in data["flip_test"].items()
+            }
 
         return data
 

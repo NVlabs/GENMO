@@ -1,7 +1,7 @@
 """This script will glob two folder, check the mp4 files are one-to-one match precisely, then call merge_horizontal.py to merge them one by one"""
 
-import os
 import argparse
+import os
 from pathlib import Path
 
 
@@ -33,9 +33,13 @@ def main():
         in_paths = [str(path1), str(path2)]
         print(f"Merging {in_paths} to {out_path}")
         if args.vertical:
-            os.system(f"python tools/video/merge_vertical.py {' '.join(in_paths)} -o {out_path}")
+            os.system(
+                f"python tools/video/merge_vertical.py {' '.join(in_paths)} -o {out_path}"
+            )
         else:
-            os.system(f"python tools/video/merge_horizontal.py {' '.join(in_paths)} -o {out_path}")
+            os.system(
+                f"python tools/video/merge_horizontal.py {' '.join(in_paths)} -o {out_path}"
+            )
 
 
 if __name__ == "__main__":

@@ -1,10 +1,10 @@
+import argparse
+import os
 from dataclasses import dataclass
+
+from hydra import compose, initialize_config_module
 from hydra.core.config_store import ConfigStore
 from hydra_zen import builds
-
-import argparse
-from hydra import compose, initialize_config_module
-import os
 
 os.environ["HYDRA_FULL_ERROR"] = "1"
 

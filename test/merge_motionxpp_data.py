@@ -3,6 +3,7 @@ import os
 
 os.environ["PYOPENGL_PLATFORM"] = "egl"
 
+import contextlib
 import json
 
 import cv2
@@ -23,7 +24,7 @@ from pytorch3d.renderer import (
 from pytorch3d.structures import Meshes
 from pytorch3d.utils import cameras_from_opencv_projection
 from tqdm import tqdm
-import contextlib
+
 from hmr4d.utils.smplx_utils import make_smplx
 
 
@@ -48,13 +49,14 @@ def draw_bbox(frame, bbox, color=(0, 255, 0), thickness=2):
 
 
 def render_mesh_to_image(smpl_vertices, smpl_faces, cameras, image, camera_params):
-
-    raster_settings = RasterizationSettings(image_size=[image.shape[0], image.shape[1]],
-                                            blur_radius=0,
-                                            faces_per_pixel=1,
-                                            bin_size=0,
-                                            max_faces_per_bin=1000,
-                                            perspective_correct=True)
+    raster_settings = RasterizationSettings(
+        image_size=[image.shape[0], image.shape[1]],
+        blur_radius=0,
+        faces_per_pixel=1,
+        bin_size=0,
+        max_faces_per_bin=1000,
+        perspective_correct=True,
+    )
     smpl_vertices = smpl_vertices.detach().cpu().numpy()
 
     verts = torch.tensor([smpl_vertices], dtype=torch.float32, device=device)
@@ -63,19 +65,25 @@ def render_mesh_to_image(smpl_vertices, smpl_faces, cameras, image, camera_param
     verts_rgb = torch.ones_like(verts)
     verts_rgb[:, :, 2] = verts_rgb[:, :, 2] * 0
     textures = TexturesVertex(verts_features=verts_rgb.to(device))
-    renderer = MeshRenderer(rasterizer=MeshRasterizer(cameras=cameras,
-                                                      raster_settings=raster_settings),
-                            shader=HardPhongShader(device=device, cameras=cameras))
+    renderer = MeshRenderer(
+        rasterizer=MeshRasterizer(cameras=cameras, raster_settings=raster_settings),
+        shader=HardPhongShader(device=device, cameras=cameras),
+    )
     images = renderer(
-        meshes_world=Meshes(verts=verts.to(device), faces=faces.to(device), textures=textures))
+        meshes_world=Meshes(
+            verts=verts.to(device), faces=faces.to(device), textures=textures
+        )
+    )
 
     images = images.cpu().numpy().squeeze() * 255
     images_rgb = images[:, :, :3].astype(np.uint8)
-    mask = images_rgb.max(axis=2) < 255  
+    mask = images_rgb.max(axis=2) < 255
     images_rgb_resized = cv2.resize(images_rgb, (image.shape[1], image.shape[0]))
-    mask_resized = cv2.resize(mask.astype(np.uint8), (image.shape[1], image.shape[0])) > 0
+    mask_resized = (
+        cv2.resize(mask.astype(np.uint8), (image.shape[1], image.shape[0])) > 0
+    )
     image[mask_resized] = images_rgb_resized[mask_resized]
-    # render with color vertex 
+    # render with color vertex
     # camera_matrix = np.array(camera_params['matrix'])
     # camera_matrix = torch.tensor([camera_matrix], dtype=torch.float32, device=device)
     # rvec = camera_params['R']
@@ -111,8 +119,12 @@ if __name__ == "__main__":
         # video_file = f"/mnt/disk3/motion-x++/video/{subset}/{file_name}.mp4"
         local_motion_file = f"/mnt/disk3/motion-x++/motion/mesh_recovery/local_motion/{subset}/{file_name}.json"
         global_motion_file = f"/mnt/disk3/motion-x++/motion/mesh_recovery/global_motion/{subset}/{file_name}.json"
-        keypoint_file = f"/mnt/disk3/motion-x++/motion/keypoints/{subset}/{file_name}.json"
-        semmantic_text_file = f"/mnt/disk3/motion-x++/text/semantic_label/{subset}/{file_name}.txt"
+        keypoint_file = (
+            f"/mnt/disk3/motion-x++/motion/keypoints/{subset}/{file_name}.json"
+        )
+        semmantic_text_file = (
+            f"/mnt/disk3/motion-x++/text/semantic_label/{subset}/{file_name}.txt"
+        )
         whole_desc_file = f"/mnt/disk3/motion-x++/text/wholebody_pose_description/{subset}/{file_name}.json"
         assert os.path.exists(local_motion_file), (local_motion_file, video_file)
         # assert os.path.exists(global_motion_file), (global_motion_file, video_file)
@@ -205,8 +217,16 @@ if __name__ == "__main__":
                 bbox = ann["bbox"]
                 body_kpts = np.array(ann_keypoint["body_kpts"])
                 body_kpts_lst.append(body_kpts)
-                intrins_global = ann_global["cam_params"]["intrins"] # [1500.0, 1500.0, 960.0, 540.0]
-                camera_matrix_global = np.array([[intrins_global[0], 0, intrins_global[2]],[0, intrins_global[1], intrins_global[3]],[0,0,1]])
+                intrins_global = ann_global["cam_params"][
+                    "intrins"
+                ]  # [1500.0, 1500.0, 960.0, 540.0]
+                camera_matrix_global = np.array(
+                    [
+                        [intrins_global[0], 0, intrins_global[2]],
+                        [0, intrins_global[1], intrins_global[3]],
+                        [0, 0, 1],
+                    ]
+                )
 
                 R = np.array(ann_global["cam_params"]["cam_R"])
                 T = np.array(ann_global["cam_params"]["cam_T"])
@@ -216,22 +236,34 @@ if __name__ == "__main__":
                 R_vec = cv2.Rodrigues(R)[0]
                 T_vec = np.array(ann_global["cam_params"]["cam_T"])
                 # assert (R_vec == 0).all(), "R_vec is zero"
-                camera_params_global = {"matrix": camera_matrix_global, "R": R_vec, "T": T_vec}
-                R = torch.from_numpy(R).to(device=device, dtype=torch.float32)[None, :, :]
+                camera_params_global = {
+                    "matrix": camera_matrix_global,
+                    "R": R_vec,
+                    "T": T_vec,
+                }
+                R = torch.from_numpy(R).to(device=device, dtype=torch.float32)[
+                    None, :, :
+                ]
                 T = torch.from_numpy(T).to(device=device, dtype=torch.float32)[None, :]
-                camera_matrix_global = torch.from_numpy(camera_matrix_global).to(device=device, dtype=torch.float32)[None, :, :]
+                camera_matrix_global = torch.from_numpy(camera_matrix_global).to(
+                    device=device, dtype=torch.float32
+                )[None, :, :]
                 image_size = torch.tensor([height, width], device=device).unsqueeze(0)
                 try:
-                    cameras_global = cameras_from_opencv_projection(R, T, camera_matrix_global, image_size)
+                    cameras_global = cameras_from_opencv_projection(
+                        R, T, camera_matrix_global, image_size
+                    )
                 except:
-                    import ipdb; ipdb.set_trace()
+                    import ipdb
 
-                pose_body = np.array(ann_global['smplx_params']['pose_body'])
-                global_orient_w = np.array(ann_global['smplx_params']['root_orient'])
-                transl_w = np.array(ann_global['smplx_params']['trans'])
-                left_hand_pose = np.array(ann_global['smplx_params']['pose_hand'][:45])
-                right_hand_pose = np.array(ann_global['smplx_params']['pose_hand'][45:])
-                expr = np.array(ann_global['smplx_params']['face_expr'][:10])
+                    ipdb.set_trace()
+
+                pose_body = np.array(ann_global["smplx_params"]["pose_body"])
+                global_orient_w = np.array(ann_global["smplx_params"]["root_orient"])
+                transl_w = np.array(ann_global["smplx_params"]["trans"])
+                left_hand_pose = np.array(ann_global["smplx_params"]["pose_hand"][:45])
+                right_hand_pose = np.array(ann_global["smplx_params"]["pose_hand"][45:])
+                expr = np.array(ann_global["smplx_params"]["face_expr"][:10])
                 beta = np.ones_like(expr)
 
                 pose_lst.append(pose_body)
@@ -243,13 +275,41 @@ if __name__ == "__main__":
 
                 vis = False
                 if vis:
-                    pose_body = torch.from_numpy(pose_body).to(device=device, dtype=torch.float32).unsqueeze(0)
-                    global_orient_w = torch.from_numpy(global_orient_w).to(device=device, dtype=torch.float32).unsqueeze(0)
-                    transl_w = torch.from_numpy(transl_w).to(device=device, dtype=torch.float32).unsqueeze(0)
-                    left_hand_pose = torch.from_numpy(left_hand_pose).to(device=device, dtype=torch.float32).unsqueeze(0)
-                    right_hand_pose = torch.from_numpy(right_hand_pose).to(device=device, dtype=torch.float32).unsqueeze(0)
-                    expr = torch.from_numpy(expr).to(device=device, dtype=torch.float32).unsqueeze(0)
-                    beta = torch.from_numpy(beta).to(device=device, dtype=torch.float32).unsqueeze(0)
+                    pose_body = (
+                        torch.from_numpy(pose_body)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0)
+                    )
+                    global_orient_w = (
+                        torch.from_numpy(global_orient_w)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0)
+                    )
+                    transl_w = (
+                        torch.from_numpy(transl_w)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0)
+                    )
+                    left_hand_pose = (
+                        torch.from_numpy(left_hand_pose)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0)
+                    )
+                    right_hand_pose = (
+                        torch.from_numpy(right_hand_pose)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0)
+                    )
+                    expr = (
+                        torch.from_numpy(expr)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0)
+                    )
+                    beta = (
+                        torch.from_numpy(beta)
+                        .to(device=device, dtype=torch.float32)
+                        .unsqueeze(0)
+                    )
 
                     output_w = smplx_layer(
                         betas=beta,
@@ -266,7 +326,7 @@ if __name__ == "__main__":
                     joints_w = output_w.joints
 
                     vertices = output_w.vertices
-                    mesh_cam_w = vertices #(bs 10475 3)
+                    mesh_cam_w = vertices  # (bs 10475 3)
 
             # cap.release()
             pose_lst = np.stack(pose_lst)

@@ -5,7 +5,7 @@ outputs
 outputs2
 
 # All file or folders start with tmp will be ignored
-tmp*  
+tmp*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -160,7 +160,7 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
-# 
+#
 .DS_Store/
 
 # PyCharm
