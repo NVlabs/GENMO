@@ -107,7 +107,7 @@ for cfg_f in cfg_files:
     cfg = osp.splitext(cfg_f)[0]
     cfg = osp.relpath(cfg, config_dir)
     if not args.debug:
-        cmd = f"python tools/train_v2.py exp={cfg} exp_name_var={args.cfg_var} pl_trainer.devices={args.gpus} {args.additional_args}"
+        cmd = f"python tools/train_v2.py exp={cfg} exp_name_var={args.cfg_var} ++pl_trainer.devices={args.gpus} ++pl_trainer.num_nodes={args.nodes} {args.additional_args}"
         cmd += " ++data.loader_opts.train.num_workers=8 ++data.loader_opts.train_2d.num_workers=8"
         if args.resume:
             cmd += f" resume_mode={args.resume_cp}"

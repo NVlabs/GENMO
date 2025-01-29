@@ -164,7 +164,7 @@ pl_trainer:
   gradient_clip_val: 0.5
   max_epochs: null
   check_val_every_n_epoch: null
-  val_check_interval: 1
+  val_check_interval: 3000
   max_steps: 200000
   devices: 1
   strategy: ddp_find_unused_parameters_true
