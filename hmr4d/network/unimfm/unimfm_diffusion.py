@@ -480,6 +480,10 @@ class UNIMFMDiffusion(nn.Module):
             if self.args.get("return_mid", False):
                 kwargs["return_mid"] = True
 
+            if "observed_motion_3d" in inputs:
+                cond["observed_motion_3d"] = inputs["observed_motion_3d"]
+                cond["motion_mask_3d"] = inputs["motion_mask_3d"]
+
             denoise_out = sample_fn(
                 denoiser,
                 motion.shape,

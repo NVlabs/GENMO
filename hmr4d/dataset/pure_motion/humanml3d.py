@@ -60,6 +60,7 @@ class Humanml3dDataset(BaseDataset):
         use_multi_text=False,
         num_multi_text=3,
         multi_text_vid=None,
+        motion_start_mode="first",
     ):
         self.root = Path("inputs/HumanML3D_SMPL/hmr4d_support")
         if split == "train":
@@ -100,6 +101,7 @@ class Humanml3dDataset(BaseDataset):
         if self.use_multi_text:
             self.num_multi_text = len(self.multi_text_vid)
             self.vid_to_idx = {}
+        self.motion_start_mode = motion_start_mode
         super().__init__(cam_augmentation, limit_size)
         if self.use_multi_text:
             for i, (vid, _) in enumerate(self.idx2meta):
@@ -267,6 +269,14 @@ class Humanml3dDataset(BaseDataset):
                 "transl": (F, 3),  in the AY coordinates
             }
         """
+        if self.motion_start_mode == "sample":
+            mlength = data["body_pose"].shape[0]
+            length = min(self.motion_frames, mlength)
+            start = np.random.randint(0, max(mlength - length + 1, 1))
+            for k, v in data.items():
+                if v in ["body_pose", "betas", "global_orient", "transl"]:
+                    data[k] = v[start:]
+
         data_name = data["data_name"]
         mid = data["mid"]
         text_ind = data["text_ind"]

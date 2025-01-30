@@ -46,6 +46,9 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         random_permute=False,
         random_seed=7,
         max_motion_frames=120,
+        wo_img_feat=False,
+        subset=None,
+        eval_text_only=False,
     ):
         self.hmr4d_support_dir = Path("inputs/MotionXpp/hmr4d_support")
         self.root = Path("inputs/MotionXpp/hmr4d_support")
@@ -62,6 +65,9 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         self.max_num_motions = max_num_motions
         self.random_permute = random_permute
         self.random_seed = random_seed
+        self.wo_img_feat = wo_img_feat
+        self.subset = subset
+        self.eval_text_only = eval_text_only
         super().__init__()
 
     def _load_dataset(self):
@@ -77,10 +83,16 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
 
     def _get_idx2meta(self):
         seq_lengths = []
+        self.idx2meta = []
         for vid in self.train_labels:
+            if (
+                self.subset is not None
+                and self.train_labels[vid]["subset"] not in self.subset
+            ):
+                continue
             seq_length = self.train_labels[vid]["pose"].shape[0]
             seq_lengths.append(seq_length)
-        self.idx2meta = list(self.train_labels.keys())
+            self.idx2meta.append(vid)
         if self.random_permute:
             rng = np.random.RandomState(self.random_seed)
             shuffle_ind = np.arange(len(self.idx2meta))
@@ -136,8 +148,9 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
                 data[k] = v[start:end]
 
         # Load img(as feature) : {mid -> 'features', 'bbx_xys', 'img_wh', 'start_end'}
-        imgfeat_file = self.f_img_folder / f"{subset}/{file_name}.pth"
-        features = torch.load(imgfeat_file)
+        if not self.wo_img_feat:
+            imgfeat_file = self.f_img_folder / f"{subset}/{file_name}.pth"
+            features = torch.load(imgfeat_file)
         bbx_xywh = data["bbox"]
         x1, y1, w, h = bbx_xywh[:, 0], bbx_xywh[:, 1], bbx_xywh[:, 2], bbx_xywh[:, 3]
         bbx_xyxy = torch.stack([x1, y1, x1 + w, y1 + h], dim=1)
@@ -149,7 +162,12 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         width, height = data["width"], data["height"]
         kp2d = data["body_kpts"]
         # remap (start, end)
-        data["f_imgseq"] = features[start:end].float()  # (L, 1024)
+        if not self.wo_img_feat:
+            data["f_imgseq"] = features[start:end].float()  # (L, 1024)
+        else:
+            data["f_imgseq"] = torch.zeros(
+                (bbx_xys.shape[0], 1024)
+            )  # NOTE: a placeholder
 
         data["bbx_xys"] = bbx_xys.float()  # (L, 4)
         data["img_wh"] = torch.tensor([width, height])  # (2)
@@ -173,8 +191,8 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         start, end = data["start_end"]
 
         # SMPL params in cam
-        body_pose = data["pose"][start:end]  # (F, 63)
-        betas = data["beta"][start:end]  # (F, 10)
+        body_pose = data["pose"]  # [start:end]  # (F, 63)
+        betas = data["beta"]  # [start:end]  # (F, 10)
         global_orient_c = data["global_orient_c"]  # (F, 3)
         transl_c = data["trans_c"]
         smpl_params_c = {
@@ -187,6 +205,12 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         # SMPL params in world
         global_orient_w = data["global_orient"]  # (F, 3)
         transl_w = data["trans"]  # (F, 3)
+        # Covert from Z-up to Y-up
+        base_rot = torch.FloatTensor([[1, 0, 0], [0, 0, 1], [0, -1, 0]])
+        global_orient_w = matrix_to_axis_angle(
+            base_rot @ axis_angle_to_matrix(global_orient_w)
+        )
+        transl_w = (base_rot @ transl_w.T).T
         smpl_params_w = {
             "body_pose": body_pose,
             "betas": betas,
@@ -252,7 +276,11 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
             return_data["text_embed"] = data["text_embed"]
         else:
             return_data = {
-                "meta": {"data_name": "bedlam", "idx": idx},
+                "meta": {
+                    "data_name": "bedlam",
+                    "idx": idx,
+                    "eval_text_only": self.eval_text_only,
+                },
                 "length": length,
                 "smpl_params_c": smpl_params_c,
                 "smpl_params_w": smpl_params_w,
