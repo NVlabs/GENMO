@@ -126,8 +126,6 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
             length = min(max_motion_len, mlength)
         if self.motion_start_mode == "sample":
             start = np.random.randint(0, max(mlength - length + 1, 1))
-        elif self.motion_start_mode == "sample_early":
-            start = np.random.randint(0, max(mlength // 4, 1))
         else:
             start = 0
         end = start + length
@@ -188,7 +186,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         return data
 
     def _process_data(self, data, idx):
-        length = data["pose"].shape[0]  # data["length"]
+        length = data["length"]
 
         start, end = data["start_end"]
 

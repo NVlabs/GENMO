@@ -270,7 +270,9 @@ class Humanml3dDataset(BaseDataset):
             }
         """
         if self.motion_start_mode == "sample":
-            start = np.random.randint(0, max(data["body_pose"].shape[0] // 4, 1))
+            mlength = data["body_pose"].shape[0]
+            length = min(self.motion_frames, mlength)
+            start = np.random.randint(0, max(mlength - length + 1, 1))
             for k, v in data.items():
                 if v in ["body_pose", "betas", "global_orient", "transl"]:
                     data[k] = v[start:]
