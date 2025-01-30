@@ -25,7 +25,7 @@ export XDG_CACHE_HOME=$cache_dir
 
 if [[ -n "$SLURM_LOCALID" && "$SLURM_LOCALID" -ne 0 ]]; then
     # Place the commands you want to run here
-    echo "sleep 30s since SLURM_LOCALID is not 0"
+    echo "sleep 60s since SLURM_LOCALID is not 0"
     sleep 60
 else
     echo "run installation since SLURM_LOCALID is 0"
@@ -45,7 +45,7 @@ else
         ln -s /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR ./inputs
     fi
 
-    pip install transformers==4.41.2 moviepy imageio einops dnspython numpy==1.23.5 pyvista scenepic fasteners
+    pip install transformers==4.41.2 moviepy imageio einops dnspython numpy==1.23.5 scenepic fasteners
     # pip install -e third-party/DPVO
     pip install -e .
 fi

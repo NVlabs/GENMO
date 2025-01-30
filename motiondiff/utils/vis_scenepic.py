@@ -5,7 +5,6 @@ sys.path.append(os.path.join(os.getcwd()))
 import time
 
 import numpy as np
-import pyvista
 import scenepic as sp
 import torch
 import wandb
