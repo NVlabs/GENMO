@@ -23,18 +23,18 @@ export HUGGINGFACE_HUB_CACHE=$cache_dir
 export XDG_CACHE_HOME=$cache_dir
 
 
-if [[ -n "$SLURM_LOCALID" && "$SLURM_LOCALID" -ne 0 ]]; then
+if [[ -n "$SLURM_PROCID" && "$SLURM_LOCALID" -ne 0 ]]; then
     echo "skip installation since SLURM_LOCALID is not 0"
     # Check if the total number of SLURM nodes used is more than 4
     if [ "$SLURM_JOB_NUM_NODES" -gt 4 ]; then
-        echo "sleep 180s since SLURM_JOB_NUM_NODES is more than 4"
-        sleep 180
+        echo "sleep 60s since SLURM_JOB_NUM_NODES is more than 4"
+        sleep 60
     else
         echo "sleep 60s since SLURM_JOB_NUM_NODES is less than 4"
         sleep 60
     fi
 else
-    echo "run installation since SLURM_LOCALID is 0"
+    echo "run installation since SLURM_PROCID is 0"
 
     if [ ! -d "$cache_dir" ]; then
         mkdir -p $cache_dir
