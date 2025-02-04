@@ -61,6 +61,7 @@ class Humanml3dDataset(BaseDataset):
         num_multi_text=3,
         multi_text_vid=None,
         motion_start_mode="first",
+        enable_speed_aug=False,
     ):
         self.root = Path("inputs/HumanML3D_SMPL/hmr4d_support")
         if split == "train":
@@ -102,6 +103,7 @@ class Humanml3dDataset(BaseDataset):
             self.num_multi_text = len(self.multi_text_vid)
             self.vid_to_idx = {}
         self.motion_start_mode = motion_start_mode
+        self.enable_speed_aug = enable_speed_aug
         super().__init__(cam_augmentation, limit_size)
         if self.use_multi_text:
             for i, (vid, _) in enumerate(self.idx2meta):
@@ -208,9 +210,13 @@ class Humanml3dDataset(BaseDataset):
         # Get {tgt_len} frames from data
         # Random select a subset with speed augmentation  [start, end)
         tgt_len = self.motion_frames
-        raw_subset_len = self.rng.randint(
-            int(tgt_len / self.l_factor), int(tgt_len * self.l_factor)
-        )
+        if self.enable_speed_aug:
+            raw_subset_len = self.rng.randint(
+                int(tgt_len / self.l_factor), int(tgt_len * self.l_factor)
+            )
+        else:
+            raw_subset_len = tgt_len
+        raw_subset_len = min(raw_subset_len, raw_len)
         if raw_subset_len <= raw_len:
             start = self.rng.randint(0, raw_len - raw_subset_len + 1)
             end = start + raw_subset_len
@@ -220,7 +226,13 @@ class Humanml3dDataset(BaseDataset):
         data = {k: v[start:end] for k, v in data.items()}
 
         # Interpolation (vec + r6d)
-        data_interpolated = interpolate_smpl_params(data, tgt_len)
+        if self.enable_speed_aug:
+            data_interpolated = interpolate_smpl_params(data, tgt_len)
+        else:
+            data_interpolated = data
+            if raw_subset_len < tgt_len:
+                data_interpolated = pad_smpl_params(data, tgt_len)
+
         # text_data = self.rng.choice(raw_data["text_data"])
         if self.use_random_subset or self.eval_text_only:
             text_ind = 0

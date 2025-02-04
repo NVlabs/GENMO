@@ -1,6 +1,7 @@
 import math
 from typing import Optional, Tuple
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,6 +9,35 @@ from einops import einsum, rearrange, repeat
 from timm.models.vision_transformer import Mlp
 
 from hmr4d.network.base_arch.embeddings.rotary_embedding import ROPE
+
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, dropout=0.1, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model)
+        )
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+
+        self.pe = nn.Parameter(pe, requires_grad=False)
+
+    def forward(self, x, motion_text_pos_enc=None):
+        pe = self.pe.transpose(0, 1)
+        if "clamp_" in motion_text_pos_enc:
+            clamp_len = int(motion_text_pos_enc.split("_")[-1])
+            pe = pe[:, :clamp_len, :]
+            pe = torch.cat([pe, pe[:, [-1]].repeat(1, x.size(1) - clamp_len, 1)], dim=1)
+        else:
+            pe = pe[:, : x.shape[1], :]
+        pe = self.dropout(pe)
+        x = x + pe
+        return x
 
 
 class RoPEAttention(nn.Module):
@@ -114,6 +144,7 @@ class DecoderRoPEBlock(nn.Module):
         dropout=0.1,
         use_self_attn=True,
         cross_attn_type="rope",
+        pos_enc_dropout=0.0,
         **block_kwargs,
     ):
         super().__init__()
@@ -144,6 +175,8 @@ class DecoderRoPEBlock(nn.Module):
         self.gate_cross_attn = nn.Parameter(torch.zeros(1, 1, hidden_size))
         self.gate_mlp = nn.Parameter(torch.zeros(1, 1, hidden_size))
 
+        self.motion_pos_encoder = PositionalEncoding(hidden_size, pos_enc_dropout)
+
         # Zero-out adaLN modulation layers
         nn.init.constant_(self.gate_cross_attn, 0)
         nn.init.constant_(self.gate_mlp, 0)
@@ -156,6 +189,7 @@ class DecoderRoPEBlock(nn.Module):
         tgt_key_padding_mask=None,
         memory_key_padding_mask=None,
         multi_text_data=None,
+        motion_text_pos_enc=None,
     ):
         if self.use_self_attn:
             x = x + self.gate_msa * self._sa_block(
@@ -168,6 +202,7 @@ class DecoderRoPEBlock(nn.Module):
             context=context,
             key_padding_mask=memory_key_padding_mask,
             multi_text_data=multi_text_data,
+            motion_text_pos_enc=motion_text_pos_enc,
         )
         x = x + self.gate_mlp * self.mlp(self.norm3(x))
         return x
@@ -177,12 +212,22 @@ class DecoderRoPEBlock(nn.Module):
         x = self.self_attn(x, attn_mask=attn_mask, key_padding_mask=key_padding_mask)
         return x
 
-    def _ca_block(self, x, context, key_padding_mask=None, multi_text_data=None):
+    def _ca_block(
+        self,
+        x,
+        context,
+        key_padding_mask=None,
+        multi_text_data=None,
+        motion_text_pos_enc=None,
+    ):
         # x: (B, L, C)
         if self.cross_attn_type == "rope":
+            if motion_text_pos_enc is not None:
+                x = self.motion_pos_encoder(x, motion_text_pos_enc)
             x = self.cross_attn(x, context=context, key_padding_mask=key_padding_mask)
         elif self.cross_attn_type == "mha":
             if multi_text_data is not None:
+                # TODO: implement positional encoding for MHA
                 out = []
                 window_start = (
                     (multi_text_data["window_start"] * x.size(1)).round().long()
@@ -205,6 +250,8 @@ class DecoderRoPEBlock(nn.Module):
                     out.append(out_i)
                 x = torch.sum(torch.stack(out), dim=0)
             else:
+                if motion_text_pos_enc is not None:
+                    x = self.motion_pos_encoder(x, motion_text_pos_enc)
                 x = self.cross_attn(
                     x, context, context, key_padding_mask=key_padding_mask
                 )[0]

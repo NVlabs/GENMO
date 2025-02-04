@@ -58,6 +58,20 @@ def interpolate_smpl_params(smpl_params, tgt_len):
     }
 
 
+def pad_smpl_params(smpl_params, tgt_len):
+    for key in smpl_params.keys():
+        smpl_params[key] = torch.cat(
+            [
+                smpl_params[key],
+                torch.zeros(
+                    tgt_len - smpl_params[key].shape[0], *smpl_params[key].shape[1:]
+                ),
+            ],
+            dim=0,
+        )
+    return smpl_params
+
+
 def rotate_around_axis(global_orient, transl, axis="y"):
     """Global coordinate augmentation. Random rotation around y-axis"""
     angle = torch.rand(1) * 2 * torch.pi

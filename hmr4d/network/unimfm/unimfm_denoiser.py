@@ -58,6 +58,7 @@ class NetworkEncoderRoPE(nn.Module):
         encoded_text_dim=1024,
         use_text_pos_enc=True,
         text_encoder_cfg={},
+        motion_text_pos_enc=None,
         text_mask_prob=0.0,
         input_remove_global=False,
         input_remove_condition=False,
@@ -147,6 +148,8 @@ class NetworkEncoderRoPE(nn.Module):
             else:
                 raise ValueError(f"Invalid net_type {net_type}")
             self.text_encoder_layers[f"{idx}"] = text_block
+
+        self.motion_text_pos_enc = motion_text_pos_enc
 
         # Output heads
         self.final_layer = Mlp(self.latent_dim, out_features=self.output_dim)
@@ -276,6 +279,7 @@ class NetworkEncoderRoPE(nn.Module):
                     attn_mask=attnmask,
                     tgt_key_padding_mask=pmask,
                     multi_text_data=multi_text_data,
+                    motion_text_pos_enc=self.motion_text_pos_enc,
                 )
             x = block(x, attn_mask=attnmask, tgt_key_padding_mask=pmask)
 
