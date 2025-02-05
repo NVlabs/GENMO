@@ -626,6 +626,23 @@ class UNIMFM(pl.LightningModule):
                 rng.binomial(1, _cfg.mask_text_prob, size=motion.shape[0])
             ).to(motion.device)
 
+        def forecast(_cfg):
+            nonlocal motion_mask, rm_text_flag, all_keyframe_idx
+            min_len = _cfg.get("min_len", 1)
+            all_keyframe_idx = []
+            if "obs" in _cfg:
+                obs_ind = get_keyframe_obs_ind(_cfg.obs)
+            else:
+                obs_ind = np.arange(motion.shape[-1])
+            for i in range(motion.shape[0]):
+                mlen = length if isinstance(length, int) else length[i].item()
+                history_mlen = np.random.randint(min_len, mlen)
+                all_keyframe_idx.append(np.arange(history_mlen))
+                motion_mask[i, :history_mlen, obs_ind] = 1.0
+            rm_text_flag = torch.from_numpy(
+                rng.binomial(1, _cfg.mask_text_prob, size=motion.shape[0])
+            ).to(motion.device)
+
         for mi, cur_mask_type in enumerate(mask_type):
             # motion_mask is updated in place so can aggregate over all types
             if cur_mask_type != "no_mask":
@@ -797,7 +814,9 @@ class UNIMFM(pl.LightningModule):
 
         if mode == "infilling":
             batch["target_x"] = self.endecoder.encode(batch)  # (B, L, C)
-            rng = np.random.RandomState(batch["meta"][0].get("eval_seed", 7))
+            rng = np.random.RandomState(
+                batch["meta"][0].get("eval_seed", 7) + batch_idx
+            )
             assert "motion_3d_mask_cfg" in self.model_cfg
             all_mask_types = [
                 x

@@ -205,8 +205,10 @@ class MetricInfilling(pl.Callback):
             # Visualize
             if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
                 mask_type = outputs[0]["mask_type"]
+                has_text = outputs[0]["rm_text_flag"].item() == 0
+                text_suffix = "_text" if has_text else "_notext"
                 wandb_dict = visualize_smpl_scene(
-                    f"vis_infilling_{mask_type}",
+                    f"vis_infilling_{mask_type}{text_suffix}",
                     batch_idx,
                     f"{res_idx:02d}-{vid}",
                     pred_j3d_can_best,
