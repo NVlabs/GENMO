@@ -54,6 +54,7 @@ class EnDecoder(nn.Module):
         # option
         self.noise_pose_k = noise_pose_k
         self.encode_type = encode_type
+        self.obs_indices_dict = None
 
         # smpl
         self.smplx_model = make_smplx("supermotion_v437coco17")
@@ -163,6 +164,11 @@ class EnDecoder(nn.Module):
                 root_data,  # (B, L, 10) -> 136:143
             }
         """
+        self.obs_indices_dict = {
+            "body_pose": torch.arange(126),
+            "betas": torch.arange(126, 136),
+            "root_data": torch.arange(136, 143),
+        }
         B, L = inputs["smpl_params_w"]["body_pose"].shape[:2]
         # cam
         smpl_params_w = inputs["smpl_params_w"]
@@ -229,6 +235,14 @@ class EnDecoder(nn.Module):
                 local_transl_vel,  # (B, L, 3) -> 148:151, smpl-coord
             }
         """
+        self.obs_indices_dict = {
+            "body_pose": torch.arange(126),
+            "betas": torch.arange(126, 136),
+            "global_orient": torch.arange(136, 142),
+            "global_orient_gv": torch.arange(142, 148),
+            "local_transl_vel": torch.arange(148, 151),
+        }
+
         B, L = inputs["smpl_params_c"]["body_pose"].shape[:2]
         # cam
         smpl_params_c = inputs["smpl_params_c"]
@@ -388,6 +402,9 @@ class EnDecoder(nn.Module):
             return 151
         elif self.encode_type == "humanml3d":
             return 143
+
+    def get_obs_indices(self, obs):
+        return self.obs_indices_dict[obs]
 
 
 group_name = "endecoder/gvhmr"

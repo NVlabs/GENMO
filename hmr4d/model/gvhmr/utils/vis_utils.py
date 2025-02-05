@@ -87,7 +87,9 @@ def move_to_start_point_face_z(verts, J_regressor):
     return verts
 
 
-def visualize_smpl_scene(vis_type, index, vid, j3d, gt_j3d, transform_mode=None):
+def visualize_smpl_scene(
+    vis_type, index, vid, j3d, gt_j3d, transform_mode=None, keyframes=None
+):
     if transform_mode == "global":
         global_rot = axis_angle_to_matrix(torch.tensor([np.pi / 2, 0, 0])).cuda()
         j3d = (global_rot @ j3d.transpose(1, 2)).transpose(1, 2)
@@ -105,6 +107,8 @@ def visualize_smpl_scene(vis_type, index, vid, j3d, gt_j3d, transform_mode=None)
             "joints_pos": j3d,
         },
     }
+    if keyframes is not None:
+        smpl_seq["pred"]["keyframe_idx"] = keyframes.tolist()
     if gt_j3d is not None:
         smpl_seq["gt"] = {
             "joints_pos": gt_j3d,

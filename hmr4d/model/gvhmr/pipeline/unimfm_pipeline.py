@@ -78,6 +78,7 @@ class Pipeline(nn.Module):
             "f_cliffcam": 3,
             "f_cam_angvel": 6,
             "f_imgseq": 1024,
+            "observed_motion_3d": 151,
         }
 
     # ========== Training ========== #
@@ -109,7 +110,8 @@ class Pipeline(nn.Module):
                 )
         for k in self.args.mask_out_attr:
             f_condition[k] = torch.zeros_like(f_condition[k])
-            inputs["f_condition_exists"][k][:] = False
+            if k in inputs["f_condition_exists"]:
+                inputs["f_condition_exists"][k][:] = False
         f_condition_mask = inputs.get("f_condition_mask", {})
         for k in f_condition_mask:
             if k in f_condition:
@@ -132,7 +134,8 @@ class Pipeline(nn.Module):
         if eval_text_only:
             for k in f_condition.keys():
                 f_condition[k] = torch.zeros_like(f_condition[k])
-                inputs["f_condition_exists"][k][:] = False
+                if k in inputs["f_condition_exists"]:
+                    inputs["f_condition_exists"][k][:] = False
 
         inputs["f_condition"] = f_condition
         return inputs

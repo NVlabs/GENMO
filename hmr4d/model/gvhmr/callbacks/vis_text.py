@@ -101,6 +101,9 @@ class VisText(pl.Callback):
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
         """The behaviour is the same for val/test/predict"""
+        mode = batch["meta"][0].get("mode", None)
+        if mode != "default":
+            return
         assert batch["B"] == 1
         dataset_id = batch["meta"][0]["dataset_id"]
         if dataset_id not in ["humanml3d", "motion-x++2d"]:

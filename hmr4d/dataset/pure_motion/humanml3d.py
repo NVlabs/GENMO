@@ -42,6 +42,7 @@ from .utils import *
 class Humanml3dDataset(BaseDataset):
     def __init__(
         self,
+        mode="default",
         motion_frames=120,
         l_factor=1.5,  # speed augmentation
         skip_moyo=True,  # not contained in the ICCV19 released version
@@ -62,6 +63,7 @@ class Humanml3dDataset(BaseDataset):
         multi_text_vid=None,
         motion_start_mode="first",
         enable_speed_aug=False,
+        eval_seed=None,
     ):
         self.root = Path("inputs/HumanML3D_SMPL/hmr4d_support")
         if split == "train":
@@ -74,6 +76,7 @@ class Humanml3dDataset(BaseDataset):
             )
         if split == "test":
             no_subsample = True
+        self.mode = mode
         self.motion_frames = motion_frames
         self.l_factor = l_factor
         self.random1024 = random1024
@@ -104,6 +107,7 @@ class Humanml3dDataset(BaseDataset):
             self.vid_to_idx = {}
         self.motion_start_mode = motion_start_mode
         self.enable_speed_aug = enable_speed_aug
+        self.eval_seed = eval_seed
         super().__init__(cam_augmentation, limit_size)
         if self.use_multi_text:
             for i, (vid, _) in enumerate(self.idx2meta):
@@ -422,6 +426,8 @@ class Humanml3dDataset(BaseDataset):
                 "eval_text_only": self.eval_text_only,
                 "mid": mid,
                 "text_ind": text_ind,
+                "mode": self.mode,
+                "eval_seed": self.eval_seed,
             },
             "length": valid_length,
             "smpl_params_c": smpl_params_c,
