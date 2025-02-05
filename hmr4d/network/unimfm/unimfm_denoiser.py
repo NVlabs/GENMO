@@ -134,6 +134,7 @@ class NetworkEncoderRoPE(nn.Module):
         use_self_attn = text_encoder_cfg.get("use_self_attn", False)
         net_type = text_encoder_cfg.get("net_type", "rope_decoder")
         cross_attn_type = text_encoder_cfg.get("cross_attn_type", "rope")
+        pos_enc_dropout = text_encoder_cfg.get("pos_enc_dropout", 0.0)
         self.text_encoder_layers = nn.ModuleDict()
         for idx in self.text_encode_layer_idx:
             if net_type == "rope_decoder":
@@ -144,6 +145,7 @@ class NetworkEncoderRoPE(nn.Module):
                     mlp_ratio=mlp_ratio,
                     dropout=dropout,
                     cross_attn_type=cross_attn_type,
+                    pos_enc_dropout=pos_enc_dropout,
                 )
             else:
                 raise ValueError(f"Invalid net_type {net_type}")
@@ -227,10 +229,7 @@ class NetworkEncoderRoPE(nn.Module):
             xt[..., -15:] = 0
 
         if motion_mask_3d is not None:
-            xt[:, :, -self.output_dim :] = (
-                xt[:, :, -self.output_dim :] * (1 - motion_mask_3d)
-                + observed_motion_3d * motion_mask_3d
-            )
+            xt = xt * (1 - motion_mask_3d) + observed_motion_3d * motion_mask_3d
 
         emb = self.embed_timestep(timesteps)  # [1, bs, d]
         x = x + emb

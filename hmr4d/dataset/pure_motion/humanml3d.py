@@ -228,10 +228,12 @@ class Humanml3dDataset(BaseDataset):
         # Interpolation (vec + r6d)
         if self.enable_speed_aug:
             data_interpolated = interpolate_smpl_params(data, tgt_len)
+            valid_length = tgt_len
         else:
             data_interpolated = data
             if raw_subset_len < tgt_len:
                 data_interpolated = pad_smpl_params(data, tgt_len)
+            valid_length = raw_subset_len
 
         # text_data = self.rng.choice(raw_data["text_data"])
         if self.use_random_subset or self.eval_text_only:
@@ -269,6 +271,7 @@ class Humanml3dDataset(BaseDataset):
         data_interpolated["gender"] = raw_data["gender"]
         data_interpolated["caption"] = caption
         data_interpolated["text_embed"] = text_embed
+        data_interpolated["valid_length"] = valid_length
         return data_interpolated
 
     def _process_data(self, data, idx):
@@ -293,6 +296,7 @@ class Humanml3dDataset(BaseDataset):
         mid = data["mid"]
         text_ind = data["text_ind"]
         length = data["body_pose"].shape[0]
+        valid_length = data["valid_length"]
         # Augmentation: betas, SMPL (gravity-axis)
         gender = str(data["gender"])
         body_pose = data["body_pose"]
@@ -324,7 +328,8 @@ class Humanml3dDataset(BaseDataset):
                 None,
             )
             w_j3d = (
-                w_j3d.repeat_interleave(N, dim=0) + smpl_params_w["transl"][:, None]
+                w_j3d.repeat_interleave(N, dim=0)[:length]
+                + smpl_params_w["transl"][:, None]
             )  # (F, 24, 3)
 
             if False:
@@ -346,7 +351,8 @@ class Humanml3dDataset(BaseDataset):
                 None,
             )
             w_j3d = (
-                w_j3d.repeat_interleave(N, dim=0) + smpl_params_w["transl"][:, None]
+                w_j3d.repeat_interleave(N, dim=0)[:length]
+                + smpl_params_w["transl"][:, None]
             )  # (F, 24, 3)
 
             if False:
@@ -417,7 +423,7 @@ class Humanml3dDataset(BaseDataset):
                 "mid": mid,
                 "text_ind": text_ind,
             },
-            "length": length,
+            "length": valid_length,
             "smpl_params_c": smpl_params_c,
             "smpl_params_w": smpl_params_w,
             "R_c2gv": R_c2gv,  # (F, 3, 3)
@@ -433,7 +439,7 @@ class Humanml3dDataset(BaseDataset):
             "caption": caption,
             "text_embed": text_embed,
             "mask": {
-                "valid": get_valid_mask(length, length),
+                "valid": get_valid_mask(length, valid_length),
                 "vitpose": False,
                 "bbx_xys": False,
                 "f_imgseq": False,
