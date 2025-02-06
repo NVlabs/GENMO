@@ -142,7 +142,7 @@ def train(cfg: DictConfig) -> None:
 
     wandb_cfg = OmegaConf.to_container(cfg, resolve=True)
     if cfg.ckpt_path is not None:
-        if cfg.get("rsync_ckpt", False):
+        if cfg.get("rsync_ckpt", False) and not os.path.exists(cfg.ckpt_path):
             print(f"rsyncing from remote: {cfg.ckpt_path}")
             cfg.ckpt_path = cfg.ckpt_path.replace(cfg.remote_results_path, "outputs")
             local_dir = cfg.ckpt_path.split("/version_")[0]
