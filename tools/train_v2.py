@@ -61,15 +61,7 @@ def train(cfg: DictConfig) -> None:
             f"[GPU x Batch] = {cfg.pl_trainer.devices} x {cfg.data.loader_opts.train.batch_size}"
         )
     num_nodes = cfg.pl_trainer.get("num_nodes", 1)
-    if "bones_2d" in cfg.test_datasets and "num_data" in cfg.test_datasets.bones_2d:
-        cfg.test_datasets.bones_2d.num_data *= cfg.pl_trainer.devices * num_nodes
-    if (
-        "humanml3d_eval" in cfg.test_datasets
-        and "random_subset_size" in cfg.test_datasets.humanml3d_eval
-    ):
-        cfg.test_datasets.humanml3d_eval.random_subset_size *= (
-            cfg.pl_trainer.devices * num_nodes
-        )
+    cfg.num_test_data *= cfg.pl_trainer.devices * num_nodes
     if (
         "imgfeat_motionx" in cfg.test_datasets
         and "max_num_motions" in cfg.test_datasets.imgfeat_motionx

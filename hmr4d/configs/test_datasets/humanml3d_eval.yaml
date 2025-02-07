@@ -3,5 +3,5 @@ humanml3d_eval:
   eval_text_only: true
   cam_augmentation: v11
   use_random_subset: true
-  random_subset_size: 32
+  random_subset_size: ${num_test_data}
   random_subset_seed: 7

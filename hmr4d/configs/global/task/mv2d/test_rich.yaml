@@ -8,6 +8,7 @@ defaults:
   - _self_
 
 task: test
+num_test_data: 32
 data_name: test_mocap
 ckpt_path: ??? # will not override previous setting if already set
 

@@ -44,6 +44,7 @@ callbacks:
 seed: ${trial_ind}
 
 task: test
+num_test_data: 32
 # remote_results_path: /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/yey/gvhmr
 remote_results_path: /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jiefengl/gvhmr
 ckpt_path: ??? # will not override previous setting if already set

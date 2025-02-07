@@ -3,7 +3,7 @@ motionx_test:
   split: test
   version: vglobal
   motion_start_mode: first
-  max_num_motions: 64
+  max_num_motions: ${num_test_data}
   random_permute: true
   random_seed: 7
   wo_img_feat: true
