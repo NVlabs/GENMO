@@ -1,7 +1,7 @@
 bones_2d:
   _target_: hmr4d.dataset.wild.bones_2d_dataset_v2.Bones2DDatasetV2SingleView
   num_frames: 120
-  num_data: 10
+  num_data: ${num_test_data}
   shuffle_data_seed: 7
   img_h: 1024
   img_w: 1024

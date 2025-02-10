@@ -28,6 +28,7 @@ class UNIMFMDiffusion(nn.Module):
         cam_angvel_dim=6,
         cam_t_vel_dim=3,
         imgseq_dim=1024,
+        observed_motion_3d_dim=151,
         latent_dim=512,
         dropout=0.1,
         args=None,
@@ -46,6 +47,7 @@ class UNIMFMDiffusion(nn.Module):
         self.cam_angvel_dim = cam_angvel_dim
         self.cam_t_vel_dim = cam_t_vel_dim
         self.imgseq_dim = imgseq_dim
+        self.observed_motion_3d_dim = observed_motion_3d_dim
         self.s_pred_ind = 0
 
         # intermediate
@@ -107,23 +109,35 @@ class UNIMFMDiffusion(nn.Module):
                 zero_module(nn.Linear(self.imgseq_dim, latent_dim)),
             )
 
+        if "observed_motion_3d" in self.args.in_attr:
+            self.observed_motion_3d_embedder = nn.Sequential(
+                nn.Linear(self.observed_motion_3d_dim * 2, latent_dim),
+                nn.SiLU(),
+                nn.Dropout(dropout),
+                zero_module(nn.Linear(latent_dim, latent_dim)),
+            )
+
         add_dim = 0
         if self.use_cond_exists_as_input:
             if cond_merge_strategy == "add":
                 self.cond_exists_embedder = nn.ModuleDict()
                 for k in self.args.in_attr:
-                    self.cond_exists_embedder[k] = nn.Sequential(
-                        nn.Linear(latent_dim + 1, latent_dim),
-                        nn.SiLU(),
-                        zero_module(nn.Linear(latent_dim, latent_dim)),
-                    )
+                    if k != "observed_motion_3d":
+                        self.cond_exists_embedder[k] = nn.Sequential(
+                            nn.Linear(latent_dim + 1, latent_dim),
+                            nn.SiLU(),
+                            zero_module(nn.Linear(latent_dim, latent_dim)),
+                        )
             elif cond_merge_strategy == "concat":
                 add_dim = cond_exists_dim
 
         if cond_merge_strategy == "concat":
             # self.cond_merger = nn.Linear(len(self.args.in_attr) * (latent_dim + add_dim), latent_dim)
+            in_dim = len(self.args.in_attr) * (latent_dim + add_dim)
+            if "observed_motion_3d" in self.args.in_attr:
+                in_dim -= add_dim
             self.cond_merger = nn.Sequential(
-                nn.Linear(len(self.args.in_attr) * (latent_dim + add_dim), latent_dim),
+                nn.Linear(in_dim, latent_dim),
                 nn.SiLU(),
                 zero_module(nn.Linear(latent_dim, latent_dim)),
             )
@@ -194,15 +208,27 @@ class UNIMFMDiffusion(nn.Module):
             f_imgseq = f_condition["f_imgseq"]  # (B, L, C)
             f_imgseq = self.imgseq_embedder(f_imgseq)
             f_cond_dict["f_imgseq"] = f_imgseq
+        if "observed_motion_3d" in f_condition:
+            motion_mask_3d = inputs.get(
+                "motion_mask_3d", torch.zeros_like(f_condition["observed_motion_3d"])
+            )
+            f_observed_motion_3d = torch.cat(
+                [f_condition["observed_motion_3d"], motion_mask_3d], dim=-1
+            )
+            f_observed_motion_3d = self.observed_motion_3d_embedder(
+                f_observed_motion_3d
+            )
+            f_cond_dict["observed_motion_3d"] = f_observed_motion_3d
 
         if self.cond_merge_strategy == "add":
             if self.use_cond_exists_as_input:
                 for k in f_cond_dict:
-                    f_cond_dict[k] = torch.cat(
-                        [f_cond_dict[k], f_condition_exists[k][:, :, None].float()],
-                        dim=-1,
-                    )
-                    f_cond_dict[k] = self.cond_exists_embedder[k](f_cond_dict[k])
+                    if k != "observed_motion_3d":
+                        f_cond_dict[k] = torch.cat(
+                            [f_cond_dict[k], f_condition_exists[k][:, :, None].float()],
+                            dim=-1,
+                        )
+                        f_cond_dict[k] = self.cond_exists_embedder[k](f_cond_dict[k])
             f_cond = sum(f_cond_dict.values())
         elif self.cond_merge_strategy == "concat":
             f_cond = torch.cat(list(f_cond_dict.values()), dim=-1)
@@ -212,6 +238,7 @@ class UNIMFMDiffusion(nn.Module):
                     .float()
                     .repeat(1, 1, self.cond_exists_dim)
                     for k in f_cond_dict
+                    if k != "observed_motion_3d"
                 ],
                 dim=-1,
             )
@@ -248,6 +275,10 @@ class UNIMFMDiffusion(nn.Module):
         }
         if "encoded_text" in inputs:
             denoiser_kwargs["y"]["encoded_text"] = inputs["encoded_text"]
+        if "observed_motion_3d" in inputs:
+            denoiser_kwargs["observed_motion_3d"] = inputs["observed_motion_3d"]
+            denoiser_kwargs["motion_mask_3d"] = inputs["motion_mask_3d"]
+            denoiser_kwargs["rm_text_flag"] = inputs["rm_text_flag"]
 
         if mode == "regression":
             t = (
@@ -332,6 +363,10 @@ class UNIMFMDiffusion(nn.Module):
         }
         if "encoded_text" in inputs:
             denoiser_kwargs["y"]["encoded_text"] = inputs["encoded_text"]
+        if "observed_motion_3d" in inputs:
+            denoiser_kwargs["observed_motion_3d"] = inputs["observed_motion_3d"]
+            denoiser_kwargs["motion_mask_3d"] = inputs["motion_mask_3d"]
+            denoiser_kwargs["rm_text_flag"] = inputs["rm_text_flag"]
 
         if mode == "regression":
             t = (
@@ -448,6 +483,10 @@ class UNIMFMDiffusion(nn.Module):
             cond["y"]["encoded_text"] = inputs["encoded_text"]
         if "meta" in inputs and "multi_text_data" in inputs["meta"][0]:
             cond["y"]["multi_text_data"] = inputs["meta"][0]["multi_text_data"]
+        if "observed_motion_3d" in inputs:
+            cond["observed_motion_3d"] = inputs["observed_motion_3d"]
+            cond["motion_mask_3d"] = inputs["motion_mask_3d"]
+            cond["rm_text_flag"] = inputs.get("rm_text_flag", None)
 
         if regression_only:
             t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
@@ -479,10 +518,6 @@ class UNIMFMDiffusion(nn.Module):
 
             if self.args.get("return_mid", False):
                 kwargs["return_mid"] = True
-
-            if "observed_motion_3d" in inputs:
-                cond["observed_motion_3d"] = inputs["observed_motion_3d"]
-                cond["motion_mask_3d"] = inputs["motion_mask_3d"]
 
             denoise_out = sample_fn(
                 denoiser,

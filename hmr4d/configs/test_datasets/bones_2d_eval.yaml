@@ -6,7 +6,7 @@ bones_2d:
   use_orig_length: true
   return_smpl: true
   num_frames: 120
-  num_data: 100
+  num_data: ${num_test_data}
   shuffle_data_seed: 7
   img_h: 1024
   img_w: 1024

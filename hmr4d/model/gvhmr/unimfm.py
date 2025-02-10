@@ -380,6 +380,12 @@ class UNIMFM(pl.LightningModule):
         batch["obs"] = obs
         batch["j2d_visible_mask"] = j2d_visible_mask
 
+        if "motion_3d_mask_cfg" in self.model_cfg:
+            mask_res = self.generate_motion_3d_mask(
+                self.model_cfg.motion_3d_mask_cfg, batch["target_x"], batch["length"]
+            )
+            batch.update(mask_res)
+
         if True:  # Use some detected vitpose (presave data)
             prob = 0.5
             mask_real_vitpose = (torch.rand(B).to(obs_kp2d) < prob) * batch["mask"][
@@ -568,6 +574,95 @@ class UNIMFM(pl.LightningModule):
                     mask[..., child] *= mask[..., parent]
         return mask
 
+    def generate_motion_3d_mask(
+        self, motion_mask_cfg, motion, length, use_mask_type=None, rng=None
+    ):
+        if rng is None:
+            rng = np.random
+        mask_type = use_mask_type
+        if "mask_probs" in motion_mask_cfg:
+            mask_probs = np.array(motion_mask_cfg.mask_probs) / np.sum(
+                motion_mask_cfg.mask_probs
+            )
+            if use_mask_type is not None:
+                mask_type = use_mask_type
+            else:
+                mask_type = rng.choice(motion_mask_cfg.mask_types, p=mask_probs)
+
+        if not isinstance(mask_type, list):
+            mask_type = [mask_type]
+
+        motion_mask = torch.zeros_like(motion)
+        rm_text_flag = torch.zeros(motion.shape[0], device=motion.device)
+        all_keyframe_idx = None
+
+        def get_keyframe_obs_ind(root_obs):
+            indices = []
+            for obs in root_obs:
+                indices.append(self.endecoder.get_obs_indices(obs))
+            indices = torch.cat(indices, dim=0)
+            return indices
+
+        def keyframes(_cfg):
+            nonlocal motion_mask, rm_text_flag, all_keyframe_idx
+            all_keyframe_idx = _cfg.get("keyframe_idx", None)
+            sample_keyframes = all_keyframe_idx is None
+            if sample_keyframes:
+                all_keyframe_idx = []
+            obs_ind = get_keyframe_obs_ind(_cfg.obs)
+            for i in range(motion.shape[0]):
+                if sample_keyframes:
+                    mlen = length if isinstance(length, int) else length[i].item()
+                    num_keyframes = rng.randint(
+                        _cfg.num_range[0], min(_cfg.num_range[1], mlen) + 1
+                    )
+                    keyframe_idx = rng.choice(mlen, num_keyframes, replace=False)
+                    all_keyframe_idx.append(keyframe_idx)
+                else:
+                    keyframe_idx = all_keyframe_idx[i]
+                for j in keyframe_idx:
+                    motion_mask[i, j, obs_ind] = 1.0
+            rm_text_flag = torch.from_numpy(
+                rng.binomial(1, _cfg.mask_text_prob, size=motion.shape[0])
+            ).to(motion.device)
+
+        def forecast(_cfg):
+            nonlocal motion_mask, rm_text_flag, all_keyframe_idx
+            min_len = _cfg.get("min_len", 1)
+            all_keyframe_idx = []
+            if "obs" in _cfg:
+                obs_ind = get_keyframe_obs_ind(_cfg.obs)
+            else:
+                obs_ind = np.arange(motion.shape[-1])
+            for i in range(motion.shape[0]):
+                mlen = length if isinstance(length, int) else length[i].item()
+                history_mlen = np.random.randint(min_len, mlen)
+                all_keyframe_idx.append(np.arange(history_mlen))
+                motion_mask[i, :history_mlen, obs_ind] = 1.0
+            rm_text_flag = torch.from_numpy(
+                rng.binomial(1, _cfg.mask_text_prob, size=motion.shape[0])
+            ).to(motion.device)
+
+        for mi, cur_mask_type in enumerate(mask_type):
+            # motion_mask is updated in place so can aggregate over all types
+            if cur_mask_type != "no_mask":
+                mask_cfg = motion_mask_cfg.get(cur_mask_type, {})
+                mask_func = locals()[mask_cfg.get("func", cur_mask_type)]
+                assert mask_func != "global_joints", (
+                    "multi-masking does not support global joints right now!"
+                )
+                mask_func(mask_cfg)
+
+        observed_motion = motion_mask * motion
+        res = {
+            "mask_type": "-".join(mask_type),
+            "motion_mask_3d": motion_mask,
+            "observed_motion_3d": observed_motion,
+            "rm_text_flag": rm_text_flag,
+            "all_3d_keyframe_idx": all_keyframe_idx,
+        }
+        return res
+
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         if "is_2d" in batch and batch["is_2d"][0]:
             return self.validation_2d(batch, batch_idx, dataloader_idx)
@@ -687,6 +782,7 @@ class UNIMFM(pl.LightningModule):
             obs[0, ~mask[0]] = 0
 
         eval_text_only = batch["meta"][0].get("eval_text_only", False)
+        mode = batch["meta"][0].get("mode", "default")
         batch_ = {
             "length": batch["length"],
             "obs": obs,
@@ -695,6 +791,7 @@ class UNIMFM(pl.LightningModule):
             "cam_angvel": batch["cam_angvel"],
             "f_imgseq": batch["f_imgseq"],
             "eval_text_only": eval_text_only,
+            "mode": mode,
             "meta": batch["meta"],
         }
         if infer_version == 3:
@@ -714,6 +811,28 @@ class UNIMFM(pl.LightningModule):
             batch_["encoded_text"] = self.encode_text(
                 batch["caption"], batch["has_text"]
             )
+
+        if mode == "infilling":
+            batch["target_x"] = self.endecoder.encode(batch)  # (B, L, C)
+            rng = np.random.RandomState(
+                batch["meta"][0].get("eval_seed", 7) + batch_idx
+            )
+            assert "motion_3d_mask_cfg" in self.model_cfg
+            all_mask_types = [
+                x
+                for x in self.model_cfg.motion_3d_mask_cfg.mask_types
+                if x != "no_mask"
+            ]
+            use_mask_type = all_mask_types[batch_idx % len(all_mask_types)]
+            mask_res = self.generate_motion_3d_mask(
+                self.model_cfg.motion_3d_mask_cfg,
+                batch["target_x"],
+                batch["length"],
+                rng=rng,
+                use_mask_type=use_mask_type,
+            )
+            batch_.update(mask_res)
+
         if "inpainting_3d" in self.model_cfg:
             batch_["observed_motion_3d"] = self.endecoder.encode(batch)
             motion_mask_3d = torch.zeros_like(batch_["observed_motion_3d"]).cuda()
@@ -762,6 +881,8 @@ class UNIMFM(pl.LightningModule):
                 k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()
             }
         outputs["eval_text_only"] = eval_text_only
+        if mode == "infilling":
+            outputs.update(mask_res)
 
         if do_flip_test:
             flip_test = batch["flip_test"]
