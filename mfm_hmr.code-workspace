@@ -20,6 +20,12 @@
 		},
 		"peacock.remoteColor": "#bab8ee",
 		"python.analysis.extraPaths": [
+			"/workspace/isaaclab/source/isaaclab/",
+			"/workspace/isaaclab/source/isaaclab_assets/",
+			"/workspace/isaaclab/source/isaaclab_mimic/",
+			"/workspace/isaaclab/source/isaaclab_rl/",
+			"/workspace/isaaclab/source/isaaclab_tasks/",
+			"third-party/PHC_Lab/"
 		],
 		"files.watcherExclude": {
 			"**/assets/**": true,

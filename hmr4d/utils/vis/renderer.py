@@ -2,17 +2,21 @@ import cv2
 import numpy as np
 import torch
 from PIL import Image
-from pytorch3d.renderer import (
-    Materials,
-    MeshRasterizer,
-    MeshRenderer,
-    PerspectiveCameras,
-    PointLights,
-    RasterizationSettings,
-    SoftPhongShader,
-    TexturesVertex,
-)
-from pytorch3d.renderer.cameras import look_at_rotation
+
+try:
+    from pytorch3d.renderer import (
+        Materials,
+        MeshRasterizer,
+        MeshRenderer,
+        PerspectiveCameras,
+        PointLights,
+        RasterizationSettings,
+        SoftPhongShader,
+        TexturesVertex,
+    )
+    from pytorch3d.renderer.cameras import look_at_rotation
+except ImportError:
+    print("pytorch3d 3d renderer not loaded!")
 from pytorch3d.structures import Meshes
 from pytorch3d.structures.meshes import join_meshes_as_scene
 

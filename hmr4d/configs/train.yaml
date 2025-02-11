@@ -2,6 +2,11 @@
 #             override             #
 # ================================ #
 # specify default configuration; the order determines the override order
+
+hydra:
+  searchpath:
+    - pkg://third-party/PHC_Lab/phc/cfg
+
 defaults:
   - _self_
   # pytorch-lightning
