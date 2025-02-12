@@ -6,6 +6,7 @@ repos:
       - id: ruff
         name: sort imports with ruff
         args: [--select, I, --fix]
+        exclude: "tools/train_ilab.py"
       - id: ruff-format
         name: format with ruff
 

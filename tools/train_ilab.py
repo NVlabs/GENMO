@@ -3,6 +3,8 @@ import sys
 from datetime import datetime
 
 sys.path.append("third-party/PHC_Lab/")
+from phc.humanoid import Humanoid
+
 import hydra
 import pytorch_lightning as pl
 import torch
@@ -12,7 +14,6 @@ from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks.checkpoint import Checkpoint
 
-from phc.humanoid import Humanoid
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 import yaml
