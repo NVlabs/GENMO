@@ -34,21 +34,49 @@ from . import stats_compose
 
 
 class EnDecoder(nn.Module):
+    # Define feature dimensions as a class attribute
+    FEATURE_DIMS = {
+        "gvhmr": 151,
+        "humanml3d": 143,
+        "humanoid": 69,  # Assuming this is the dimension for humanoid
+    }
+
     def __init__(
         self,
         stats_name="DEFAULT_01",
         encode_type="gvhmr",
+        feature_arr=["gvhmr", "humanml3d"],
+        stats_arr=["MM_V1_AMASS_LOCAL_BEDLAM_CAM", "HUMANML3D_V1"],
         noise_pose_k=10,
         clip_std=False,
     ):
         super().__init__()
-        # Load mean, std
-        stats = getattr(stats_compose, stats_name)
-        Log.info(f"[EnDecoder] Use {stats_name} for statistics!")
-        self.register_buffer("mean", torch.tensor(stats["mean"]).float(), False)
-        self.register_buffer("std", torch.tensor(stats["std"]).float(), False)
-        if clip_std:
-            self.std = torch.clamp(self.std, 0.1, 1)
+
+        if encode_type in ["gvhmr", "humanml3d"]:
+            feature_arr = [encode_type]
+            stats_arr = [stats_name]
+
+        # Store stats for each feature type
+        self.stats_dict = {}
+
+        for feature, stats_name in zip(feature_arr, stats_arr):
+            stats = getattr(stats_compose, stats_name)
+            mean = torch.tensor(stats["mean"]).float()
+            std = torch.tensor(stats["std"]).float()
+
+            feature_dim = self.FEATURE_DIMS[feature]
+            if stats_name != "DEFAULT_01":
+                assert mean.shape[-1] == feature_dim
+                assert std.shape[-1] == feature_dim
+
+            if clip_std:
+                std = torch.clamp(std, 0.1, 1)
+
+            self.stats_dict[feature] = {"mean": mean, "std": std}
+
+        # Store feature configuration
+        self.feature_arr = feature_arr
+        self.stats_arr = stats_arr
         self.clip_std = clip_std
 
         # option
@@ -61,6 +89,16 @@ class EnDecoder(nn.Module):
         parents = self.smplx_model.parents[:22]
         self.register_buffer("parents_tensor", parents, False)
         self.parents = parents.tolist()
+
+    def normalize(self, x, feature_type):
+        """Normalize input using stats for specific feature type"""
+        stats = self.stats_dict[feature_type]
+        return (x - stats["mean"].to(x)) / stats["std"].to(x)
+
+    def denormalize(self, x_norm, feature_type):
+        """Denormalize input using stats for specific feature type"""
+        stats = self.stats_dict[feature_type]
+        return x_norm * stats["std"].to(x_norm) + stats["mean"].to(x_norm)
 
     def get_noisyobs(self, data, return_type="r6d"):
         """
@@ -87,9 +125,13 @@ class EnDecoder(nn.Module):
         """body_pose_r6d: (B, L, {J*6}/{J, 6}) ->  (B, L, J*6)"""
         B, L = body_pose_r6d.shape[:2]
         body_pose_r6d = body_pose_r6d.reshape(B, L, -1)
-        if self.mean.shape[-1] == 1:  # no mean, std provided
+        if (
+            self.stats_dict[self.encode_type]["mean"].shape[-1] == 1
+        ):  # no mean, std provided
             return body_pose_r6d
-        body_pose_r6d = (body_pose_r6d - self.mean[:126]) / self.std[:126]  # (B, L, C)
+        body_pose_r6d = (
+            body_pose_r6d - self.stats_dict["gvhmr"]["mean"]
+        ) / self.stats_dict["gvhmr"]["std"]  # (B, L, C)
         return body_pose_r6d
 
     def fk_v2(
@@ -151,10 +193,25 @@ class EnDecoder(nn.Module):
         return static_gt
 
     def encode(self, inputs):
-        if self.encode_type == "gvhmr":
-            return self.encode_gvhmr(inputs)
-        elif self.encode_type == "humanml3d":
-            return self.encode_humanml3d(inputs)
+        """Composite encoder that combines multiple feature types"""
+        encoded_features = []
+
+        for feature in self.feature_arr:
+            if feature == "gvhmr":
+                encoded = self.encode_gvhmr(inputs)
+            elif feature == "humanml3d":
+                encoded = self.encode_humanml3d(inputs)
+            elif feature == "humanoid":
+                encoded = self.encode_humanoid(inputs)
+            encoded_features.append(encoded)
+
+        # Concatenate all encoded features
+        return torch.cat(encoded_features, dim=-1)
+
+    def encode_humanoid(self, inputs):
+        clean_action = inputs["clean_action"]
+        x = clean_action
+        return self.normalize(x, "humanoid")
 
     def encode_humanml3d(self, inputs):
         """
@@ -222,8 +279,7 @@ class EnDecoder(nn.Module):
         )
         # 126 + 10 + 7 = 143d
         x = torch.cat([body_pose_r6d, betas, root_data], dim=-1)
-        x_norm = (x - self.mean) / self.std
-        return x_norm
+        return self.normalize(x, "humanml3d")
 
     def encode_gvhmr(self, inputs):
         """
@@ -282,8 +338,7 @@ class EnDecoder(nn.Module):
             ],
             dim=-1,
         )
-        x_norm = (x - self.mean) / self.std
-        return x_norm
+        return self.normalize(x, "gvhmr")
 
     def encode_translw(self, inputs):
         """
@@ -303,23 +358,42 @@ class EnDecoder(nn.Module):
 
         # returns
         x = local_transl_vel
-        x_norm = (x - self.mean[-3:]) / self.std[-3:]
+        x_norm = (x - self.stats_dict["gvhmr"]["mean"][-3:]) / self.stats_dict["gvhmr"][
+            "std"
+        ][-3:]
         return x_norm
 
     def decode_translw(self, x_norm):
-        return x_norm * self.std[-3:] + self.mean[-3:]
+        return (
+            x_norm * self.stats_dict["gvhmr"]["std"][-3:]
+            + self.stats_dict["gvhmr"]["mean"][-3:]
+        )
 
     def decode(self, x_norm):
-        if self.encode_type == "gvhmr":
-            return self.decode_gvhmr(x_norm)
-        elif self.encode_type == "humanml3d":
-            return self.decode_humanml3d(x_norm)
+        """Composite decoder that handles multiple feature types"""
+        current_idx = 0
+        decoded_outputs = {}
+
+        for feature in self.feature_arr:
+            feature_size = self.FEATURE_DIMS[feature]
+            feature_norm = x_norm[..., current_idx : current_idx + feature_size]
+
+            if feature == "gvhmr":
+                decoded = self.decode_gvhmr(feature_norm)
+            elif feature == "humanml3d":
+                decoded = self.decode_humanml3d(feature_norm)
+            elif feature == "humanoid":
+                decoded = self.decode_humanoid(feature_norm)
+
+            decoded_outputs.update(decoded)
+            current_idx += feature_size
+
+        return decoded_outputs
 
     def decode_humanml3d(self, x_norm):
         """x_norm: (B, L, C)"""
         B, L, C = x_norm.shape
-        x = (x_norm * self.std) + self.mean
-        # x = x_norm
+        x = self.denormalize(x_norm, "humanml3d")
 
         body_pose_r6d = x[:, :, :126]
         betas = x[:, :, 126:136]
@@ -368,7 +442,7 @@ class EnDecoder(nn.Module):
     def decode_gvhmr(self, x_norm):
         """x_norm: (B, L, C)"""
         B, L, C = x_norm.shape
-        x = (x_norm * self.std) + self.mean
+        x = self.denormalize(x_norm, "gvhmr")
 
         body_pose_r6d = x[:, :, :126]
         betas = x[:, :, 126:136]
@@ -397,11 +471,25 @@ class EnDecoder(nn.Module):
 
         return output
 
+    def decode_humanoid(self, x_norm):
+        """
+        Decodes normalized humanoid features back to original action space
+
+        Args:
+            x_norm: (B, L, C) Normalized humanoid features
+
+        Returns:
+            dict: Contains denormalized action data
+        """
+        x = self.denormalize(x_norm, "humanoid")
+
+        output = {"clean_action": x}
+
+        return output
+
     def get_motion_dim(self):
-        if self.encode_type == "gvhmr":
-            return 151
-        elif self.encode_type == "humanml3d":
-            return 143
+        """Calculate total dimension based on enabled features"""
+        return sum(self.FEATURE_DIMS[feature] for feature in self.feature_arr)
 
     def get_obs_indices(self, obs):
         return self.obs_indices_dict[obs]
@@ -434,3 +522,13 @@ MainStore.store(
 
 MainStore.store(name="v2", node=cfg_base(stats_name="MM_V2"), group=group_name)
 MainStore.store(name="v2_1", node=cfg_base(stats_name="MM_V2_1"), group=group_name)
+
+MainStore.store(
+    name="v1_amass_local_bedlam_cam_humanoid",
+    node=cfg_base(
+        encode_type="compose",
+        feature_arr=["gvhmr", "humanoid"],
+        stats_arr=["MM_V1_AMASS_LOCAL_BEDLAM_CAM", "DEFAULT_01"],
+    ),
+    group=group_name,
+)
