@@ -45,8 +45,8 @@ class EnDecoder(nn.Module):
         self,
         stats_name="DEFAULT_01",
         encode_type="gvhmr",
-        feature_arr=["gvhmr", "humanml3d"],
-        stats_arr=["MM_V1_AMASS_LOCAL_BEDLAM_CAM", "HUMANML3D_V1"],
+        feature_arr=None,
+        stats_arr=None,
         noise_pose_k=10,
         clip_std=False,
     ):
@@ -209,8 +209,8 @@ class EnDecoder(nn.Module):
         return torch.cat(encoded_features, dim=-1)
 
     def encode_humanoid(self, inputs):
-        clean_action = inputs["clean_action"]
-        x = clean_action
+        humanoid_clean_action = inputs["humanoid_clean_action"]
+        x = humanoid_clean_action
         return self.normalize(x, "humanoid")
 
     def encode_humanml3d(self, inputs):
@@ -483,7 +483,7 @@ class EnDecoder(nn.Module):
         """
         x = self.denormalize(x_norm, "humanoid")
 
-        output = {"clean_action": x}
+        output = {"humanoid_clean_action": x}
 
         return output
 

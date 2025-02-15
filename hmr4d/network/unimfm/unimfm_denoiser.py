@@ -62,6 +62,7 @@ class NetworkEncoderRoPE(nn.Module):
         text_mask_prob=0.0,
         input_remove_global=False,
         input_remove_condition=False,
+        allow_autoregressive=True,
         **kwargs,
     ):
         super().__init__()
@@ -87,6 +88,7 @@ class NetworkEncoderRoPE(nn.Module):
         self.use_text_pos_enc = use_text_pos_enc
         self.input_remove_global = input_remove_global
         self.input_remove_condition = input_remove_condition
+        self.allow_autoregressive = allow_autoregressive
 
         # ===== build model ===== #
         # Input (Kp2d)
@@ -202,6 +204,7 @@ class NetworkEncoderRoPE(nn.Module):
         xt,
         timesteps,
         y=None,
+        inputs=None,
         observed_motion_3d=None,
         motion_mask_3d=None,
         rm_text_flag=None,
@@ -260,7 +263,13 @@ class NetworkEncoderRoPE(nn.Module):
         assert B == length.size(0)
         pmask = ~length_to_mask(length, L)  # (B, L)
 
-        if L > self.max_len:
+        autoregressive_mask = inputs.get("has_humanoid_data", None)
+        use_autoregressive = (
+            self.allow_autoregressive
+            and autoregressive_mask is not None
+            and autoregressive_mask.any()
+        )
+        if L > self.max_len or use_autoregressive:
             attnmask = torch.ones((L, L), device=x.device, dtype=torch.bool)
             for i in range(L):
                 min_ind = max(0, i - self.max_len // 2)
@@ -270,6 +279,19 @@ class NetworkEncoderRoPE(nn.Module):
                 attnmask[i, min_ind:max_ind] = False
         else:
             attnmask = None
+
+        if use_autoregressive:
+            # Expand attnmask to batch dimension if not already done
+            attnmask = attnmask.unsqueeze(0).expand(B, L, L)
+
+            # Create causal mask (upper triangular = True)
+            causal_mask = torch.triu(
+                torch.ones((L, L), device=x.device, dtype=torch.bool), diagonal=1
+            )
+
+            # Apply causal mask using logical OR where autoregressive_mask is True
+            autoregressive_mask = autoregressive_mask.view(B, 1, 1)
+            attnmask = attnmask | (causal_mask.unsqueeze(0) & autoregressive_mask)
 
         # Transformer
         for i, block in enumerate(self.blocks):

@@ -6,6 +6,9 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 from hmr4d.configs import MainStore, builds
+from hmr4d.dataset.pure_motion.base_dataset import BaseDataset
+from hmr4d.dataset.pure_motion.cam_traj_utils import CameraAugmentorV11
+from hmr4d.dataset.pure_motion.utils import *
 from hmr4d.utils.geo.hmr_cam import create_camera_sensor
 from hmr4d.utils.geo.hmr_global import (
     get_c_rootparam,
@@ -34,10 +37,6 @@ from hmr4d.utils.wis3d_utils import (
     make_wis3d,
 )
 
-from .base_dataset import BaseDataset
-from .cam_traj_utils import CameraAugmentorV11
-from .utils import *
-
 
 class Humanml3dDataset(BaseDataset):
     def __init__(
@@ -64,6 +63,9 @@ class Humanml3dDataset(BaseDataset):
         motion_start_mode="first",
         enable_speed_aug=False,
         eval_seed=None,
+        humanoid_data_dir=None,
+        humanoid_noise_seq=None,
+        discard_last_frame=False,
     ):
         self.root = Path("inputs/HumanML3D_SMPL/hmr4d_support")
         if split == "train":
@@ -108,6 +110,10 @@ class Humanml3dDataset(BaseDataset):
         self.motion_start_mode = motion_start_mode
         self.enable_speed_aug = enable_speed_aug
         self.eval_seed = eval_seed
+        self.humanoid_data_dir = humanoid_data_dir
+        self.humanoid_noise_seq = humanoid_noise_seq
+        self.has_humanoid_data = humanoid_data_dir is not None
+        self.discard_last_frame = discard_last_frame
         super().__init__(cam_augmentation, limit_size)
         if self.use_multi_text:
             for i, (vid, _) in enumerate(self.idx2meta):
@@ -203,13 +209,54 @@ class Humanml3dDataset(BaseDataset):
         mid, start_id = self.idx2meta[idx]
         raw_data = self.motion_files[mid]
         text_embed_data = self.text_embed_dict[mid].float()
+
         raw_len = raw_data["pose"].shape[0] - start_id
+        offset = 1 if self.discard_last_frame else 0
+        raw_len -= offset
         data = {
-            "body_pose": raw_data["pose"][start_id:, 3:],  # (F, 63)
+            "body_pose": raw_data["pose"][start_id : start_id + raw_len, 3:],  # (F, 63)
             "betas": raw_data["beta"].repeat(raw_len, 1),  # (10)
-            "global_orient": raw_data["pose"][start_id:, :3],  # (F, 3)
-            "transl": raw_data["trans"][start_id:],  # (F, 3)
+            "global_orient": raw_data["pose"][
+                start_id : start_id + raw_len, :3
+            ],  # (F, 3)
+            "transl": raw_data["trans"][start_id : start_id + raw_len],  # (F, 3)
         }
+
+        if self.has_humanoid_data:
+            noise_seq = np.random.choice(self.humanoid_noise_seq)
+            humanoid_data = torch.load(
+                f"{self.humanoid_data_dir}/{noise_seq}/{mid}.pth"
+            )
+            raw_humanoid_len = humanoid_data["obs"].shape[0] - start_id
+            if raw_humanoid_len >= raw_len:
+                data["humanoid_obs"] = humanoid_data["obs"][
+                    start_id : start_id + raw_len
+                ]
+                data["humanoid_clean_action"] = humanoid_data["clean_action"][
+                    start_id : start_id + raw_len
+                ]
+            else:
+                data["humanoid_obs"] = torch.cat(
+                    [
+                        humanoid_data["obs"][start_id:],
+                        torch.zeros(
+                            raw_len - raw_humanoid_len, *humanoid_data["obs"].shape[1:]
+                        ),
+                    ],
+                    dim=0,
+                )
+                data["humanoid_clean_action"] = torch.cat(
+                    [
+                        humanoid_data["clean_action"][start_id:],
+                        torch.zeros(
+                            raw_len - raw_humanoid_len,
+                            *humanoid_data["clean_action"].shape[1:],
+                        ),
+                    ],
+                    dim=0,
+                )
+        else:
+            humanoid_data = None
 
         # Get {tgt_len} frames from data
         # Random select a subset with speed augmentation  [start, end)
@@ -236,7 +283,7 @@ class Humanml3dDataset(BaseDataset):
         else:
             data_interpolated = data
             if raw_subset_len < tgt_len:
-                data_interpolated = pad_smpl_params(data, tgt_len)
+                data_interpolated = pad_data(data, tgt_len)
             valid_length = raw_subset_len
 
         # text_data = self.rng.choice(raw_data["text_data"])
@@ -276,6 +323,11 @@ class Humanml3dDataset(BaseDataset):
         data_interpolated["caption"] = caption
         data_interpolated["text_embed"] = text_embed
         data_interpolated["valid_length"] = valid_length
+        if self.has_humanoid_data:
+            raw_subset_humanoid_len = (
+                min(start + raw_subset_len, raw_humanoid_len) - start
+            )
+            data_interpolated["valid_humanoid_length"] = raw_subset_humanoid_len
         return data_interpolated
 
     def _process_data(self, data, idx):
@@ -310,6 +362,14 @@ class Humanml3dDataset(BaseDataset):
         )
         caption = data["caption"]
         text_embed = data["text_embed"]
+        if self.has_humanoid_data:
+            valid_humanoid_length = data["valid_humanoid_length"]
+            humanoid_obs = data["humanoid_obs"]
+            humanoid_clean_action = data["humanoid_clean_action"]
+        else:
+            valid_humanoid_length = 0
+            humanoid_obs = None
+            humanoid_clean_action = None
         del data
 
         # SMPL_params in world
@@ -428,6 +488,7 @@ class Humanml3dDataset(BaseDataset):
                 "text_ind": text_ind,
                 "mode": self.mode,
                 "eval_seed": self.eval_seed,
+                "has_humanoid_data": self.has_humanoid_data,
             },
             "length": valid_length,
             "smpl_params_c": smpl_params_c,
@@ -446,12 +507,16 @@ class Humanml3dDataset(BaseDataset):
             "text_embed": text_embed,
             "mask": {
                 "valid": get_valid_mask(length, valid_length),
+                "humanoid": get_valid_mask(length, valid_humanoid_length),
                 "vitpose": False,
                 "bbx_xys": False,
                 "f_imgseq": False,
                 "spv_incam_only": False,
             },
         }
+        if self.has_humanoid_data:
+            return_data["humanoid_obs"] = humanoid_obs
+            return_data["humanoid_clean_action"] = humanoid_clean_action
 
         # Batchable
         return_data["smpl_params_c"] = repeat_to_max_len_dict(
@@ -559,3 +624,28 @@ MainStore.store(
     ),
     group=test_group_name,
 )
+MainStore.store(
+    name="humanoid_train_v1",
+    node=builds(
+        Humanml3dDataset,
+        cam_augmentation="static",
+        split="train",
+        humanoid_data_dir="inputs/humanoid/data/traj_v1",
+        humanoid_noise_seq=["noise_0", "noise_0.07"],
+        discard_last_frame=True,
+    ),
+    group=train_group_name,
+)
+
+if __name__ == "__main__":
+    dataset = Humanml3dDataset(
+        cam_augmentation="static",
+        split="train",
+        humanoid_data_dir="inputs/humanoid/data/traj_v1",
+        humanoid_noise_seq=["noise_0", "noise_0.07"],
+        discard_last_frame=True,
+    )
+    print(len(dataset))
+    for i in range(len(dataset)):
+        data = dataset[i]
+        print(i)

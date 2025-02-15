@@ -80,9 +80,14 @@ class RoPEAttention(nn.Module):
             self.head_dim
         )
         if attn_mask is not None:
-            attn_mask = attn_mask.reshape(1, 1, L, L_ctx).expand(
-                B, self.num_heads, -1, -1
-            )
+            if len(attn_mask.shape) == 2:
+                attn_mask = attn_mask.reshape(1, 1, L, L_ctx).expand(
+                    B, self.num_heads, -1, -1
+                )
+            else:
+                attn_mask = attn_mask.reshape(B, 1, L, L_ctx).expand(
+                    B, self.num_heads, -1, -1
+                )
             attn_score = attn_score.masked_fill(attn_mask, float("-inf"))
         if key_padding_mask is not None:
             key_padding_mask = key_padding_mask.reshape(B, 1, 1, L_ctx).expand(

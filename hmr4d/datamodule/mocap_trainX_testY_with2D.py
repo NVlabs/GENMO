@@ -1,4 +1,5 @@
 import resource
+from functools import partial
 
 import pytorch_lightning as pl
 import torch
@@ -14,30 +15,35 @@ rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (4096, rlimit[1]))
 
 
-def collate_fn(batch):
+def collate_fn(batch, collate_cfg=None):
     """Handle meta and Add batch size to the return dict
     Args:
         batch: list of dict, each dict is a data point
+        collate_cfg: configuration for collation
     """
     # Assume all keys in the batch are the same
     return_dict = {}
     keys = set(batch[0].keys())
-    keys.add("caption")
-    keys.add("text_embed")
-    keys.add("use_det_kp")
+    keys.update(
+        {"caption", "text_embed", "use_det_kp", "humanoid_obs", "humanoid_clean_action"}
+    )
+    keys_using_default_feature_dim = set(collate_cfg.default_feature_dim.keys())
     for k in keys:
         if k.startswith("meta"):  # data information, do not batch
             return_dict[k] = [d[k] for d in batch]
         elif k == "caption":
             return_dict[k] = [d[k] if k in d else "" for d in batch]
-        elif k == "text_embed":
-            return_dict[k] = torch.stack(
-                [d[k] if k in d else torch.zeros(50, 1024) for d in batch]
-            )
         elif k == "use_det_kp":
             return_dict[k] = default_collate(
                 [
                     d[k] if k in d else torch.zeros(d["K_fullimg"].shape[0])
+                    for d in batch
+                ]
+            )
+        elif k in keys_using_default_feature_dim:
+            return_dict[k] = default_collate(
+                [
+                    d.get(k, torch.zeros(*collate_cfg.default_feature_dim[k]))
                     for d in batch
                 ]
             )
@@ -58,6 +64,7 @@ class DataModule(pl.LightningDataModule):
         limit_each_trainset=None,
         train_subset_ratio=None,
         train_2d_only=False,
+        collate_cfg: DictConfig = None,
     ):
         """This is a general datamodule that can be used for any dataset.
         Train uses ConcatDataset
@@ -73,7 +80,7 @@ class DataModule(pl.LightningDataModule):
         self.limit_each_trainset = limit_each_trainset
         self.train_subset_ratio = train_subset_ratio
         self.train_2d_only = train_2d_only
-
+        self.collate_cfg = collate_cfg
         # Train uses concat dataset
         if "train" in dataset_opts:
             assert "train" in self.loader_opts, "train not in loader_opts"
@@ -158,7 +165,7 @@ class DataModule(pl.LightningDataModule):
                 persistent_workers=True and self.loader_opts.train_2d.num_workers > 0,
                 batch_size=self.loader_opts.train_2d.batch_size,
                 drop_last=True,
-                collate_fn=collate_fn,
+                collate_fn=partial(collate_fn, collate_cfg=self.collate_cfg),
             )
             if self.train_2d_only:
                 return loader_2d
@@ -170,7 +177,7 @@ class DataModule(pl.LightningDataModule):
                 persistent_workers=True and self.loader_opts.train.num_workers > 0,
                 batch_size=self.loader_opts.train.batch_size,
                 drop_last=True,
-                collate_fn=collate_fn,
+                collate_fn=partial(collate_fn, collate_cfg=self.collate_cfg),
             )
             all_train_dataloaders = CombinedLoader(
                 {"3d": loader_3d, "2d": loader_2d}, mode="min_size"
@@ -191,7 +198,7 @@ class DataModule(pl.LightningDataModule):
                         persistent_workers=True
                         and self.loader_opts.val.num_workers > 0,
                         batch_size=self.loader_opts.val.batch_size,
-                        collate_fn=collate_fn,
+                        collate_fn=partial(collate_fn, collate_cfg=self.collate_cfg),
                     )
                 )
             return CombinedLoader(loaders, mode="sequential")
@@ -209,7 +216,7 @@ class DataModule(pl.LightningDataModule):
                         num_workers=self.loader_opts.test.num_workers,
                         persistent_workers=False,
                         batch_size=self.loader_opts.test.batch_size,
-                        collate_fn=collate_fn,
+                        collate_fn=partial(collate_fn, collate_cfg=self.collate_cfg),
                     )
                 )
             return CombinedLoader(loaders, mode="sequential")

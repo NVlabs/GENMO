@@ -208,20 +208,25 @@ class UNIMFM(pl.LightningModule):
     def init_condition_exists(self, batch):
         B, L = batch["obs"].shape[:2]
         f_condition_exists = dict()
+        key_mapping = {
+            "f_cam_angvel": "cam_angvel",
+        }
         if self.model_cfg.get("perframe_condition_exists", False):
             f_condition_exists["obs"] = batch["obs"].view(B, L, -1).norm(dim=-1) > 1e-4
             f_condition_exists["f_cliffcam"] = f_condition_exists["obs"].clone()
             f_condition_exists["f_imgseq"] = (
                 batch["f_imgseq"].view(B, L, -1).norm(dim=-1) > 1e-4
             )
-            if "cam_angvel" in batch:
-                f_condition_exists["f_cam_angvel"] = (
-                    batch["cam_angvel"].view(B, L, -1).norm(dim=-1) > 1e-4
-                )
-            else:
-                f_condition_exists["f_cam_angvel"] = (
-                    torch.zeros(B, L).bool().to(batch["obs"].device)
-                )
+            for k in ["f_cam_angvel", "humanoid_obs"]:
+                batch_key = key_mapping.get(k, k)
+                if batch_key in batch:
+                    f_condition_exists[k] = (
+                        batch[batch_key].view(B, L, -1).norm(dim=-1) > 1e-4
+                    )
+                else:
+                    f_condition_exists[k] = (
+                        torch.zeros(B, L).bool().to(batch["obs"].device)
+                    )
         else:
             f_condition_exists["obs"] = (
                 (batch["obs"].view(B, -1).norm(dim=-1) > 1e-4)
@@ -234,16 +239,18 @@ class UNIMFM(pl.LightningModule):
                 .unsqueeze(-1)
                 .repeat(1, L)
             )
-            if "cam_angvel" in batch:
-                f_condition_exists["f_cam_angvel"] = (
-                    (batch["cam_angvel"].view(B, -1).norm(dim=-1) > 1e-4)
-                    .unsqueeze(-1)
-                    .repeat(1, L)
-                )
-            else:
-                f_condition_exists["f_cam_angvel"] = (
-                    torch.zeros(B, L).bool().to(batch["obs"].device)
-                )
+            for k in ["f_cam_angvel", "humanoid_obs"]:
+                batch_key = key_mapping.get(k, k)
+                if batch_key in batch:
+                    f_condition_exists[k] = (
+                        (batch[batch_key].view(B, -1).norm(dim=-1) > 1e-4)
+                        .unsqueeze(-1)
+                        .repeat(1, L)
+                    )
+                else:
+                    f_condition_exists[k] = (
+                        torch.zeros(B, L).bool().to(batch["obs"].device)
+                    )
         batch["f_condition_exists"] = f_condition_exists
 
     def create_condition_mask(self, batch, cond_mask_cfg, mode):
@@ -397,6 +404,10 @@ class UNIMFM(pl.LightningModule):
 
         # Set untrusted frames to False
         batch["obs"][~batch["mask"]["valid"]] = 0
+
+        batch["has_humanoid_data"] = torch.tensor(
+            [x.get("has_humanoid_data", False) for x in batch["meta"]]
+        ).to(obs.device)
         return batch
 
     def train_3d_step(self, batch, batch_idx, mode):
@@ -782,6 +793,9 @@ class UNIMFM(pl.LightningModule):
             obs[0, ~mask[0]] = 0
 
         eval_text_only = batch["meta"][0].get("eval_text_only", False)
+        has_humanoid_data = torch.tensor(
+            [x.get("has_humanoid_data", False) for x in batch["meta"]]
+        ).to(obs.device)
         mode = batch["meta"][0].get("mode", "default")
         batch_ = {
             "length": batch["length"],
@@ -793,6 +807,7 @@ class UNIMFM(pl.LightningModule):
             "eval_text_only": eval_text_only,
             "mode": mode,
             "meta": batch["meta"],
+            "has_humanoid_data": has_humanoid_data,
         }
         if infer_version == 3:
             batch_["R_w2c"] = batch["R_w2c"]
@@ -901,6 +916,7 @@ class UNIMFM(pl.LightningModule):
                 "cam_angvel": flip_test["cam_angvel"],
                 "f_imgseq": flip_test["f_imgseq"],
                 "meta": batch["meta"],
+                "has_humanoid_data": has_humanoid_data,
             }
             if infer_version == 3:
                 batch_["R_w2c"] = flip_test["R_w2c"]

@@ -29,6 +29,7 @@ class UNIMFMDiffusion(nn.Module):
         cam_t_vel_dim=3,
         imgseq_dim=1024,
         observed_motion_3d_dim=151,
+        humanoid_obs_dim=358,
         latent_dim=512,
         dropout=0.1,
         args=None,
@@ -48,6 +49,7 @@ class UNIMFMDiffusion(nn.Module):
         self.cam_t_vel_dim = cam_t_vel_dim
         self.imgseq_dim = imgseq_dim
         self.observed_motion_3d_dim = observed_motion_3d_dim
+        self.humanoid_obs_dim = humanoid_obs_dim
         self.s_pred_ind = 0
 
         # intermediate
@@ -112,6 +114,14 @@ class UNIMFMDiffusion(nn.Module):
         if "observed_motion_3d" in self.args.in_attr:
             self.observed_motion_3d_embedder = nn.Sequential(
                 nn.Linear(self.observed_motion_3d_dim * 2, latent_dim),
+                nn.SiLU(),
+                nn.Dropout(dropout),
+                zero_module(nn.Linear(latent_dim, latent_dim)),
+            )
+
+        if "humanoid_obs" in self.args.in_attr:
+            self.humanoid_obs_embedder = nn.Sequential(
+                nn.Linear(self.humanoid_obs_dim, latent_dim),
                 nn.SiLU(),
                 nn.Dropout(dropout),
                 zero_module(nn.Linear(latent_dim, latent_dim)),
@@ -220,6 +230,11 @@ class UNIMFMDiffusion(nn.Module):
             )
             f_cond_dict["observed_motion_3d"] = f_observed_motion_3d
 
+        if "humanoid_obs" in f_condition:
+            f_humanoid_obs = f_condition["humanoid_obs"]  # (B, L, humanoid_obs_dim)
+            f_humanoid_obs = self.humanoid_obs_embedder(f_humanoid_obs)
+            f_cond_dict["humanoid_obs"] = f_humanoid_obs
+
         if self.cond_merge_strategy == "add":
             if self.use_cond_exists_as_input:
                 for k in f_cond_dict:
@@ -272,6 +287,7 @@ class UNIMFMDiffusion(nn.Module):
                 "mask": vis_mask,
                 "length": length,
             },
+            "inputs": inputs,
         }
         if "encoded_text" in inputs:
             denoiser_kwargs["y"]["encoded_text"] = inputs["encoded_text"]
@@ -359,7 +375,8 @@ class UNIMFMDiffusion(nn.Module):
                 "f_cond": f_cond,
                 "mask": vis_mask,
                 "length": length,
-            }
+            },
+            "inputs": inputs,
         }
         if "encoded_text" in inputs:
             denoiser_kwargs["y"]["encoded_text"] = inputs["encoded_text"]
@@ -471,22 +488,25 @@ class UNIMFMDiffusion(nn.Module):
 
         vis_mask = length_to_mask(length, L)  # (B, L)
 
-        cond = {
+        denoiser_kwargs = {
             "y": {
                 "text": inputs.get("caption", [""] * B),
                 "f_cond": f_cond,
                 "mask": vis_mask,
                 "length": length,
             },
+            "inputs": inputs,
         }
         if "encoded_text" in inputs:
-            cond["y"]["encoded_text"] = inputs["encoded_text"]
+            denoiser_kwargs["y"]["encoded_text"] = inputs["encoded_text"]
         if "meta" in inputs and "multi_text_data" in inputs["meta"][0]:
-            cond["y"]["multi_text_data"] = inputs["meta"][0]["multi_text_data"]
+            denoiser_kwargs["y"]["multi_text_data"] = inputs["meta"][0][
+                "multi_text_data"
+            ]
         if "observed_motion_3d" in inputs:
-            cond["observed_motion_3d"] = inputs["observed_motion_3d"]
-            cond["motion_mask_3d"] = inputs["motion_mask_3d"]
-            cond["rm_text_flag"] = inputs.get("rm_text_flag", None)
+            denoiser_kwargs["observed_motion_3d"] = inputs["observed_motion_3d"]
+            denoiser_kwargs["motion_mask_3d"] = inputs["motion_mask_3d"]
+            denoiser_kwargs["rm_text_flag"] = inputs.get("rm_text_flag", None)
 
         if regression_only:
             t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
@@ -495,12 +515,15 @@ class UNIMFMDiffusion(nn.Module):
             x_t = torch.zeros_like(motion)
 
             denoise_out = denoiser(
-                x_t, self.train_diffusion._scale_timesteps(t), return_aux=False, **cond
+                x_t,
+                self.train_diffusion._scale_timesteps(t),
+                return_aux=False,
+                **denoiser_kwargs,
             )
         else:
             if self.args.get("use_cfg_sampler_for_text", False) and eval_text_only:
                 denoiser = ClassifierFreeSampleModel(denoiser)
-                cond["y"]["scale"] = self.model_cfg.diffusion.guidance_param
+                denoiser_kwargs["y"]["scale"] = self.model_cfg.diffusion.guidance_param
             diff_sampler = self.model_cfg.diffusion.get("sampler", "ddim")
             if diff_sampler == "ddim":
                 sample_fn = diffusion.ddim_sample_loop_with_aux
@@ -523,7 +546,7 @@ class UNIMFMDiffusion(nn.Module):
                 denoiser,
                 motion.shape,
                 clip_denoised=False,
-                model_kwargs=cond,
+                model_kwargs=denoiser_kwargs,
                 skip_timesteps=0,  # 0 is the default value - i.e. don't skip any step
                 init_image=None,
                 progress=progress,

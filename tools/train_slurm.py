@@ -142,13 +142,14 @@ repo_folder = str(
     pathlib.Path(__file__).resolve().parent.parent
 )  # the root of the project
 
+# can only include top
 include_files = [
     "motiondiff/**",
     "hmr4d/**",
     "tools/**",
     "setup.py",
     "dyn_ddns.py",
-    "third-party/**",
+    "third-party/**",  # thrid-party/PHC_Lab/** won't work
 ]
 exclude_files = [
     "/inputs",
@@ -159,6 +160,11 @@ exclude_files = [
     "**/__pycache__",
     "**/doc",
     "**/docs",
+    "*.ipynb",
+    "*.pth",
+    "*.safetensors",
+    "third-party/DPVO",
+    "third-party/PHC_Lab/phc/data",
 ]
 include_str = " ".join([f'--include="{f}"' for f in include_files])
 exclude_str = " ".join([f'--exclude="{f}"' for f in exclude_files])

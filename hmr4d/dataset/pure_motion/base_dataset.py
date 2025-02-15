@@ -231,6 +231,7 @@ class BaseDataset(Dataset):
             "T_w2c": normed_T_w2c,
             "mask": {
                 "valid": get_valid_mask(length, length),
+                "humanoid": get_valid_mask(length, 0),
                 "vitpose": False,
                 "bbx_xys": False,
                 "f_imgseq": False,
