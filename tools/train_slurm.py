@@ -161,10 +161,10 @@ exclude_files = [
     "**/doc",
     "**/docs",
     "*.ipynb",
-    "*.pth",
     "*.safetensors",
     "third-party/DPVO",
     "third-party/PHC_Lab/phc/data",
+    "third-party/**/*.pth",
 ]
 include_str = " ".join([f'--include="{f}"' for f in include_files])
 exclude_str = " ".join([f'--exclude="{f}"' for f in exclude_files])
