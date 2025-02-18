@@ -15,7 +15,7 @@ import pickle
 from os.path import join as pjoin
 
 import clip
-from transformers import AutoTokenizer, CLIPTextModelWithProjection
+# from transformers import AutoTokenizer, CLIPTextModelWithProjection
 
 from motiondiff.utils.mdm_modules import (
     MotionEncoderBiGRUCo,
@@ -28,125 +28,44 @@ from motiondiff.utils.motionx_modules import (
     MovementConvEncoderWithDropout,
 )
 
-# from hmr4d.model.gvhmr.utils.endecoder import EnDecoder
-# encoder = EnDecoder(stats_name='DEFAULT_01', encode_type='humanml3d').cuda()
-
-dataset_name = "humanml"
-POS_enumerator = {
-    "VERB": 0,
-    "NOUN": 1,
-    "DET": 2,
-    "ADP": 3,
-    "NUM": 4,
-    "AUX": 5,
-    "PRON": 6,
-    "ADJ": 7,
-    "ADV": 8,
-    "Loc_VIP": 9,
-    "Body_VIP": 10,
-    "Obj_VIP": 11,
-    "Act_VIP": 12,
-    "Desc_VIP": 13,
-    "OTHER": 14,
-}
-opt = {
-    "dataset_name": dataset_name,
-    "device": "cuda",
-    "dim_word": 300,
-    "max_motion_length": 196,
-    "dim_pos_ohot": len(POS_enumerator),
-    "dim_motion_hidden": 1024,
-    "max_text_len": 20,
-    "dim_text_hidden": 512,
-    "dim_coemb_hidden": 512,
-    "dim_pose": 263 if dataset_name == "humanml" else 251,
-    "dim_movement_enc_hidden": 512,
-    "dim_movement_latent": 512,
-    "checkpoints_dir": ".",
-    "unit_length": 4,
-}
+import argparse
 
 
-# POS_enumerator = {
-#     'VERB': 0,
-#     'NOUN': 1,
-#     'DET': 2,
-#     'ADP': 3,
-#     'NUM': 4,
-#     'AUX': 5,
-#     'PRON': 6,
-#     'ADJ': 7,
-#     'ADV': 8,
-#     'Loc_VIP': 9,
-#     'Body_VIP': 10,
-#     'Obj_VIP': 11,
-#     'Act_VIP': 12,
-#     'Desc_VIP': 13,
-#     'OTHER': 14,
-# }
+def build_motionx_evaluators(opt):
+    movement_enc = MovementConvEncoder(
+        opt["dim_pose"], opt["dim_movement_enc_hidden"], opt["dim_movement_latent"]
+    )
 
-# Loc_list = ('left', 'right', 'clockwise', 'counterclockwise', 'anticlockwise', 'forward', 'back', 'backward',
-#             'up', 'down', 'straight', 'curve')
+    text_enc = TextEncoderMLP(input_dim=512, hidden_dim=512, output_dim=512)
 
-# Body_list = ('arm', 'chin', 'foot', 'feet', 'face', 'hand', 'mouth', 'leg', 'waist', 'eye', 'knee', 'shoulder', 'thigh')
+    motion_enc = MotionEncoderBiGRUCo(
+        input_size=opt["dim_movement_latent"],
+        hidden_size=opt["dim_motion_hidden"],
+        output_size=opt["dim_coemb_hidden"],
+        device=opt["device"],
+    )
 
-# Obj_List = ('stair', 'dumbbell', 'chair', 'window', 'floor', 'car', 'ball', 'handrail', 'baseball', 'basketball')
+    ckpt_dir = "./t2m_checkpoints/motionx"
 
-# Act_list = ('walk', 'run', 'swing', 'pick', 'bring', 'kick', 'put', 'squat', 'throw', 'hop', 'dance', 'jump', 'turn',
-#             'stumble', 'dance', 'stop', 'sit', 'lift', 'lower', 'raise', 'wash', 'stand', 'kneel', 'stroll',
-#             'rub', 'bend', 'balance', 'flap', 'jog', 'shuffle', 'lean', 'rotate', 'spin', 'spread', 'climb')
+    checkpoint = torch.load(
+        pjoin(
+            opt["checkpoints_dir"],
+            ckpt_dir,
+            "text_mot_match/model_10.0_clip_fullset",
+            "finest.tar",
+        ),
+        map_location=opt["device"],
+    )
+    movement_enc.load_state_dict(checkpoint["movement_encoder"])
+    text_enc.load_state_dict(checkpoint["text_encoder"])
+    motion_enc.load_state_dict(checkpoint["motion_encoder"])
+    print(
+        "Loading Evaluation Model Wrapper (Epoch %d) Completed!!"
+        % (checkpoint["epoch"])
+    )
+    return text_enc, motion_enc, movement_enc
 
-# Desc_list = ('slowly', 'carefully', 'fast', 'careful', 'slow', 'quickly', 'happy', 'angry', 'sad', 'happily',
-#              'angrily', 'sadly')
-
-# VIP_dict = {
-#     'Loc_VIP': Loc_list,
-#     'Body_VIP': Body_list,
-#     'Obj_VIP': Obj_List,
-#     'Act_VIP': Act_list,
-#     'Desc_VIP': Desc_list,
-# }
-
-
-# class WordVectorizer(object):
-#     def __init__(self, meta_root, prefix):
-#         vectors = np.load(pjoin(meta_root, '%s_data.npy'%prefix))
-#         words = pickle.load(open(pjoin(meta_root, '%s_words.pkl'%prefix), 'rb'))
-#         word2idx = pickle.load(open(pjoin(meta_root, '%s_idx.pkl'%prefix), 'rb'))
-#         self.word2vec = {w: vectors[word2idx[w]] for w in words}
-
-#     def _get_pos_ohot(self, pos):
-#         pos_vec = np.zeros(len(POS_enumerator))
-#         if pos in POS_enumerator:
-#             pos_vec[POS_enumerator[pos]] = 1
-#         else:
-#             pos_vec[POS_enumerator['OTHER']] = 1
-#         return pos_vec
-
-#     def __len__(self):
-#         return len(self.word2vec)
-
-#     def __getitem__(self, item):
-#         word, pos = item.split('/')
-#         if word in self.word2vec:
-#             word_vec = self.word2vec[word]
-#             vip_pos = None
-#             for key, values in VIP_dict.items():
-#                 if word in values:
-#                     vip_pos = key
-#                     break
-#             if vip_pos is not None:
-#                 pos_vec = self._get_pos_ohot(vip_pos)
-#             else:
-#                 pos_vec = self._get_pos_ohot(pos)
-#         else:
-#             word_vec = self.word2vec['unk']
-#             pos_vec = self._get_pos_ohot('OTHER')
-#         return word_vec, pos_vec
-
-
-# mdm version of encoder
-def build_evaluators(opt):
+def build_humanml3d_evaluators(opt):
     movement_enc = MovementConvEncoder(
         opt["dim_pose"] - 4, opt["dim_movement_enc_hidden"], opt["dim_movement_latent"]
     )
@@ -165,11 +84,7 @@ def build_evaluators(opt):
         device=opt["device"],
     )
 
-    ckpt_dir = opt["dataset_name"]
-    # if opt['dataset_name'] == 'motionx':
-    #     ckpt_dir = './inputs/t2m'
     ckpt_dir = "./inputs/t2m"
-
     checkpoint = torch.load(
         pjoin(
             opt["checkpoints_dir"], ckpt_dir, "text_mot_match", "model", "finest.tar"
@@ -183,6 +98,25 @@ def build_evaluators(opt):
         "Loading Evaluation Model Wrapper (Epoch %d) Completed!!"
         % (checkpoint["epoch"])
     )
+    return text_enc, motion_enc, movement_enc
+
+def build_evaluators(args, opt):
+    if args.dataset == 'humanml3d':
+        """
+            Our self-trained text-motion encoder by pairing the latent representation
+            as in t2m: https://github.com/EricGuo5513/text-to-motion
+        """
+        text_enc, motion_enc, movement_enc = build_humanml3d_evaluators(opt)
+    elif args.dataset == 'motionx':
+        """
+            The text encoder used by text-to-motion:
+            https://github.com/EricGuo5513/text-to-motion
+            provided by training on paired text-motion data on humanml3d 
+        """
+        text_enc, motion_enc, movement_enc = build_motionx_evaluators(opt)
+    else:
+        assert False, "Invalid text encoder"
+
     return text_enc, motion_enc, movement_enc
 
 
@@ -230,8 +164,6 @@ def calculate_R_precision(embedding1, embedding2, top_k, sum_all=False):
 
 
 # from action2motion
-
-
 def evaluate_matching_score(text_embeddings_all, motion_embeddings_all):
     # match_score_dict = OrderedDict({})
     # R_precision_dict = OrderedDict({})
@@ -282,7 +214,7 @@ def calculate_activation_statistics(activations):
     Params:
     -- activation: num_samples x dim_feat
     Returns:
-    -- mu: dim_featcccccbkvecgrfrjgrctkkhtnnjcbctdvhktfgbergbnh
+    -- mu: dim_feat
     -- sigma: dim_feat x dim_feat
     """
     mu = np.mean(activations, axis=0)
@@ -387,43 +319,14 @@ def compute_fid(feats1, feats2):
     return fid
 
 
-gt_features = pickle.load(open("inputs/motionx_gt_feats.pkl", "rb"))
-gt_motions = gt_features["motions"]
-gt_texts = gt_features["texts"]
+def get_text_embedding(text_encoder, word_embs, pos_ohot, cap_lens):
+    with torch.no_grad():
+        word_embs = word_embs.detach().to("cuda").float()
+        pos_ohot = pos_ohot.detach().to("cuda").float()
+        cap_lens = cap_lens.detach().to("cuda").float()
+        text_embedding = text_encoder(word_embs, pos_ohot, cap_lens)
+    return text_embedding
 
-
-feats_path = "/lustre/fs12/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jinkunc/gvhmr/mocap_mixed_v1/unimfm/unimfm_est_st_norm_di_lg_mx2_cp1_g8/version_0/text_feats_196_motionx"
-feats_ckpt = "feats_len196_1.pt"
-feats = torch.load(os.path.join(feats_path, feats_ckpt))
-test_motions = feats["feats"]
-test_texts = feats["text"]
-
-gt_motions[:, :, 126:136] = test_motions[:, :, 126:136]
-# gt_motions[:, :, 136:] = 0
-# test_motions[:, :, 136:] = torch.tensor(gt_motions[:, :, 136:])
-
-humanml_format_gt_feature = "outputs/motionx_gt_feats_263d.pkl"
-humanml_format_test_feature = "outputs/motionx_test_feats_263d.pkl"
-
-gt_feats = pickle.load(open(humanml_format_gt_feature, "rb"))
-gt_motions = gt_feats["feats"]
-gt_texts = gt_feats["text"]
-
-test_feats = pickle.load(open(humanml_format_test_feature, "rb"))
-test_motions = test_feats["feats"]
-test_texts = test_feats["text"]
-
-humanml_mean = np.load("outputs/humanml3d_mean.npy")
-humanml_std = np.load("outputs/humanml3d_std.npy")
-humanml_mean = torch.tensor(humanml_mean).float().cuda()
-humanml_std = torch.tensor(humanml_std).float().cuda()
-
-gt_motions = (gt_motions - humanml_mean) / humanml_std
-test_motions = (test_motions - humanml_mean) / humanml_std
-
-text_enc, motion_enc, movement_enc = build_evaluators(opt)
-motion_enc = motion_enc.to("cuda")
-movement_enc = movement_enc.to("cuda")
 
 
 def get_motion_embedding(motions, m_lens):
@@ -442,100 +345,17 @@ def get_motion_embedding(motions, m_lens):
     return motion_embedding
 
 
-gt_m_lens = (
-    torch.tensor([gt_motions.shape[1]]).float().cuda().repeat(gt_motions.shape[0])
-)
-test_m_lens = (
-    torch.tensor([test_motions.shape[1]]).float().cuda().repeat(test_motions.shape[0])
-)
 
-gt_motion_embs = get_motion_embedding(gt_motions, gt_m_lens)
-test_motion_embs = get_motion_embedding(test_motions, test_m_lens)
-
-fid = compute_fid(gt_motion_embs.cpu().numpy(), test_motion_embs.cpu().numpy())
-
-div = evaluate_diversity(test_motion_embs.cpu().numpy())
-
-text_embeds = torch.load("inputs/motionx_text_clip_embds.pth")
-matching_score, R_precision, all_motion_embeddings = evaluate_matching_score(
-    text_embeds, test_motion_embs
-)
-# breakpoint()
-# breakpoint()
-
-######## To generate the text features by CLIP:
-
-# model = CLIPTextModelWithProjection.from_pretrained("openai/clip-vit-base-patch32")
-# tokenizer = AutoTokenizer.from_pretrained("openai/clip-vit-base-patch32")
-
-# # Choice #1: we use CLIP to get text embeddings from raw texts
-# bs = 128
-# total_text_num = len(gt_texts)
-# batch_num = total_text_num // bs
-# all_text_embeds = []
-# print("Generating text embbedings...")
-# for i in tqdm(range(batch_num+1)):
-#     # texts = clip.tokenize(raw_text, context_length=196, truncate=True).to('cuda')
-#     # breakpoint()
-#     text_batch = gt_texts[i*bs:(i+1)*bs]
-#     text_batch = [t[0] for t in text_batch]
-#     inputs = tokenizer(text_batch, padding='max_length', truncation=True,max_length=77, return_tensors="pt")
-#     outputs = model(**inputs)
-#     text_embeds = outputs.text_embeds
-#     all_text_embeds.append(text_embeds)
-
-# text_embeds = torch.cat(all_text_embeds, dim=0)
-# torch.save(text_embeds, 'inputs/motionx_text_clip_embds.pth')
-
-text_embeds = torch.load("inputs/motionx_text_clip_embds.pth")
-# dataset_name = 'motionx'
-
-
-# Initialize the models
-# movement_enc = MovementConvEncoderWithDropout(
-#     input_dim=opt["dim_pose"],  # Full input dimension
-#     hidden_dim=opt["dim_movement_enc_hidden"],
-#     latent_dim=opt["dim_movement_latent"],
-#     dropout_prob=0.3,
-# ).to(opt["device"])
-
-# motion_enc = MotionEncoderBiGRUCoWithDropout(
-#     input_size=opt["dim_movement_latent"],
-#     hidden_size=opt["dim_motion_hidden"],
-#     output_size=opt["dim_coemb_hidden"],
-#     device=opt["device"],
-#     dropout_prob=0.3,
-# ).to(opt["device"])
-
-# motion_decoder = MotionDecoderWithDropout(
-#     latent_dim=opt["dim_coemb_hidden"],
-#     hidden_dim=opt["dim_motion_hidden"],
-#     output_dim=opt["dim_pose"],
-#     unit_length=opt["unit_length"],
-#     dropout_prob=0.3,
-# ).to(opt["device"])
-
-
-# # Function to load weights
-# def load_weights(checkpoint_path, movement_enc, motion_enc, motion_decoder):
-#     if os.path.exists(checkpoint_path):
-#         checkpoint = torch.load(checkpoint_path)
-#         movement_enc.load_state_dict(checkpoint["movement_enc_state_dict"])
-#         motion_enc.load_state_dict(checkpoint["motion_enc_state_dict"])
-#         motion_decoder.load_state_dict(checkpoint["motion_decoder_state_dict"])
-#         print(f"Loaded weights from {checkpoint_path}")
-#     else:
-#         print(f"Checkpoint not found at {checkpoint_path}")
-
-
-# checkpoint_path = "outputs/motionx_motion_encoder_decoder_weights.pth"
-
-# load_weights(checkpoint_path, movement_enc, motion_enc, motion_decoder)
-
-# Set models to evaluation mode
-movement_enc.eval()
-motion_enc.eval()
-# motion_decoder.eval()
+# Function to load weights
+def load_weights(checkpoint_path, movement_enc, motion_enc, motion_decoder):
+    if os.path.exists(checkpoint_path):
+        checkpoint = torch.load(checkpoint_path)
+        movement_enc.load_state_dict(checkpoint["movement_enc_state_dict"])
+        motion_enc.load_state_dict(checkpoint["motion_enc_state_dict"])
+        motion_decoder.load_state_dict(checkpoint["motion_decoder_state_dict"])
+        print(f"Loaded weights from {checkpoint_path}")
+    else:
+        print(f"Checkpoint not found at {checkpoint_path}")
 
 
 def get_motion_embeds(all_motions):
@@ -588,29 +408,144 @@ def get_motion_embeds(all_motions):
     return final_embeddings
 
 
-gt_motion_embs = get_motion_embeds(gt_motions)
-test_motion_embs = get_motion_embeds(test_motions)
-text_embeds = text_embeds
+DEMO_FEAT_PATH = "/lustre/fs12/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jinkunc/gvhmr/mocap_mixed_v1/unimfm/unimfm_est_st_norm_di_lg_g8/version_0/text_feats_ts10_humanml3d/feats_seed0_263d.pkl"
 
-matching_score, R_precision, all_motion_embeddings = evaluate_matching_score(
-    text_embeds, test_motion_embs
-)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="A simple argument parser example")
+    parser.add_argument("--pred_feat", type=str, 
+                    default=DEMO_FEAT_PATH, help="path to the generated features")
+    parser.add_argument("--dataset", type=str, default='humanml3d', help='dataset name')
+
+    args = parser.parse_args()
+
+    device = 'cuda'
+
+    if args.dataset == "humanml3d":
+        mean = np.load("outputs/humanml3d_mean.npy")
+        std = np.load("outputs/humanml3d_std.npy")
+        mean = torch.tensor(mean).float().to(device)
+        std = torch.tensor(std).float().to(device)
+        # the embedding is generated by gen_humanml_text_tokens.py
+        text_embeds = pickle.load(open("inputs/humanml_text_embs.pkl", "rb"))
+        gt_feat_path = 'outputs/humanml3d_feats_gt/feats_test_humanml3d_format.pt.npy'
+        gt_motions = np.load(gt_feat_path)
+        gt_motions = torch.tensor(gt_motions).float().to(device)
+    elif args.dataset == "motionx":
+        mean = np.load("inputs/motion_x_mean_train.npy")
+        std = np.load("inputs/motion_x_std_train.npy")
+        mean = torch.tensor(mean).float().to(device)
+        std = torch.tensor(std).float().to(device)
+        text_embeds = torch.load("inputs/motionx_text_clip_embds.pth") # text embeddings
+
+        gt_feat_path = "inputs/motionx_test_gt_feats.pkl"
+        gt_features = pickle.load(open(gt_feat_path, "rb"))
+        gt_motions = gt_features["motions"]
+        gt_texts = gt_features["texts"] # raw text
+
+    # denormalize features 
+    gt_motions = gt_motions * std + mean
+
+    # gt_features = pickle.load(args.gt_feat, "rb")
+    # gt_motions = gt_features["motions"]
+    # gt_texts = gt_features["texts"]
+
+    # feats_path = "/lustre/fs12/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jinkunc/gvhmr/mocap_mixed_v1/unimfm/unimfm_est_st_norm_di_lg_mx2_cp1_g8/version_0/text_feats_196_motionx"
+    # feats_ckpt = "feats_len196_1.pt"
+    feats = pickle.load(open(args.pred_feat, "rb"))
+    # feats = torch.load(args.pred_feat)
+    test_motions = feats["feats"]
+    test_texts = feats["text"]
+
+    if args.dataset == 'humanml3d':
+        test_motions = test_motions[:, :119]
 
 
-fid = compute_fid(gt_motion_embs.cpu().numpy(), test_motion_embs.cpu().numpy())
-breakpoint()
-# fid = compute_fid(gt_motions[:100, :, :126].reshape(100,-1), test_motions[:100, :, :126].reshape(100,-1))
-fid = compute_fid(gt_motion_embs.cpu().numpy(), test_motion_embs.cpu().numpy())
-div = evaluate_diversity(all_motion_embeddings)
-print("FID on motionx is: ", fid)
-print("Diversity on motionx is: ", div)
+    POS_enumerator = {
+        "VERB": 0,
+        "NOUN": 1,
+        "DET": 2,
+        "ADP": 3,
+        "NUM": 4,
+        "AUX": 5,
+        "PRON": 6,
+        "ADJ": 7,
+        "ADV": 8,
+        "Loc_VIP": 9,
+        "Body_VIP": 10,
+        "Obj_VIP": 11,
+        "Act_VIP": 12,
+        "Desc_VIP": 13,
+        "OTHER": 14,
+    }
+    opt = {
+        "dataset_name": args.dataset,
+        "device": device,
+        "dim_word": 300,
+        "max_motion_length": 196,
+        "dim_pos_ohot": len(POS_enumerator),
+        "dim_motion_hidden": 1024,
+        "max_text_len": 20,
+        "dim_text_hidden": 512 if args.dataset == 'humanml3d' else 256,
+        "dim_coemb_hidden": 512,
+        "dim_pose": 263 if args.dataset == "humanml3d" else 251,
+        "dim_movement_enc_hidden": 512,
+        "dim_movement_latent": 512,
+        "checkpoints_dir": ".",
+        "unit_length": 4,
+    }
 
-# multimodal_dist = matching_score
 
-# fid = compute_fid(gt_motion_embs.cpu().numpy(), all_motion_embeddings)
+    text_enc, motion_enc, movement_enc = build_evaluators(args, opt)
+    text_enc = text_enc.to(opt['device'])
+    motion_enc = motion_enc.to(opt['device'])
+    movement_enc = movement_enc.to(opt['device'])
 
-# div = evaluate_diversity(all_motion_embeddings)
 
-# print("Multimodal Distance: ", multimodal_dist)
-# print("FID: ", fid)
-# print("Diversity: ", div)
+    gt_m_lens = (
+        torch.tensor([gt_motions.shape[1]]).float().cuda().repeat(gt_motions.shape[0])
+    )
+    test_m_lens = (
+        torch.tensor([test_motions.shape[1]]).float().cuda().repeat(test_motions.shape[0])
+    )
+
+    gt_motion_embs = get_motion_embedding(gt_motions, gt_m_lens)
+    test_motion_embs = get_motion_embedding(test_motions, test_m_lens)
+
+    all_word_embs = []
+    all_pos_ohots = []
+    all_sent_lens = []
+    all_text_embeddings = []
+
+    print("Extrating pre-saved text embeddings")
+    for i in tqdm(range(len(test_texts))):
+        text = test_texts[i]
+        saved_embds = text_embeds[text]
+        word_embs = saved_embds["word_embeddings"]
+        pos_ohots = saved_embds["pose_one_hots"]
+        sent_len = saved_embds["sent_len"]
+        all_word_embs.append(word_embs[None])
+        all_pos_ohots.append(pos_ohots[None])
+        all_sent_lens.append(sent_len)
+
+        word_embs = torch.tensor(word_embs).float().cuda()[None]
+        pos_ohots = torch.tensor(pos_ohots).float().cuda()[None]
+        sent_len = torch.tensor(sent_len).float().cuda()[None]
+        text_embedding = get_text_embedding(text_enc, word_embs, pos_ohots, sent_len)
+        all_text_embeddings.append(text_embedding)
+
+    all_text_embedding = torch.cat(all_text_embeddings, dim=0)
+    
+    print("######### Start evaluating the generated features.... ######")
+
+    matching_score, R_precision, all_motion_embeddings = evaluate_matching_score(
+        all_text_embedding, test_motion_embs
+    )
+    fid = compute_fid(gt_motion_embs.cpu().numpy(), test_motion_embs.cpu().numpy())
+    div = evaluate_diversity(all_motion_embeddings)
+
+    print("Matching score on motionx is: ", matching_score)
+    print("R-precision on motionx is: ", R_precision)
+    print("FID on motionx is: ", fid)
+    print("Diversity on motionx is: ", div)
+
+

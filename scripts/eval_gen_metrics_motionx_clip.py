@@ -29,22 +29,19 @@ from motiondiff.utils.motionx_modules import (
     MovementConvEncoderWithDropout,
 )
 
+import random
+import clip # pip install openai-clip
+import numpy as np
+import argparse
+
 device = "cuda"
 # clip_model = CLIPTextModelWithProjection.from_pretrained("sentence-transformers/all-MiniLM-L6-v2", do_sample=False).to(device).eval()
 # clip_tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
 
-import clip
-
 clip_model, preprocess = clip.load("ViT-B/32", device=device)
 
-# from hmr4d.model.gvhmr.utils.endecoder import EnDecoder
-# encoder = EnDecoder(stats_name='DEFAULT_01', encode_type='humanml3d').cuda()
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
-
-import random
-
-import numpy as np
 
 random.seed(42)
 np.random.seed(42)
@@ -87,46 +84,6 @@ opt = {
     "unit_length": 4,
 }
 
-
-# POS_enumerator = {
-#     'VERB': 0,
-#     'NOUN': 1,
-#     'DET': 2,
-#     'ADP': 3,
-#     'NUM': 4,
-#     'AUX': 5,
-#     'PRON': 6,
-#     'ADJ': 7,
-#     'ADV': 8,
-#     'Loc_VIP': 9,
-#     'Body_VIP': 10,
-#     'Obj_VIP': 11,
-#     'Act_VIP': 12,
-#     'Desc_VIP': 13,
-#     'OTHER': 14,
-# }
-
-# Loc_list = ('left', 'right', 'clockwise', 'counterclockwise', 'anticlockwise', 'forward', 'back', 'backward',
-#             'up', 'down', 'straight', 'curve')
-
-# Body_list = ('arm', 'chin', 'foot', 'feet', 'face', 'hand', 'mouth', 'leg', 'waist', 'eye', 'knee', 'shoulder', 'thigh')
-
-# Obj_List = ('stair', 'dumbbell', 'chair', 'window', 'floor', 'car', 'ball', 'handrail', 'baseball', 'basketball')
-
-# Act_list = ('walk', 'run', 'swing', 'pick', 'bring', 'kick', 'put', 'squat', 'throw', 'hop', 'dance', 'jump', 'turn',
-#             'stumble', 'dance', 'stop', 'sit', 'lift', 'lower', 'raise', 'wash', 'stand', 'kneel', 'stroll',
-#             'rub', 'bend', 'balance', 'flap', 'jog', 'shuffle', 'lean', 'rotate', 'spin', 'spread', 'climb')
-
-# Desc_list = ('slowly', 'carefully', 'fast', 'careful', 'slow', 'quickly', 'happy', 'angry', 'sad', 'happily',
-#              'angrily', 'sadly')
-
-# VIP_dict = {
-#     'Loc_VIP': Loc_list,
-#     'Body_VIP': Body_list,
-#     'Obj_VIP': Obj_List,
-#     'Act_VIP': Act_list,
-#     'Desc_VIP': Desc_list,
-# }
 
 
 class TextEncoderMLP(nn.Module):
@@ -392,148 +349,156 @@ def compute_fid(feats1, feats2):
     return fid
 
 
-gt_features = pickle.load(open("inputs/motionx_test_gt_feats.pkl", "rb"))
-gt_motions = gt_features["motions"]
-gt_texts = gt_features["texts"]
-
-
 save_parent_dir = "/lustre/fs12/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jinkunc/gvhmr/mocap_mixed_v1/unimfm/"
 exp_path = "unimfm_est_st_norm_di_lg_mx3_cp1_g8/version_1/text_feats_196_motionx"
 ckpt_name = "new_feats_len196_0.pt"
-feats_path = os.path.join(save_parent_dir, exp_path, ckpt_name)
+DEMO_FEAT_PATH = os.path.join(save_parent_dir, exp_path, ckpt_name)
 
-feats = torch.load(feats_path)
-test_motions = feats["feats"]
-test_texts = feats["text"]
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="A simple argument parser example")
+    parser.add_argument("--pred_feat", type=str, 
+                    default=DEMO_FEAT_PATH, help="path to the generated features")
+    parser.add_argument("--dataset", type=str, default='humanml3d', help='dataset name')
 
-gt_motions = torch.tensor(gt_motions).float().to(device)
-test_motions = torch.tensor(test_motions).float().to(device)
+    args = parser.parse_args()
 
-# test_motions[:, :, 126:136] = gt_motions[:, :, 126:136]
+    device = 'cuda'
 
-motionx_mean = np.load("inputs/motion_x_mean_train.npy")
-motionx_std = np.load("inputs/motion_x_std_train.npy")
+    gt_features = pickle.load(open("inputs/motionx_test_gt_feats.pkl", "rb"))
+    gt_motions = gt_features["motions"]
+    gt_texts = gt_features["texts"]
 
-motionx_mean = torch.tensor(motionx_mean).float().to(device)
-motionx_std = torch.tensor(motionx_std).float().to(device)
+    feats = torch.load(args.pred_feat)
+    test_motions = feats["feats"]
+    test_texts = feats["text"]
 
-gt_motions = (gt_motions - motionx_mean) / motionx_std
-test_motions = (test_motions - motionx_mean) / motionx_std
+    gt_motions = torch.tensor(gt_motions).float().to(device)
+    test_motions = torch.tensor(test_motions).float().to(device)
+
+    # test_motions[:, :, 126:136] = gt_motions[:, :, 126:136]
+
+    motionx_mean = np.load("inputs/motion_x_mean_train.npy")
+    motionx_std = np.load("inputs/motion_x_std_train.npy")
+
+    motionx_mean = torch.tensor(motionx_mean).float().to(device)
+    motionx_std = torch.tensor(motionx_std).float().to(device)
+
+    gt_motions = (gt_motions - motionx_mean) / motionx_std
+    test_motions = (test_motions - motionx_mean) / motionx_std
+
+    text_enc, motion_enc, movement_enc = build_evaluators(opt)
+    text_enc = text_enc.to("cuda")
+    motion_enc = motion_enc.to("cuda")
+    movement_enc = movement_enc.to("cuda")
+
+    total_num = len(gt_texts)
 
 
-text_enc, motion_enc, movement_enc = build_evaluators(opt)
-text_enc = text_enc.to("cuda")
-motion_enc = motion_enc.to("cuda")
-movement_enc = movement_enc.to("cuda")
-
-total_num = len(gt_texts)
+    batch_size = 64
+    batch_num = total_num // batch_size
+    # batch_num = math.ceil(total_num / batch_size)  # Use ceiling for all items
 
 
-batch_size = 64
-batch_num = total_num // batch_size
-# batch_num = math.ceil(total_num / batch_size)  # Use ceiling for all items
+    def get_co_embeds(motions, texts, movement_encoder, motion_encoder, text_enc, opt):
+        m_lens = (
+            torch.tensor([motions.shape[1]])
+            .float()
+            .to(motions.device)
+            .repeat(motions.shape[0])
+            .long()
+        )
+        # Sort the length of motions in descending order, (length of text has been sorted)
+        align_idx = np.argsort(m_lens.data.tolist())[::-1].copy()
+        # print(self.align_idx)
+        # print(m_lens[self.align_idx])
+        motions = motions[align_idx]
+        m_lens = m_lens[align_idx]
+
+        """Movement Encoding"""
+        movements = movement_encoder(motions).detach()
+        m_lens = m_lens // 4
+        motion_embedding = motion_encoder(movements, m_lens // 4)
+
+        """Text Encoding"""
+        with torch.no_grad():
+            # texts = [t[0] for t in texts]
+            # tokenized_inputs = clip_tokenizer(texts, padding='max_length', truncation=True, return_tensors="pt")
+
+            # # Remove 'token_type_ids' (not used by CLIP models)
+            # tokenized_inputs.pop("token_type_ids", None)
+            # for key in tokenized_inputs:
+            #     tokenized_inputs[key] = tokenized_inputs[key].to(device)
+            # clip_text_feat = clip_model(**tokenized_inputs)
+            # text_embeds_batch = clip_text_feat.text_embeds
+
+            text = clip.tokenize(texts, truncate=True).to(device)
+            text_embeds_clip = clip_model.encode_text(text).float()
+
+        text_embeds_ours = text_enc(text_embeds_clip)[align_idx]
+
+        return motion_embedding, text_embeds_ours
 
 
-def get_co_embeds(motions, texts, movement_encoder, motion_encoder, text_enc, opt):
-    m_lens = (
-        torch.tensor([motions.shape[1]])
-        .float()
-        .to(motions.device)
-        .repeat(motions.shape[0])
-        .long()
+    all_text_embeds = []
+    all_motion_embeds = []
+    print("Generating embeddings for GTs...")
+    for i in tqdm(range(batch_num)):
+        start_idx = i * batch_size
+        end_idx = min((i + 1) * batch_size, total_num)  # Avoid index overflow
+        text_batch = gt_texts[start_idx:end_idx]
+        text_batch = [t[0] for t in text_batch]
+        motion_batch = gt_motions[start_idx:end_idx]
+        motion_embeds, text_embeds = get_co_embeds(
+            motion_batch, text_batch, movement_enc, motion_enc, text_enc, opt
+        )
+        all_motion_embeds.append(motion_embeds)
+        all_text_embeds.append(text_embeds)
+
+    all_text_embeds = torch.cat(all_text_embeds, dim=0)
+    all_motion_embeds = torch.cat(all_motion_embeds, dim=0).detach()
+
+    all_text_embeds_test = []
+    all_motion_embeds_test = []
+    print("Generating embeddings for test...")
+    for i in tqdm(range(batch_num)):
+        start_idx = i * batch_size
+        end_idx = min((i + 1) * batch_size, total_num)  # Avoid index overflow
+        text_batch = test_texts[start_idx:end_idx]
+        text_batch = [t[0] for t in text_batch]
+        motion_batch = test_motions[start_idx:end_idx]
+        motion_embeds, text_embeds = get_co_embeds(
+            motion_batch, text_batch, movement_enc, motion_enc, text_enc, opt
+        )
+        all_motion_embeds_test.append(motion_embeds)
+        all_text_embeds_test.append(text_embeds)
+
+    all_text_embeds_test = torch.cat(all_text_embeds_test, dim=0)
+    all_motion_embeds_test = torch.cat(all_motion_embeds_test, dim=0).detach()
+
+
+    matching_score, R_precision, all_motion_embeddings = evaluate_matching_score(
+        all_text_embeds, all_motion_embeds
     )
-    # Sort the length of motions in descending order, (length of text has been sorted)
-    align_idx = np.argsort(m_lens.data.tolist())[::-1].copy()
-    # print(self.align_idx)
-    # print(m_lens[self.align_idx])
-    motions = motions[align_idx]
-    m_lens = m_lens[align_idx]
 
-    """Movement Encoding"""
-    movements = movement_encoder(motions).detach()
-    m_lens = m_lens // 4
-    motion_embedding = motion_encoder(movements, m_lens // 4)
-
-    """Text Encoding"""
-    with torch.no_grad():
-        # texts = [t[0] for t in texts]
-        # tokenized_inputs = clip_tokenizer(texts, padding='max_length', truncation=True, return_tensors="pt")
-
-        # # Remove 'token_type_ids' (not used by CLIP models)
-        # tokenized_inputs.pop("token_type_ids", None)
-        # for key in tokenized_inputs:
-        #     tokenized_inputs[key] = tokenized_inputs[key].to(device)
-        # clip_text_feat = clip_model(**tokenized_inputs)
-        # text_embeds_batch = clip_text_feat.text_embeds
-
-        text = clip.tokenize(texts, truncate=True).to(device)
-        text_embeds_clip = clip_model.encode_text(text).float()
-
-    text_embeds_ours = text_enc(text_embeds_clip)[align_idx]
-
-    return motion_embedding, text_embeds_ours
-
-
-all_text_embeds = []
-all_motion_embeds = []
-print("Generating embeddings for GTs...")
-for i in tqdm(range(batch_num)):
-    start_idx = i * batch_size
-    end_idx = min((i + 1) * batch_size, total_num)  # Avoid index overflow
-    text_batch = gt_texts[start_idx:end_idx]
-    text_batch = [t[0] for t in text_batch]
-    motion_batch = gt_motions[start_idx:end_idx]
-    motion_embeds, text_embeds = get_co_embeds(
-        motion_batch, text_batch, movement_enc, motion_enc, text_enc, opt
+    fid = compute_fid(
+        all_motion_embeds_test.detach().cpu().numpy(),
+        all_motion_embeds.detach().cpu().numpy(),
     )
-    all_motion_embeds.append(motion_embeds)
-    all_text_embeds.append(text_embeds)
 
-all_text_embeds = torch.cat(all_text_embeds, dim=0)
-all_motion_embeds = torch.cat(all_motion_embeds, dim=0).detach()
-
-all_text_embeds_test = []
-all_motion_embeds_test = []
-print("Generating embeddings for test...")
-for i in tqdm(range(batch_num)):
-    start_idx = i * batch_size
-    end_idx = min((i + 1) * batch_size, total_num)  # Avoid index overflow
-    text_batch = test_texts[start_idx:end_idx]
-    text_batch = [t[0] for t in text_batch]
-    motion_batch = test_motions[start_idx:end_idx]
-    motion_embeds, text_embeds = get_co_embeds(
-        motion_batch, text_batch, movement_enc, motion_enc, text_enc, opt
+    matching_score_test, R_precision_test, all_motion_embeddings_test = (
+        evaluate_matching_score(all_text_embeds_test, all_motion_embeds_test)
     )
-    all_motion_embeds_test.append(motion_embeds)
-    all_text_embeds_test.append(text_embeds)
 
-all_text_embeds_test = torch.cat(all_text_embeds_test, dim=0)
-all_motion_embeds_test = torch.cat(all_motion_embeds_test, dim=0).detach()
+    div_gt = evaluate_diversity(all_motion_embeds.detach().cpu().numpy())
+    div_test = evaluate_diversity(all_motion_embeds_test.detach().cpu().numpy())
 
+    print("feature path: ", args.pred_feat)
+    print("FID: ", fid)
 
-matching_score, R_precision, all_motion_embeddings = evaluate_matching_score(
-    all_text_embeds, all_motion_embeds
-)
+    print("GT Matching Score: ", matching_score)
+    print("GT R-precision: ", R_precision)
+    print("GT Diversity: ", div_gt)
 
-fid = compute_fid(
-    all_motion_embeds_test.detach().cpu().numpy(),
-    all_motion_embeds.detach().cpu().numpy(),
-)
-
-matching_score_test, R_precision_test, all_motion_embeddings_test = (
-    evaluate_matching_score(all_text_embeds_test, all_motion_embeds_test)
-)
-
-div_gt = evaluate_diversity(all_motion_embeds.detach().cpu().numpy())
-div_test = evaluate_diversity(all_motion_embeds_test.detach().cpu().numpy())
-
-print("feature path: ", feats_path)
-print("FID: ", fid)
-
-print("GT Matching Score: ", matching_score)
-print("GT R-precision: ", R_precision)
-print("GT Diversity: ", div_gt)
-
-print("Test Matching Score: ", matching_score_test)
-print("Test R-precision: ", R_precision_test)
-print("Test Diversity: ", div_test)
+    print("Test Matching Score: ", matching_score_test)
+    print("Test R-precision: ", R_precision_test)
+    print("Test Diversity: ", div_test)
