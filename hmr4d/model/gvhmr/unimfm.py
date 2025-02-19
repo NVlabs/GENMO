@@ -103,6 +103,8 @@ class UNIMFM(pl.LightningModule):
         else:
             self.use_text_encoder = False
 
+        self.humanoid = None
+
     def load_and_freeze_llm(self, llm_version):
         tokenizer = T5Tokenizer.from_pretrained(llm_version)
         model = T5EncoderModel.from_pretrained(llm_version)
@@ -796,7 +798,7 @@ class UNIMFM(pl.LightningModule):
         has_humanoid_data = torch.tensor(
             [x.get("has_humanoid_data", False) for x in batch["meta"]]
         ).to(obs.device)
-        mode = batch["meta"][0].get("mode", "default")
+        test_mode = batch["meta"][0].get("mode", "default")
         batch_ = {
             "length": batch["length"],
             "obs": obs,
@@ -804,11 +806,14 @@ class UNIMFM(pl.LightningModule):
             "K_fullimg": batch["K_fullimg"],
             "cam_angvel": batch["cam_angvel"],
             "f_imgseq": batch["f_imgseq"],
+            "caption": batch["caption"],
             "eval_text_only": eval_text_only,
-            "mode": mode,
+            "mode": test_mode,
             "meta": batch["meta"],
             "has_humanoid_data": has_humanoid_data,
+            "humanoid": self.humanoid,
         }
+
         if infer_version == 3:
             batch_["R_w2c"] = batch["R_w2c"]
             batch_["cam_tvel"] = batch["cam_tvel"]
@@ -827,7 +832,7 @@ class UNIMFM(pl.LightningModule):
                 batch["caption"], batch["has_text"]
             )
 
-        if mode == "infilling":
+        if test_mode == "infilling":
             batch["target_x"] = self.endecoder.encode(batch)  # (B, L, C)
             rng = np.random.RandomState(
                 batch["meta"][0].get("eval_seed", 7) + batch_idx
@@ -887,6 +892,7 @@ class UNIMFM(pl.LightningModule):
             train=False,
             postproc=do_postproc_not_flip_test,
             global_step=global_step,
+            test_mode=test_mode,
         )
         outputs["pred_smpl_params_global"] = {
             k: v[0] for k, v in outputs["pred_smpl_params_global"].items()
@@ -896,7 +902,7 @@ class UNIMFM(pl.LightningModule):
                 k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()
             }
         outputs["eval_text_only"] = eval_text_only
-        if mode == "infilling":
+        if test_mode == "infilling":
             outputs.update(mask_res)
 
         if do_flip_test:

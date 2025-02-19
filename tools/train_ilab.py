@@ -128,6 +128,11 @@ def train(cfg: DictConfig) -> None:
         cfg.data, _recursive_=False
     )
     model: pl.LightningModule = hydra.utils.instantiate(cfg.model, _recursive_=False)
+    humanoid = Humanoid(
+        cfg_hydra=cfg.phc,
+        seed=0,
+    )
+    model.humanoid = humanoid
 
     if (
         cfg.get("pretrain_ckpt", None) is not None
@@ -253,12 +258,6 @@ def train(cfg: DictConfig) -> None:
 @hydra.main(version_base="1.3", config_path="../hmr4d/configs", config_name="train")
 def main(cfg) -> None:
     print_cfg(cfg, use_rich=True)
-    humanoid = Humanoid(
-        cfg_hydra=cfg.phc,
-        seed=0,
-    )
-    humanoid.eval()
-    humanoid.close()
     train(cfg)
 
 

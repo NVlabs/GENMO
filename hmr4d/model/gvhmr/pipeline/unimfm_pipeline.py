@@ -165,13 +165,20 @@ class Pipeline(nn.Module):
         static_cam=False,
         global_step=0,
         mode=None,
+        test_mode=None,
     ):
         outputs = dict()
         inputs = self.prepare_inputs(inputs, train)
 
         # Forward & output
         model_output = self.denoiser3d(
-            inputs, train=train, postproc=postproc, static_cam=static_cam, mode=mode
+            inputs,
+            train=train,
+            postproc=postproc,
+            static_cam=static_cam,
+            mode=mode,
+            test_mode=test_mode,
+            normalizer_stats=self.normalizer_stats,
         )  # pred_x, pred_cam, static_conf_logits
         decode_dict = self.endecoder.decode(model_output["pred_x"])  # (B, L, C) -> dict
         outputs.update({"model_output": model_output, "decode_dict": decode_dict})

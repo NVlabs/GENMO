@@ -178,15 +178,18 @@ class UNIMFMDiffusion(nn.Module):
         )
         return
 
-    def generate_motion_rep(self, inputs, target_x):
+    def generate_motion_rep(self, inputs, target_x, first_k_frames=None):
         f_condition = inputs["f_condition"]
         f_condition_exists = inputs["f_condition_exists"]
-
         length = inputs["length"]
+        end_fr = first_k_frames if first_k_frames is not None else None
+        if first_k_frames is not None:
+            length = length.clamp(max=first_k_frames)
+
         assert "obs" in f_condition
         f_cond_dict = {}
         if "obs" in f_condition:
-            obs = f_condition["obs"]
+            obs = f_condition["obs"][:, :end_fr]
             B, L, J, C = obs.shape
             assert J == 17 and C == 3
             obs = obs.clone()
@@ -203,27 +206,27 @@ class UNIMFMDiffusion(nn.Module):
             f_cond_dict["obs"] = f_obs
 
         if "f_cliffcam" in f_condition:
-            f_cliffcam = f_condition["f_cliffcam"]  # (B, L, 3)
+            f_cliffcam = f_condition["f_cliffcam"][:, :end_fr]  # (B, L, 3)
             f_cliffcam = self.cliffcam_embedder(f_cliffcam)
             f_cond_dict["f_cliffcam"] = f_cliffcam
         if "f_cam_angvel" in f_condition:
-            f_cam_angvel = f_condition["f_cam_angvel"]  # (B, L, 6)
+            f_cam_angvel = f_condition["f_cam_angvel"][:, :end_fr]  # (B, L, 6)
             f_cam_angvel = self.cam_angvel_embedder(f_cam_angvel)
             f_cond_dict["f_cam_angvel"] = f_cam_angvel
         if "f_cam_t_vel" in f_condition:
-            f_cam_t_vel = f_condition["f_cam_t_vel"]  # (B, L, 3)
+            f_cam_t_vel = f_condition["f_cam_t_vel"][:, :end_fr]  # (B, L, 3)
             f_cam_t_vel = self.cam_t_vel_embedder(f_cam_t_vel)
             f_cond_dict["f_cam_t_vel"] = f_cam_t_vel
         if "f_imgseq" in f_condition:
-            f_imgseq = f_condition["f_imgseq"]  # (B, L, C)
+            f_imgseq = f_condition["f_imgseq"][:, :end_fr]  # (B, L, C)
             f_imgseq = self.imgseq_embedder(f_imgseq)
             f_cond_dict["f_imgseq"] = f_imgseq
         if "observed_motion_3d" in f_condition:
             motion_mask_3d = inputs.get(
                 "motion_mask_3d", torch.zeros_like(f_condition["observed_motion_3d"])
-            )
+            )[:, :end_fr]
             f_observed_motion_3d = torch.cat(
-                [f_condition["observed_motion_3d"], motion_mask_3d], dim=-1
+                [f_condition["observed_motion_3d"][:, :end_fr], motion_mask_3d], dim=-1
             )
             f_observed_motion_3d = self.observed_motion_3d_embedder(
                 f_observed_motion_3d
@@ -231,7 +234,9 @@ class UNIMFMDiffusion(nn.Module):
             f_cond_dict["observed_motion_3d"] = f_observed_motion_3d
 
         if "humanoid_obs" in f_condition:
-            f_humanoid_obs = f_condition["humanoid_obs"]  # (B, L, humanoid_obs_dim)
+            f_humanoid_obs = f_condition["humanoid_obs"][
+                :, :end_fr
+            ]  # (B, L, humanoid_obs_dim)
             f_humanoid_obs = self.humanoid_obs_embedder(f_humanoid_obs)
             f_cond_dict["humanoid_obs"] = f_humanoid_obs
 
@@ -240,7 +245,10 @@ class UNIMFMDiffusion(nn.Module):
                 for k in f_cond_dict:
                     if k != "observed_motion_3d":
                         f_cond_dict[k] = torch.cat(
-                            [f_cond_dict[k], f_condition_exists[k][:, :, None].float()],
+                            [
+                                f_cond_dict[k],
+                                f_condition_exists[k][:, :end_fr, None].float(),
+                            ],
                             dim=-1,
                         )
                         f_cond_dict[k] = self.cond_exists_embedder[k](f_cond_dict[k])
@@ -249,7 +257,7 @@ class UNIMFMDiffusion(nn.Module):
             f_cond = torch.cat(list(f_cond_dict.values()), dim=-1)
             f_cond_exists = torch.cat(
                 [
-                    f_condition_exists[k][:, :, None]
+                    f_condition_exists[k][:, :end_fr, None]
                     .float()
                     .repeat(1, 1, self.cond_exists_dim)
                     for k in f_cond_dict
@@ -261,9 +269,10 @@ class UNIMFMDiffusion(nn.Module):
                 f_cond = torch.cat([f_cond, f_cond_exists], dim=-1)
             f_cond = self.cond_merger(f_cond)
 
-        vis_mask = length_to_mask(length, L)  # (B, L)
+        vis_mask = length_to_mask(length, L)[:, :end_fr]  # (B, L)
 
         motion = target_x * vis_mask[..., None]
+        motion = motion[:, :end_fr]
         return f_cond, motion
 
     def forward_train(
@@ -567,8 +576,172 @@ class UNIMFMDiffusion(nn.Module):
             assert x in output, f"Output {x} not found in denoise_out"
         return output
 
-    def forward(self, inputs, train=False, postproc=False, static_cam=False, mode=None):
+    def forward_test_humanoid(
+        self,
+        inputs,
+        train=False,
+        postproc=False,
+        static_cam=False,
+        progress=False,
+        mode=None,
+        normalizer_stats=None,
+    ):
+        assert not self.training, "forward_test should only be called during inference"
+        eval_text_only = inputs.get("eval_text_only", False)
+        diffusion = (
+            self.test_text_only_diffusion if eval_text_only else self.test_diffusion
+        )
+        denoiser = self.denoiser
+        length = inputs["length"]  # (B,) effective length of each sample
+        regression_only = self.args.get("regression_only", False) and not eval_text_only
+        if self.args.get("force_regression_only", False):
+            regression_only = True
+        if (
+            self.args.get("use_cfg_sampler_for_text", False)
+            and eval_text_only
+            and not regression_only
+        ):
+            denoiser = ClassifierFreeSampleModel(denoiser)
+
+        f_condition = inputs["f_condition"]
+        f_condition_exists = inputs["f_condition_exists"]
+        obs = f_condition["obs"]
+        B, L = obs.shape[:2]
+        mdim = self.endecoder.get_motion_dim()
+        humanoid = inputs["humanoid"]
+        cur_obs = None
+        outputs_all = []
+        decode_dict_all = []
+
+        def policy(obs):
+            nonlocal cur_obs
+            obs = obs[..., :358].unsqueeze(1)
+            if "humanoid_obs" in normalizer_stats:
+                obs = (
+                    obs - normalizer_stats["humanoid_obs"]["mean"].to(obs)
+                ) / normalizer_stats["humanoid_obs"]["std"].to(obs)
+            if cur_obs is None:
+                cur_obs = obs
+            else:
+                cur_obs = torch.cat([cur_obs, obs], dim=1)
+            num_fr = cur_obs.shape[1]
+            target_x = torch.zeros(B, num_fr, mdim).to(obs)
+            f_condition["humanoid_obs"][:, :num_fr, :] = cur_obs
+
+            f_cond, motion = self.generate_motion_rep(
+                inputs, target_x, first_k_frames=num_fr
+            )
+            length_new = length.clamp(max=num_fr)
+
+            vis_mask = length_to_mask(length_new, num_fr)  # (B, L)
+
+            denoiser_kwargs = {
+                "y": {
+                    "text": inputs.get("caption", [""] * B),
+                    "f_cond": f_cond,
+                    "mask": vis_mask,
+                    "length": length_new,
+                },
+                "inputs": inputs,
+            }
+            if "encoded_text" in inputs:
+                denoiser_kwargs["y"]["encoded_text"] = inputs["encoded_text"]
+
+            if regression_only:
+                t, t_weights = self.schedule_sampler.sample(
+                    motion.shape[0], motion.device
+                )
+                t = (torch.ones_like(t) * diffusion.original_num_steps).long()
+                t_weights = torch.ones_like(t_weights)
+                x_t = torch.zeros_like(motion)
+
+                denoise_out = denoiser(
+                    x_t,
+                    self.train_diffusion._scale_timesteps(t),
+                    return_aux=False,
+                    **denoiser_kwargs,
+                )
+            else:
+                if self.args.get("use_cfg_sampler_for_text", False) and eval_text_only:
+                    denoiser_kwargs["y"]["scale"] = (
+                        self.model_cfg.diffusion.guidance_param
+                    )
+                diff_sampler = self.model_cfg.diffusion.get("sampler", "ddim")
+                if diff_sampler == "ddim":
+                    sample_fn = diffusion.ddim_sample_loop_with_aux
+                    kwargs = {"eta": self.model_cfg.diffusion.ddim_eta}
+                else:
+                    raise NotImplementedError(f"Sampler {diff_sampler} not implemented")
+
+                if self.args.get("force_zero_noise", False):
+                    noise = torch.zeros_like(motion)
+                else:
+                    if eval_text_only:
+                        noise = torch.randn_like(motion)
+                    else:
+                        noise = torch.zeros_like(motion)
+
+                if self.args.get("return_mid", False):
+                    kwargs["return_mid"] = True
+
+                denoise_out = sample_fn(
+                    denoiser,
+                    motion.shape,
+                    clip_denoised=False,
+                    model_kwargs=denoiser_kwargs,
+                    skip_timesteps=0,  # 0 is the default value - i.e. don't skip any step
+                    init_image=None,
+                    progress=progress,
+                    dump_steps=None,
+                    noise=noise,
+                    const_noise=False,
+                    **kwargs,
+                )
+
+            output = denoise_out.copy()
+            decode_dict = self.endecoder.decode(output["pred_x"])
+            action = decode_dict["humanoid_clean_action"]
+            outputs_all.append(output)
+            decode_dict_all.append(decode_dict)
+            return action[:, -1, :]
+
+        humanoid.eval_genmo_policy(policy=policy)
+        # for fr in range(L):
+        #     obs = torch.ones_like(f_condition['humanoid_obs'][:, fr:fr+1, :])
+        #     ar_output = policy(obs)
+
+        output = outputs_all[-1]
+
+        if self.args.get("return_mid", False):
+            output["intermediate_pred_x"] = [
+                sample_i["pred_x"] for sample_i in output["intermediates"]
+            ]
+
+        for x in self.args.out_attr:
+            assert x in output, f"Output {x} not found in denoise_out"
+        return output
+
+    def forward(
+        self,
+        inputs,
+        train=False,
+        postproc=False,
+        static_cam=False,
+        mode=None,
+        test_mode=None,
+        normalizer_stats=None,
+    ):
         if train:
             return self.forward_train(inputs, train, postproc, static_cam, mode=mode)
         else:
-            return self.forward_test(inputs, train, postproc, static_cam, mode=mode)
+            if test_mode == "humanoid":
+                return self.forward_test_humanoid(
+                    inputs,
+                    train,
+                    postproc,
+                    static_cam,
+                    mode=mode,
+                    normalizer_stats=normalizer_stats,
+                )
+            else:
+                return self.forward_test(inputs, train, postproc, static_cam, mode=mode)
