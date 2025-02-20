@@ -532,3 +532,13 @@ MainStore.store(
     ),
     group=group_name,
 )
+
+MainStore.store(
+    name="humanoid_only",
+    node=cfg_base(
+        encode_type="compose",
+        feature_arr=["humanoid"],
+        stats_arr=["DEFAULT_01"],
+    ),
+    group=group_name,
+)

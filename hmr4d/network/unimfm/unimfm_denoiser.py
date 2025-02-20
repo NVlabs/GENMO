@@ -131,6 +131,8 @@ class NetworkEncoderRoPE(nn.Module):
             self.text_encode_layer_idx = list(
                 range(0, num_layers, int(text_encode_mode.split("_")[1]))
             )
+        elif text_encode_mode == "none":
+            self.text_encode_layer_idx = []
         else:
             raise ValueError(f"Invalid text_encode_mode {text_encode_mode}")
         use_self_attn = text_encoder_cfg.get("use_self_attn", False)

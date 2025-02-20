@@ -705,7 +705,8 @@ class UNIMFMDiffusion(nn.Module):
             decode_dict_all.append(decode_dict)
             return action[:, -1, :]
 
-        humanoid.eval_genmo_policy(policy=policy)
+        ref_motions = [x["mid"] for x in inputs["meta"]]
+        humanoid.run_genmo_player(policy=policy, ref_motions=ref_motions, max_steps=L)
         # for fr in range(L):
         #     obs = torch.ones_like(f_condition['humanoid_obs'][:, fr:fr+1, :])
         #     ar_output = policy(obs)

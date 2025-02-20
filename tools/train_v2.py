@@ -2,6 +2,8 @@ import os
 import sys
 from datetime import datetime
 
+sys.path.append("third-party/PHC_Lab/")
+
 import hydra
 import pytorch_lightning as pl
 import torch

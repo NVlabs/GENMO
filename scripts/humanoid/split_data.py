@@ -4,10 +4,14 @@ import joblib
 import torch
 
 # Load the data
-data = joblib.load("phc/output/data/noise_True_0.07_2025-02-07-00_05_21.pkl")
-out_dir = "inputs/humanoid/data/traj_v1/noise_0.07"
-stats_dir = "inputs/humanoid/data/traj_v1/stats"
-self_obs_dim = 358
+data = joblib.load("phc/output/data/noise_False_0.05_2025-02-06-23_00_31.pkl")
+out_dir = "inputs/humanoid/data/traj_im_v1/noise_0"
+stats_dir = "inputs/humanoid/data/traj_im_v1/stats"
+self_obs_dim = None
+# data = joblib.load("phc/output/data/noise_True_0.07_2025-02-07-00_05_21.pkl")
+# out_dir = "inputs/humanoid/data/traj_v1/noise_0.07"
+# stats_dir = "inputs/humanoid/data/traj_v1/stats"
+# self_obs_dim = 358
 
 # Create output directory if it doesn't exist
 os.makedirs(out_dir, exist_ok=True)
@@ -17,11 +21,11 @@ key_names = data["key_names"]
 seq_length = len(key_names)
 
 # dump running_mean
-# running_mean = dict(data["running_mean"])
-# mean = running_mean["running_mean"][:self_obs_dim].float()
-# std = running_mean["running_var"][:self_obs_dim].sqrt().float()
-# torch.save(mean, os.path.join(stats_dir, "mean.pth"))
-# torch.save(std, os.path.join(stats_dir, "std.pth"))
+running_mean = dict(data["running_mean"])
+mean = running_mean["running_mean"][:self_obs_dim].float()
+std = running_mean["running_var"][:self_obs_dim].sqrt().float()
+torch.save(mean, os.path.join(stats_dir, "mean.pth"))
+torch.save(std, os.path.join(stats_dir, "std.pth"))
 
 # Split data into individual sequences
 for i in range(seq_length):

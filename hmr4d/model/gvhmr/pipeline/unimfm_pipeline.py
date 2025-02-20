@@ -87,7 +87,7 @@ class Pipeline(nn.Module):
             "f_cam_angvel": 6,
             "f_imgseq": 1024,
             "observed_motion_3d": 151,
-            "humanoid_obs": 358,
+            "humanoid_obs": self.args.get("humanoid_obs_dim", 358),
         }
 
     def normalize_attr(self, x, key):
@@ -316,14 +316,15 @@ class Pipeline(nn.Module):
                     outputs["pred_smpl_params_incam"]["body_pose"] = (
                         pred_smpl_params_body_pose
                     )
-            else:
+            elif "body_pose" in decode_dict:
                 outputs["pred_smpl_params_global"] = {
                     "body_pose": decode_dict["body_pose"],
                     "betas": decode_dict["betas"],
                     "global_orient": decode_dict["global_orient_w"],
                     "transl": decode_dict["transl_w"],
                 }
-            outputs["static_conf_logits"] = model_output["static_conf_logits"]
+            if "static_conf_logits" in model_output:
+                outputs["static_conf_logits"] = model_output["static_conf_logits"]
 
             if (
                 postproc

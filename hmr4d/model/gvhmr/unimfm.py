@@ -894,9 +894,10 @@ class UNIMFM(pl.LightningModule):
             global_step=global_step,
             test_mode=test_mode,
         )
-        outputs["pred_smpl_params_global"] = {
-            k: v[0] for k, v in outputs["pred_smpl_params_global"].items()
-        }
+        if "pred_smpl_params_global" in outputs:
+            outputs["pred_smpl_params_global"] = {
+                k: v[0] for k, v in outputs["pred_smpl_params_global"].items()
+            }
         if "pred_smpl_params_incam" in outputs:
             outputs["pred_smpl_params_incam"] = {
                 k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()

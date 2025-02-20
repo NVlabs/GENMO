@@ -132,6 +132,7 @@ def train(cfg: DictConfig) -> None:
         cfg_hydra=cfg.phc,
         seed=0,
     )
+    humanoid.create_player()
     model.humanoid = humanoid
 
     if (

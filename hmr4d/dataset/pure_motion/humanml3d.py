@@ -636,6 +636,18 @@ MainStore.store(
     ),
     group=train_group_name,
 )
+MainStore.store(
+    name="humanoid_train_im_v1",
+    node=builds(
+        Humanml3dDataset,
+        cam_augmentation="static",
+        split="train",
+        humanoid_data_dir="inputs/humanoid/data/traj_im_v1",
+        humanoid_noise_seq=["noise_0", "noise_0.07"],
+        discard_last_frame=True,
+    ),
+    group=train_group_name,
+)
 
 if __name__ == "__main__":
     dataset = Humanml3dDataset(
