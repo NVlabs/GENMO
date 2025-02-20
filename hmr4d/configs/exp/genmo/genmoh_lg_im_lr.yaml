@@ -6,7 +6,7 @@ defaults:
   - override /data: mocap/trainX_testY
   - override /model: gvhmr/unimfm
   - override /endecoder: gvhmr/humanoid_only
-  - override /optimizer: adamw_2e-4
+  - override /optimizer: adamw_2e-5
   - override /scheduler_cfg: epoch_half_200_350
   - override /train_datasets:
       # - pure_motion_amass/v11

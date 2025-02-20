@@ -1,0 +1,11 @@
+# @package phc
+
+test: True
+# Checkpoint settings
+checkpoint: phc/output/HumanoidIm/1108_phc_multi_silu/Humanoid.pth
+epoch: -1
+
+# Environment settings
+env:
+  num_envs: 1
+  tile_env: True

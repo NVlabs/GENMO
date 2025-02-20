@@ -276,8 +276,9 @@ class NetworkEncoderRoPE(nn.Module):
             for i in range(L):
                 min_ind = max(0, i - self.max_len // 2)
                 max_ind = min(L, i + self.max_len // 2)
-                max_ind = max(self.max_len, max_ind)
-                min_ind = min(L - self.max_len, min_ind)
+                eff_max_len = min(self.max_len, L)
+                max_ind = max(eff_max_len, max_ind)
+                min_ind = min(L - eff_max_len, min_ind)
                 attnmask[i, min_ind:max_ind] = False
         else:
             attnmask = None

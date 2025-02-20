@@ -615,7 +615,7 @@ class UNIMFMDiffusion(nn.Module):
 
         def policy(obs):
             nonlocal cur_obs
-            obs = obs[..., :358].unsqueeze(1)
+            obs = obs[..., : self.humanoid_obs_dim].unsqueeze(1)
             if "humanoid_obs" in normalizer_stats:
                 obs = (
                     obs - normalizer_stats["humanoid_obs"]["mean"].to(obs)

@@ -71,41 +71,41 @@ class VisHumanoid(pl.Callback):
         if dataset_id not in ["humanml3d"]:  # Only process humanoid dataset
             return
 
-        # Move models to GPU if needed
-        for g in ["male", "female", "neutral"]:
-            self.smplx_model[g] = self.smplx_model[g].cuda()
-        self.smplx = self.smplx.cuda()
-        self.J_regressor = self.J_regressor.cuda()
-        self.smplx2smpl = self.smplx2smpl.cuda()
+        # # Move models to GPU if needed
+        # for g in ["male", "female", "neutral"]:
+        #     self.smplx_model[g] = self.smplx_model[g].cuda()
+        # self.smplx = self.smplx.cuda()
+        # self.J_regressor = self.J_regressor.cuda()
+        # self.smplx2smpl = self.smplx2smpl.cuda()
 
-        # Get sequence info
-        seq_id = batch["meta"][0].get("seq_id", "unknown")
-        seq_length = batch["length"][0].item()
-        gender = "neutral"
+        # # Get sequence info
+        # seq_id = batch["meta"][0].get("seq_id", "unknown")
+        # seq_length = batch["length"][0].item()
+        # gender = "neutral"
 
-        # Process predictions
-        pred_smpl_params_global = outputs["pred_smpl_params_global"]
-        pred_ay_j3d = self.smplx_model["neutral"](**pred_smpl_params_global)
+        # # Process predictions
+        # pred_smpl_params_global = outputs["pred_smpl_params_global"]
+        # pred_ay_j3d = self.smplx_model["neutral"](**pred_smpl_params_global)
 
-        # Get ground truth if available
-        target_w_j3d = None
-        if "smpl_params_w" in batch:
-            target_w_params = {k: v[0] for k, v in batch["smpl_params_w"].items()}
-            target_w_j3d = self.smplx_model[gender](**target_w_params)
-            offset = batch["smpl_params_w"]["transl"][0, :, None] - target_w_j3d[:, [0]]
-            target_w_j3d = target_w_j3d + offset
+        # # Get ground truth if available
+        # target_w_j3d = None
+        # if "smpl_params_w" in batch:
+        #     target_w_params = {k: v[0] for k, v in batch["smpl_params_w"].items()}
+        #     target_w_j3d = self.smplx_model[gender](**target_w_params)
+        #     offset = batch["smpl_params_w"]["transl"][0, :, None] - target_w_j3d[:, [0]]
+        #     target_w_j3d = target_w_j3d + offset
 
-        # Visualize
-        if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
-            wandb_dict = visualize_smpl_scene(
-                f"vis_humanoid_global",
-                batch_idx,
-                seq_id,
-                pred_ay_j3d,
-                target_w_j3d,
-                transform_mode="global",
-            )
-            self.wandb_html_dict.update(wandb_dict)
+        # # Visualize
+        # if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
+        #     wandb_dict = visualize_smpl_scene(
+        #         f"vis_humanoid_global",
+        #         batch_idx,
+        #         seq_id,
+        #         pred_ay_j3d,
+        #         target_w_j3d,
+        #         transform_mode="global",
+        #     )
+        #     self.wandb_html_dict.update(wandb_dict)
 
     def on_predict_epoch_start(self, trainer, pl_module):
         """Initialize visualization dictionary at start of epoch"""

@@ -2,7 +2,7 @@
 # based on unimfm_est_wtext_grep_reg_new3_j2d2_st_norm
 defaults:
   - /diffusion@model_cfg.diffusion: ddim
-  - /phc: config
+  - /phc: config_v1
   - override /data: mocap/trainX_testY
   - override /model: gvhmr/unimfm
   - override /endecoder: gvhmr/v1_amass_local_bedlam_cam_humanoid

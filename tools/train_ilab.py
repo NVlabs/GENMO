@@ -163,6 +163,7 @@ def train(cfg: DictConfig) -> None:
                 "global_step": ckpt["global_step"],
                 "epoch": ckpt["epoch"],
             }
+            print("pretrained ckpt info:", wandb_cfg["pretrained_ckpt_info"])
 
     # PL callbacks and logger
     global_rank = rank_zero_only.rank if rank_zero_only.rank is not None else 0

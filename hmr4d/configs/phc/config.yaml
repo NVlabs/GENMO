@@ -9,7 +9,7 @@ defaults:
 
 project_name: "PHC_Lab"
 notes: "Default Notes"
-exp_name: &exp_name humanoid_smpl
+exp_name: humanoid_smpl
 headless: True
 seed: 0
 no_log: False
@@ -18,7 +18,7 @@ num_threads: 64
 test: False
 dataset: False
 mlp: False
-output_path: output/HumanoidIm/${exp_name}
+output_path: output/HumanoidIm/${.exp_name}
 torch_deterministic: False
 epoch: 0
 im_eval: False
@@ -51,11 +51,3 @@ add_proj: False
 real_traj: False
 rendering_results: False
 rendering_results_path: test
-
-hydra:
-  job:
-    name: ${exp_name}
-    env_set:
-      OMP_NUM_THREADS: 1
-  run:
-    dir: output/HumanoidIm/${exp_name}
