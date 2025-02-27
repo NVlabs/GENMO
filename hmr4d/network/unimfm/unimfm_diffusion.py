@@ -36,6 +36,7 @@ class UNIMFMDiffusion(nn.Module):
         use_cond_exists_as_input=False,
         cond_merge_strategy="add",
         cond_exists_dim=512,
+        img_process_modules=None,
         **kwargs,
     ):
         super().__init__()
@@ -61,17 +62,22 @@ class UNIMFMDiffusion(nn.Module):
         self.cond_merge_strategy = cond_merge_strategy
         self.cond_exists_dim = cond_exists_dim
 
-        assert "obs" in self.args.in_attr, "obs (kp2d) must be in in_attr"
-        self.learned_pos_linear = nn.Linear(2, 32)
-        self.learned_pos_params = nn.Parameter(torch.randn(17, 32), requires_grad=True)
-        self.embed_noisyobs = Mlp(
-            17 * 32,
-            hidden_features=self.latent_dim * 2,
-            out_features=self.latent_dim,
-            drop=dropout,
-        )
-        latent_dim = self.latent_dim
-        dropout = self.dropout
+        if img_process_modules is not None:
+            self.img_process_modules = nn.ModuleDict(instantiate(img_process_modules))
+        else:
+            self.img_process_modules = None
+
+        if "obs" in self.args.in_attr:
+            self.learned_pos_linear = nn.Linear(2, 32)
+            self.learned_pos_params = nn.Parameter(
+                torch.randn(17, 32), requires_grad=True
+            )
+            self.embed_noisyobs = Mlp(
+                17 * 32,
+                hidden_features=self.latent_dim * 2,
+                out_features=self.latent_dim,
+                drop=dropout,
+            )
         if "f_cliffcam" in self.args.in_attr:
             self.cliffcam_embedder = nn.Sequential(
                 nn.Linear(self.cliffcam_dim, latent_dim),
@@ -126,6 +132,30 @@ class UNIMFMDiffusion(nn.Module):
                 nn.Dropout(dropout),
                 zero_module(nn.Linear(latent_dim, latent_dim)),
             )
+        self.add_features_dim = {
+            "humanoid_contact_force": 90,
+        }
+        self.not_add_features = [
+            "obs",
+            "f_cliffcam",
+            "f_cam_angvel",
+            "f_cam_t_vel",
+            "f_imgseq",
+            "observed_motion_3d",
+            "humanoid_obs",
+            "humanoid_rgb_obs",
+        ]
+        self.add_feature_embedders = nn.ModuleDict()
+        for k in self.args.in_attr:
+            if k in self.not_add_features:
+                continue
+            module = nn.Sequential(
+                nn.Linear(self.add_features_dim[k], latent_dim),
+                nn.SiLU(),
+                nn.Dropout(dropout),
+                zero_module(nn.Linear(latent_dim, latent_dim)),
+            )
+            self.add_feature_embedders[k] = module
 
         add_dim = 0
         if self.use_cond_exists_as_input:
@@ -186,7 +216,6 @@ class UNIMFMDiffusion(nn.Module):
         if first_k_frames is not None:
             length = length.clamp(max=first_k_frames)
 
-        assert "obs" in f_condition
         f_cond_dict = {}
         if "obs" in f_condition:
             obs = f_condition["obs"][:, :end_fr]
@@ -240,6 +269,17 @@ class UNIMFMDiffusion(nn.Module):
             f_humanoid_obs = self.humanoid_obs_embedder(f_humanoid_obs)
             f_cond_dict["humanoid_obs"] = f_humanoid_obs
 
+        for k in self.args.in_attr:
+            if k in self.not_add_features:
+                continue
+            f_cond_dict[k] = self.add_feature_embedders[k](f_condition[k][:, :end_fr])
+
+        for k in self.img_process_modules:
+            B = f_condition[k].shape[0]
+            img_batched = f_condition[k][:, :end_fr].view(-1, *f_condition[k].shape[2:])
+            f_cond_dict[k] = self.img_process_modules[k](img_batched)
+            f_cond_dict[k] = f_cond_dict[k].view(B, -1, *f_cond_dict[k].shape[1:])
+
         if self.cond_merge_strategy == "add":
             if self.use_cond_exists_as_input:
                 for k in f_cond_dict:
@@ -269,7 +309,7 @@ class UNIMFMDiffusion(nn.Module):
                 f_cond = torch.cat([f_cond, f_cond_exists], dim=-1)
             f_cond = self.cond_merger(f_cond)
 
-        vis_mask = length_to_mask(length, L)[:, :end_fr]  # (B, L)
+        vis_mask = length_to_mask(length, f_cond.shape[1])[:, :end_fr]  # (B, L)
 
         motion = target_x * vis_mask[..., None]
         motion = motion[:, :end_fr]

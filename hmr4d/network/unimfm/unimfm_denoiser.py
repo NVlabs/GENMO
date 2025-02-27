@@ -272,21 +272,26 @@ class NetworkEncoderRoPE(nn.Module):
             and autoregressive_mask.any()
         )
         if L > self.max_len or use_autoregressive:
-            attnmask = torch.ones((L, L), device=x.device, dtype=torch.bool)
+            attnmask = torch.ones((B, L, L), device=x.device, dtype=torch.bool)
+            attnmask_noar = torch.ones((L, L), device=x.device, dtype=torch.bool)
+            attnmask_ar = torch.ones((L, L), device=x.device, dtype=torch.bool)
             for i in range(L):
                 min_ind = max(0, i - self.max_len // 2)
                 max_ind = min(L, i + self.max_len // 2)
                 eff_max_len = min(self.max_len, L)
-                max_ind = max(eff_max_len, max_ind)
-                min_ind = min(L - eff_max_len, min_ind)
-                attnmask[i, min_ind:max_ind] = False
+                max_ind_exp = max(eff_max_len, max_ind)
+                min_ind_exp = min(L - eff_max_len, min_ind)
+                attnmask_ar[i, min_ind:max_ind] = False
+                attnmask_noar[i, min_ind_exp:max_ind_exp] = False
+            if use_autoregressive:
+                attnmask[autoregressive_mask] = attnmask_ar
+                attnmask[~autoregressive_mask] = attnmask_noar
+            else:
+                attnmask[:] = attnmask_noar.unsqueeze(0)
         else:
             attnmask = None
 
         if use_autoregressive:
-            # Expand attnmask to batch dimension if not already done
-            attnmask = attnmask.unsqueeze(0).expand(B, L, L)
-
             # Create causal mask (upper triangular = True)
             causal_mask = torch.triu(
                 torch.ones((L, L), device=x.device, dtype=torch.bool), diagonal=1

@@ -1,7 +1,8 @@
 user=${1:-jiefengl}
 branch=${2:-main}
 env_var=${3}
-python_cmd=${@:4}
+tmp_folder=${4}
+python_cmd=${@:5}
 
 
 if [ ! -v LOCAL_RANK ]; then
@@ -25,7 +26,7 @@ echo "SLURM_PROCID: $SLURM_PROCID"
 echo "SLURM_JOB_NUM_NODES: $SLURM_JOB_NUM_NODES"
 echo "SUBMIT_SAVE_ROOT: $SUBMIT_SAVE_ROOT"
 
-source tools/slurm_init.sh $user
+source tools/slurm_init_ilab.sh $user $tmp_folder
 
 echo "==========="
 echo "pwd:"

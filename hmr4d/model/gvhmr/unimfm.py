@@ -208,55 +208,35 @@ class UNIMFM(pl.LightningModule):
         return outputs
 
     def init_condition_exists(self, batch):
-        B, L = batch["obs"].shape[:2]
+        B, L = batch["B"], batch["L"]
+        device = batch["device"]
         f_condition_exists = dict()
         key_mapping = {
             "f_cam_angvel": "cam_angvel",
+            "f_cliffcam": "obs",
         }
-        if self.model_cfg.get("perframe_condition_exists", False):
-            f_condition_exists["obs"] = batch["obs"].view(B, L, -1).norm(dim=-1) > 1e-4
-            f_condition_exists["f_cliffcam"] = f_condition_exists["obs"].clone()
-            f_condition_exists["f_imgseq"] = (
-                batch["f_imgseq"].view(B, L, -1).norm(dim=-1) > 1e-4
-            )
-            for k in ["f_cam_angvel", "humanoid_obs"]:
-                batch_key = key_mapping.get(k, k)
-                if batch_key in batch:
+        for k in self.pipeline.args.in_attr:
+            batch_key = key_mapping.get(k, k)
+            if f"{k}_exists" in batch:
+                f_condition_exists[k] = batch[f"{k}_exists"]
+            elif batch_key in batch:
+                if self.model_cfg.get("perframe_condition_exists", False):
                     f_condition_exists[k] = (
-                        batch[batch_key].view(B, L, -1).norm(dim=-1) > 1e-4
-                    )
+                        batch[batch_key].view(B, L, -1) > 1e-5
+                    ).any(dim=-1)
                 else:
                     f_condition_exists[k] = (
-                        torch.zeros(B, L).bool().to(batch["obs"].device)
-                    )
-        else:
-            f_condition_exists["obs"] = (
-                (batch["obs"].view(B, -1).norm(dim=-1) > 1e-4)
-                .unsqueeze(-1)
-                .repeat(1, L)
-            )
-            f_condition_exists["f_cliffcam"] = f_condition_exists["obs"].clone()
-            f_condition_exists["f_imgseq"] = (
-                (batch["f_imgseq"].view(B, -1).norm(dim=-1) > 1e-4)
-                .unsqueeze(-1)
-                .repeat(1, L)
-            )
-            for k in ["f_cam_angvel", "humanoid_obs"]:
-                batch_key = key_mapping.get(k, k)
-                if batch_key in batch:
-                    f_condition_exists[k] = (
-                        (batch[batch_key].view(B, -1).norm(dim=-1) > 1e-4)
+                        (batch[batch_key].view(B, -1) > 1e-5)
+                        .any(dim=-1)
                         .unsqueeze(-1)
                         .repeat(1, L)
                     )
-                else:
-                    f_condition_exists[k] = (
-                        torch.zeros(B, L).bool().to(batch["obs"].device)
-                    )
+            else:
+                f_condition_exists[k] = torch.zeros(B, L).bool().to(device)
         batch["f_condition_exists"] = f_condition_exists
 
     def create_condition_mask(self, batch, cond_mask_cfg, mode):
-        device = batch["obs"].device
+        device = batch["device"]
         reuse_regression_mask = cond_mask_cfg.get("reuse_regression_mask", True)
         regression_no_img_mask = cond_mask_cfg.get("regression_no_img_mask", False)
         mask_text_prob = cond_mask_cfg.get("mask_text_prob", {}).get(mode, 0.0)
@@ -319,97 +299,103 @@ class UNIMFM(pl.LightningModule):
                 batch["caption"], batch["has_text"]
             )
         batch["target_x"] = self.endecoder.encode(batch)  # (B, L, C)
-        batch["static_gt"] = self.endecoder.get_static_gt(
-            batch, self.pipeline.args.static_conf.vel_thr
-        )  # (B, L, 6)
+        batch["device"] = batch["target_x"].device
+        batch["B"], batch["L"] = batch["target_x"].shape[:2]
 
-        B, F = batch["smpl_params_c"]["body_pose"].shape[:2]
+        if "smpl_params_c" in batch:
+            # Create augmented noisy-obs : gt_j3d(coco17)
+            with torch.no_grad():
+                gt_verts437, gt_j3d = self.smplx(**batch["smpl_params_c"])
+                root_ = gt_j3d[:, :, [11, 12], :].mean(-2, keepdim=True)
+                batch["gt_j3d"] = gt_j3d
+                batch["gt_cr_coco17"] = gt_j3d - root_
+                batch["gt_c_verts437"] = gt_verts437
+                batch["gt_cr_verts437"] = gt_verts437 - root_
 
-        # Create augmented noisy-obs : gt_j3d(coco17)
-        with torch.no_grad():
-            gt_verts437, gt_j3d = self.smplx(**batch["smpl_params_c"])
-            root_ = gt_j3d[:, :, [11, 12], :].mean(-2, keepdim=True)
-            batch["gt_j3d"] = gt_j3d
-            batch["gt_cr_coco17"] = gt_j3d - root_
-            batch["gt_c_verts437"] = gt_verts437
-            batch["gt_cr_verts437"] = gt_verts437 - root_
+            # bbx_xys
+            i_x2d = safely_render_x3d_K(gt_verts437, batch["K_fullimg"], thr=0.3)
+            bbx_xys = get_bbx_xys(i_x2d, do_augment=True)
+            if False:  # trust image bbx_xys seems better
+                batch["bbx_xys"] = bbx_xys
+            else:
+                mask_bbx_xys = batch["mask"]["bbx_xys"]
+                batch["bbx_xys"][~mask_bbx_xys] = bbx_xys[~mask_bbx_xys].to(
+                    batch["bbx_xys"]
+                )
 
-        # bbx_xys
-        i_x2d = safely_render_x3d_K(gt_verts437, batch["K_fullimg"], thr=0.3)
-        bbx_xys = get_bbx_xys(i_x2d, do_augment=True)
-        if False:  # trust image bbx_xys seems better
-            batch["bbx_xys"] = bbx_xys
-        else:
-            mask_bbx_xys = batch["mask"]["bbx_xys"]
-            batch["bbx_xys"][~mask_bbx_xys] = bbx_xys[~mask_bbx_xys].to(
-                batch["bbx_xys"]
+            # noisy_j3d -> project to i_j2d -> compute a bbx -> normalized kp2d [-1, 1]
+
+            noisy_j3d = gt_j3d + get_wham_aug_kp3d(gt_j3d.shape[:2])
+            if True:
+                noisy_j3d = randomly_modify_hands_legs(noisy_j3d)
+            obs_i_j2d = perspective_projection(
+                noisy_j3d, batch["K_fullimg"]
+            )  # (B, L, J, 2)
+            j2d_visible_mask = get_visible_mask(gt_j3d.shape[:2]).cuda()  # (B, L, J)
+            j2d_visible_mask[noisy_j3d[..., 2] < 0.3] = (
+                False  # Set close-to-image-plane points as invisible
             )
+            if True:  # Set both legs as invisible for a period
+                legs_invisible_mask = get_invisible_legs_mask(
+                    gt_j3d.shape[:2]
+                ).cuda()  # (B, L, J)
+                j2d_visible_mask[legs_invisible_mask] = False
+            if "mask_cfg" in self.model_cfg:
+                mask = self.generate_mask(
+                    self.model_cfg.mask_cfg, j2d_visible_mask, batch["length"]
+                )
+                j2d_visible_mask = j2d_visible_mask & mask
+            if "body_mask_cfg" in self.model_cfg:
+                mask = self.generate_mask(
+                    self.model_cfg.body_mask_cfg, j2d_visible_mask, batch["length"]
+                )
+                j2d_visible_mask = j2d_visible_mask & mask
+            if (
+                self.model_cfg.get("mask_occluded_imgfeats", False)
+                and "f_imgseq" in batch
+            ):
+                occluded_img_mask = (~j2d_visible_mask).all(dim=-1)
+                batch["f_imgseq"][occluded_img_mask] = 0
 
-        # noisy_j3d -> project to i_j2d -> compute a bbx -> normalized kp2d [-1, 1]
+            obs_kp2d = torch.cat(
+                [obs_i_j2d, j2d_visible_mask[:, :, :, None].float()], dim=-1
+            )  # (B, L, J, 3)
+            obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
+            # vis_ind = 0
+            # mv2d_norm = obs.unsqueeze(2)
+            # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
+            # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/mask_infill.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
 
-        noisy_j3d = gt_j3d + get_wham_aug_kp3d(gt_j3d.shape[:2])
-        if True:
-            noisy_j3d = randomly_modify_hands_legs(noisy_j3d)
-        obs_i_j2d = perspective_projection(
-            noisy_j3d, batch["K_fullimg"]
-        )  # (B, L, J, 2)
-        j2d_visible_mask = get_visible_mask(gt_j3d.shape[:2]).cuda()  # (B, L, J)
-        j2d_visible_mask[noisy_j3d[..., 2] < 0.3] = (
-            False  # Set close-to-image-plane points as invisible
-        )
-        if True:  # Set both legs as invisible for a period
-            legs_invisible_mask = get_invisible_legs_mask(
-                gt_j3d.shape[:2]
-            ).cuda()  # (B, L, J)
-            j2d_visible_mask[legs_invisible_mask] = False
-        if "mask_cfg" in self.model_cfg:
-            mask = self.generate_mask(
-                self.model_cfg.mask_cfg, j2d_visible_mask, batch["length"]
-            )
-            j2d_visible_mask = j2d_visible_mask & mask
-        if "body_mask_cfg" in self.model_cfg:
-            mask = self.generate_mask(
-                self.model_cfg.body_mask_cfg, j2d_visible_mask, batch["length"]
-            )
-            j2d_visible_mask = j2d_visible_mask & mask
-        if self.model_cfg.get("mask_occluded_imgfeats", False) and "f_imgseq" in batch:
-            occluded_img_mask = (~j2d_visible_mask).all(dim=-1)
-            batch["f_imgseq"][occluded_img_mask] = 0
+            obs[~j2d_visible_mask] = 0  # if not visible, set to (0,0,0)
+            batch["obs"] = obs
+            batch["j2d_visible_mask"] = j2d_visible_mask
 
-        obs_kp2d = torch.cat(
-            [obs_i_j2d, j2d_visible_mask[:, :, :, None].float()], dim=-1
-        )  # (B, L, J, 3)
-        obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
-        # vis_ind = 0
-        # mv2d_norm = obs.unsqueeze(2)
-        # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
-        # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/mask_infill.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
+            if "motion_3d_mask_cfg" in self.model_cfg:
+                mask_res = self.generate_motion_3d_mask(
+                    self.model_cfg.motion_3d_mask_cfg,
+                    batch["target_x"],
+                    batch["length"],
+                )
+                batch.update(mask_res)
 
-        obs[~j2d_visible_mask] = 0  # if not visible, set to (0,0,0)
-        batch["obs"] = obs
-        batch["j2d_visible_mask"] = j2d_visible_mask
+            if True:  # Use some detected vitpose (presave data)
+                prob = 0.5
+                mask_real_vitpose = (
+                    torch.rand(batch["B"]).to(obs_kp2d) < prob
+                ) * batch["mask"]["vitpose"]
+                batch["obs"][mask_real_vitpose] = normalize_kp2d(
+                    batch["kp2d"], batch["bbx_xys"]
+                )[mask_real_vitpose]
 
-        if "motion_3d_mask_cfg" in self.model_cfg:
-            mask_res = self.generate_motion_3d_mask(
-                self.model_cfg.motion_3d_mask_cfg, batch["target_x"], batch["length"]
-            )
-            batch.update(mask_res)
-
-        if True:  # Use some detected vitpose (presave data)
-            prob = 0.5
-            mask_real_vitpose = (torch.rand(B).to(obs_kp2d) < prob) * batch["mask"][
-                "vitpose"
-            ]
-            batch["obs"][mask_real_vitpose] = normalize_kp2d(
-                batch["kp2d"], batch["bbx_xys"]
-            )[mask_real_vitpose]
-
-        # Set untrusted frames to False
-        batch["obs"][~batch["mask"]["valid"]] = 0
+            # Set untrusted frames to False
+            batch["obs"][~batch["mask"]["valid"]] = 0
+            batch["static_gt"] = self.endecoder.get_static_gt(
+                batch, self.pipeline.args.static_conf.vel_thr
+            )  # (B, L, 6)
 
         batch["has_humanoid_data"] = torch.tensor(
             [x.get("has_humanoid_data", False) for x in batch["meta"]]
-        ).to(obs.device)
+        ).to(batch["device"])
         return batch
 
     def train_3d_step(self, batch, batch_idx, mode):
@@ -436,6 +422,8 @@ class UNIMFM(pl.LightningModule):
         return outputs
 
     def prepare_2d_batch(self, batch):
+        batch["device"] = batch["obs_kp2d"].device
+        batch["B"], batch["L"] = batch["obs_kp2d"].shape[:2]
         if "text_embed" in batch:
             batch["encoded_text"] = batch["text_embed"].cuda()
         elif self.use_text_encoder:
@@ -1031,6 +1019,14 @@ class UNIMFM(pl.LightningModule):
         if len(unexpected) > 0:
             Log.warn(f"Unexpected keys: {unexpected}")
         return ckpt
+
+    def cleanup_for_autoresume(self):
+        if hasattr(self, "humanoid"):
+            print(
+                f"[Auto Resume] Rank {self.trainer.global_rank} closing Humanoid",
+                flush=True,
+            )
+            self.humanoid.close()
 
 
 unimfm = builds(

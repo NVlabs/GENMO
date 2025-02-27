@@ -1,0 +1,9 @@
+phc_data_collect:
+  _target_: hmr4d.utils.callbacks.phc_data_collection_callback.PHCDataCollectionCallback
+  every_n_epochs: 1
+  collect_kwargs:
+    max_steps: 300
+    num_episodes: 170
+    enable_render: False
+    out_dir: "/tmp/phc/phc_data_gen_1/"
+    verbose: False

@@ -1,0 +1,11 @@
+# @package phc
+
+test: True
+# Checkpoint settings
+checkpoint: phc/output/HumanoidIm/dais_rgbd_0219/Humanoid_00020000.pth
+epoch: -1
+
+# Environment settings
+env:
+  num_envs: 5
+  tile_env: True

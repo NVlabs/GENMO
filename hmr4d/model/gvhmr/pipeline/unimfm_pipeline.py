@@ -75,19 +75,21 @@ class Pipeline(nn.Module):
         self.normalizer_stats = {}
         if "norm_attr_stats" in args:
             for key, stats_path in args.norm_attr_stats.items():
-                mean = torch.load(f"{stats_path}/mean.pth")
-                std = torch.load(f"{stats_path}/std.pth")
-                self.normalizer_stats[key] = {"mean": mean, "std": std}
+                self.normalizer_stats[key] = torch.load(
+                    stats_path, map_location="cpu", weights_only=False
+                )
 
         self.denoiser3d.endecoder = self.endecoder
 
         self.f_condition_dim = {
-            "obs": 3,
-            "f_cliffcam": 3,
-            "f_cam_angvel": 6,
-            "f_imgseq": 1024,
-            "observed_motion_3d": 151,
-            "humanoid_obs": self.args.get("humanoid_obs_dim", 358),
+            "obs": (17, 3),
+            "f_cliffcam": (3,),
+            "f_cam_angvel": (6,),
+            "f_imgseq": (1024,),
+            "observed_motion_3d": (151,),
+            "humanoid_obs": (self.args.get("humanoid_obs_dim", 358),),
+            "humanoid_rgb_obs": (4, 100, 100),
+            "humanoid_contact_forces": (90,),
         }
 
     def normalize_attr(self, x, key):
@@ -99,9 +101,11 @@ class Pipeline(nn.Module):
     # ========== Training ========== #
 
     def prepare_inputs(self, inputs, train):
-        B, L = inputs["obs"].shape[:2]
+        B, L = inputs["B"], inputs["L"]
 
-        if "use_cliffcam" not in inputs or inputs["use_cliffcam"].any():
+        if "bbx_xys" in inputs and (
+            "use_cliffcam" not in inputs or inputs["use_cliffcam"].any()
+        ):
             inputs["f_cliffcam"] = compute_bbox_info_bedlam(
                 inputs["bbx_xys"], inputs["K_fullimg"]
             )  # (B, L, 3)
@@ -122,8 +126,8 @@ class Pipeline(nn.Module):
                 if k in self.normalizer_stats:
                     f_condition[k] = self.normalize_attr(f_condition[k], k)
             else:
-                f_condition[k] = torch.zeros(B, L, self.f_condition_dim[k]).to(
-                    inputs["obs"]
+                f_condition[k] = torch.zeros(B, L, *self.f_condition_dim[k]).to(
+                    inputs["device"]
                 )
         for k in self.args.mask_out_attr:
             f_condition[k] = torch.zeros_like(f_condition[k])
@@ -397,7 +401,7 @@ class Pipeline(nn.Module):
                 total_loss += extra_loss
                 outputs.update(extra_loss_dict)
 
-        if "humanoid" in self.endecoder.feature_arr:
+        if any(["humanoid" in x for x in self.endecoder.feature_arr]):
             humanoid_loss, humanoid_loss_dict = compute_humanoid_loss(
                 inputs, outputs, self, mode
             )
@@ -653,15 +657,26 @@ def compute_humanoid_loss(inputs, outputs, ppl, mode):
 
     # add clean action loss
     if weights.get("humanoid_clean_action", 0.0) > 0.0:
+        gt_humanoid_clean_action = inputs["humanoid_clean_action"]
         humanoid_clean_action = outputs["decode_dict"]["humanoid_clean_action"]
         humanoid_clean_action_loss = F.mse_loss(
-            humanoid_clean_action, inputs["humanoid_clean_action"], reduction="none"
+            humanoid_clean_action, gt_humanoid_clean_action, reduction="none"
         )
         humanoid_clean_action_loss = (
             humanoid_clean_action_loss * mask[..., None]
         ).mean()
         humanoid_loss += humanoid_clean_action_loss * weights.humanoid_clean_action
         humanoid_loss_dict["humanoid_clean_action_loss"] = humanoid_clean_action_loss
+
+    if weights.get("humanoid_z_action", 0.0) > 0.0:
+        gt_humanoid_z_action = inputs["humanoid_z_action"]
+        humanoid_z_action = outputs["decode_dict"]["humanoid_z_action"]
+        humanoid_z_action_loss = F.mse_loss(
+            humanoid_z_action, gt_humanoid_z_action, reduction="none"
+        )
+        humanoid_z_action_loss = (humanoid_z_action_loss * mask[..., None]).mean()
+        humanoid_loss += humanoid_z_action_loss * weights.humanoid_z_action
+        humanoid_loss_dict["humanoid_z_action_loss"] = humanoid_z_action_loss
 
     return humanoid_loss, humanoid_loss_dict
 

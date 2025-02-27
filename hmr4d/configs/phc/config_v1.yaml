@@ -5,7 +5,7 @@ defaults:
   - override /learning@learning: ppo_im_big
   - _self_
 
-exp_name: &exp_name "1108_phc_multi_silu"
+exp_name: "1108_phc_multi_silu"
 
 # Environment settings
 env:

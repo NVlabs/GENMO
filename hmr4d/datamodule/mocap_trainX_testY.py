@@ -34,12 +34,13 @@ def collate_fn(batch, collate_cfg=None):
         elif k == "caption":
             return_dict[k] = [d[k] if k in d else "" for d in batch]
         elif k == "use_det_kp":
-            return_dict[k] = default_collate(
-                [
-                    d[k] if k in d else torch.zeros(d["K_fullimg"].shape[0])
-                    for d in batch
-                ]
-            )
+            if "K_fullimg" in batch[0]:
+                return_dict[k] = default_collate(
+                    [
+                        d[k] if k in d else torch.zeros(d["K_fullimg"].shape[0])
+                        for d in batch
+                    ]
+                )
         elif k in keys_using_default_feature_dim:
             return_dict[k] = default_collate(
                 [

@@ -19,6 +19,7 @@ parser.add_argument("-c", "--cfg_query", nargs="+", default=[])
 parser.add_argument("-d", "--dir_query", nargs="+", default=[])
 parser.add_argument("-v", "--cfg_var", type=str, default="", help="exp name var")
 parser.add_argument("-env", "--env_var", default="DUMMYFLAG=1")
+parser.add_argument("-m", "--mode", default="default")
 parser.add_argument("-g", "--gpus", type=int, default=1, help="gpus used per node")
 parser.add_argument("-n", "--nodes", type=int, default=1, help="number of nodes")
 parser.add_argument("-ar_bt", "--autoresume_before_timelimit", type=int, default=20)
@@ -34,6 +35,7 @@ parser.add_argument(
 )
 parser.add_argument("-s", "--stage", default="opt")
 parser.add_argument("-l", "--local", action="store_true")
+parser.add_argument("-i", "--interactive", action="store_true")
 parser.add_argument("-u", "--user", help="cluster username", required=True)
 parser.add_argument(
     "-a",
@@ -107,7 +109,12 @@ for cfg_f in cfg_files:
     cfg = osp.splitext(cfg_f)[0]
     cfg = osp.relpath(cfg, config_dir)
     if not args.debug:
-        cmd = f"python tools/train_v2.py exp={cfg} exp_name_var={args.cfg_var} ++pl_trainer.devices={args.gpus} ++pl_trainer.num_nodes={args.nodes} {args.additional_args}"
+        if args.mode == "humanoid":
+            cmd = f"/workspace/isaaclab/_isaac_sim/python.sh tools/train_ilab.py --headless --enable_cameras exp={cfg} exp_name_var={args.cfg_var} ++pl_trainer.devices={args.gpus} ++pl_trainer.num_nodes={args.nodes} {args.additional_args}"
+            if args.gpus > 1:
+                cmd += " --distributed"
+        else:
+            cmd = f"python tools/train_v2.py exp={cfg} exp_name_var={args.cfg_var} ++pl_trainer.devices={args.gpus} ++pl_trainer.num_nodes={args.nodes} {args.additional_args}"
         cmd += " ++data.loader_opts.train.num_workers=8 ++data.loader_opts.train_2d.num_workers=8"
         if args.resume:
             cmd += f" resume_mode={args.resume_cp}"
@@ -123,7 +130,7 @@ for cfg_f in cfg_files:
 
     tag = f"{args.job_tag}.{cfg_tag}"
     tag = tag[:110] if len(tag) > 110 else tag
-    slurm_cmds.append((cmd, tag))
+    slurm_cmds.append((cmd, tag, cfg_tag))
     # print(cmd)
 
 
@@ -132,12 +139,18 @@ if len(slurm_cmds) == 0:
     sys.exit(0)
 
 exp_base_folder = f"/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_exp/{args.user}"
+tmp_base_folder = f"/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/phc/{args.user}/tmp"
 subprocess_run(
     f"ssh {args.user}@cs-oci-ord-login-02 'mkdir -p {exp_base_folder}'", shell=True
 )
 
-now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+now_str = (
+    datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    if not args.interactive
+    else "interactive"
+)
 exp_folder = f"{exp_base_folder}/gvhmr-{now_str}"
+tmp_folder = f"{tmp_base_folder}/tmp-{now_str}"
 repo_folder = str(
     pathlib.Path(__file__).resolve().parent.parent
 )  # the root of the project
@@ -170,13 +183,25 @@ include_str = " ".join([f'--include="{f}"' for f in include_files])
 exclude_str = " ".join([f'--exclude="{f}"' for f in exclude_files])
 
 
-rsync_cmd = f'rsync -az --partial -m --chmod=775 {exclude_str} {include_str} --exclude="*/*" {repo_folder}/ {args.user}@cs-oci-ord-dc-02:{exp_folder}/'
+rsync_cmd = f'rsync -az -m --partial --chmod=775 {exclude_str} {include_str} --exclude="*/*" {repo_folder}/ {args.user}@cs-oci-ord-dc-02:{exp_folder}/'
 print(rsync_cmd)
 if not args.debug:
     subprocess_run(rsync_cmd, shell=True)
 
-for cmd, tag in slurm_cmds:
-    job_cmd = f"cd {exp_folder}; tools/slurm_job.sh {args.user} {args.branch} {args.env_var} {cmd}"
+if args.interactive:
+    print(f"Interactive mode, skipping slurm jobs, please go to {exp_folder}")
+    sys.exit(0)
+
+for cmd, tag, cfg_tag in slurm_cmds:
+    if args.mode == "humanoid":
+        script_name = "slurm_job_ilab.sh"
+        docker_image = "/lustre/fsw/portfolios/nvr/projects/nvr_lpr_digitalhuman/docker/ye_isaac_lab_2.1.1.sqsh"
+        tmp_cfg_folder = f"{tmp_folder}-{cfg_tag}"
+        job_cmd = f"cd {exp_folder}; tools/{script_name} {args.user} {args.branch} {args.env_var} {tmp_cfg_folder} {cmd}"
+    else:
+        script_name = "slurm_job.sh"
+        docker_image = "/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/docker/gvhmr+v1.sqsh"
+        job_cmd = f"cd {exp_folder}; tools/{script_name} {args.user} {args.branch} {args.env_var} {cmd}"
     print("job_cmd:", job_cmd)
 
     autoresume_str = (
@@ -187,7 +212,7 @@ for cmd, tag in slurm_cmds:
     autoresume_str += " --autoresume_ignore_failure"
     account_str = f"--account {args.account}" if args.account is not None else ""
     ssh_cmd = (
-        f"submit_job --partition {args.partition} {account_str} --duration {args.time} --gpu {args.gpus} --nodes {args.nodes} --tasks_per_node {args.gpus} {autoresume_str} --email_mode {args.slack_mode} --image /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/docker/gvhmr+v1.sqsh"
+        f"submit_job --partition {args.partition} {account_str} --duration {args.time} --gpu {args.gpus} --nodes {args.nodes} --tasks_per_node {args.gpus} {autoresume_str} --email_mode {args.slack_mode} --image {docker_image}"
         + f' --name {tag} --command "{job_cmd}"'
     )
 

@@ -1,0 +1,4 @@
+_target_: hmr4d.dataset.phc.phc_v1.PHCDataset
+data_path: /tmp/phc/phc_data_gen_1/
+motion_frames: 120
+num_repeat: 20
