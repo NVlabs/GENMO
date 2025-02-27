@@ -89,7 +89,7 @@ class Pipeline(nn.Module):
             "observed_motion_3d": (151,),
             "humanoid_obs": (self.args.get("humanoid_obs_dim", 358),),
             "humanoid_rgb_obs": (4, 100, 100),
-            "humanoid_contact_forces": (90,),
+            "humanoid_contact_force": (90,),
         }
 
     def normalize_attr(self, x, key):

@@ -149,6 +149,7 @@ network:
       num_layers: 8
       num_heads: 8
       mlp_ratio: 4
+      avgbeta: false
 
 data:
   loader_opts:

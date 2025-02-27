@@ -242,15 +242,16 @@ class NetworkEncoderRoPE(nn.Module):
 
         x = self.add_cond_linear(torch.cat([x, xt], dim=-1))
 
-        enc_text = y["encoded_text"].clone()
-        if self.training and self.text_mask_prob > 0:
-            mask = torch.rand((B,), device=x.device) < self.text_mask_prob
-            enc_text = enc_text * (1 - mask[:, None, None].float())
-        if rm_text_flag is not None:
-            enc_text = enc_text * (1 - rm_text_flag[:, None, None].float())
-        emb_text = self.embed_text(enc_text)
-        if self.use_text_pos_enc:
-            emb_text = self.sequence_pos_encoder(emb_text, batch_first=True)
+        if "encoded_text" in inputs:
+            enc_text = y["encoded_text"].clone()
+            if self.training and self.text_mask_prob > 0:
+                mask = torch.rand((B,), device=x.device) < self.text_mask_prob
+                enc_text = enc_text * (1 - mask[:, None, None].float())
+            if rm_text_flag is not None:
+                enc_text = enc_text * (1 - rm_text_flag[:, None, None].float())
+            emb_text = self.embed_text(enc_text)
+            if self.use_text_pos_enc:
+                emb_text = self.sequence_pos_encoder(emb_text, batch_first=True)
 
         if multi_text_data is not None:
             multi_text_data["text_embed_feats"] = self.embed_text(
@@ -317,7 +318,7 @@ class NetworkEncoderRoPE(nn.Module):
 
         # Output
         sample = self.final_layer(x)  # (B, L, C)
-        if self.avgbeta:
+        if self.avgbeta:  # TODO: fix based on beta dims
             betas = (sample[..., 126:136] * (~pmask[..., None])).sum(1) / length[
                 :, None
             ]  # (B, C)

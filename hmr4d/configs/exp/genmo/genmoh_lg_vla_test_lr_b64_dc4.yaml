@@ -7,7 +7,7 @@ defaults:
   - override /data: mocap/trainX_testY
   - override /model: gvhmr/unimfm
   - override /endecoder: gvhmr/humanoid_z_action
-  - override /optimizer: adamw_2e-5
+  - override /optimizer: adamw_1e-4
   - override /scheduler_cfg: epoch_half_200_350
   - override /train_datasets:
       - phc/v1
@@ -41,6 +41,11 @@ defaults:
       # - metric_3dpw
       # - metric_3dpw_occ
   - _self_
+
+callbacks:
+  phc_data_collect:
+    every_n_epochs: 4
+
 exp_name_base: ${hydra:runtime.choices.exp}
 exp_name_var: ""
 exp_name: ${exp_name_base}_${exp_name_var}
@@ -137,7 +142,6 @@ network:
     diffusion: ${model_cfg.diffusion}
     denoiser:
       _target_: hmr4d.network.unimfm.unimfm_denoiser.NetworkEncoderRoPE
-      max_len: 30 # effective max len is half for causal attention
       output_dim: 48
       xt_dim: ${.output_dim}
       njoints: ${.xt_dim}
@@ -155,7 +159,7 @@ network:
 data:
   loader_opts:
     train:
-      batch_size: 32
+      batch_size: 64
       num_workers: 6
     train_2d:
       batch_size: 16

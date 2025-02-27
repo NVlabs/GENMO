@@ -276,7 +276,9 @@ class UNIMFMDiffusion(nn.Module):
 
         for k in self.img_process_modules:
             B = f_condition[k].shape[0]
-            img_batched = f_condition[k][:, :end_fr].view(-1, *f_condition[k].shape[2:])
+            img_batched = f_condition[k][:, :end_fr].reshape(
+                -1, *f_condition[k].shape[2:]
+            )
             f_cond_dict[k] = self.img_process_modules[k](img_batched)
             f_cond_dict[k] = f_cond_dict[k].view(B, -1, *f_cond_dict[k].shape[1:])
 
@@ -624,6 +626,7 @@ class UNIMFMDiffusion(nn.Module):
         static_cam=False,
         progress=False,
         mode=None,
+        test_mode=None,
         normalizer_stats=None,
     ):
         assert not self.training, "forward_test should only be called during inference"
@@ -645,28 +648,42 @@ class UNIMFMDiffusion(nn.Module):
 
         f_condition = inputs["f_condition"]
         f_condition_exists = inputs["f_condition_exists"]
-        obs = f_condition["obs"]
-        B, L = obs.shape[:2]
+        humanoid_obs = f_condition["humanoid_obs"]
+        B, L = humanoid_obs.shape[:2]
         mdim = self.endecoder.get_motion_dim()
         humanoid = inputs["humanoid"]
-        cur_obs = None
+        obs_keys = [
+            x
+            for x in self.args.in_attr
+            if x in ["humanoid_obs", "humanoid_rgb_obs", "humanoid_contact_force"]
+        ]
+        cur_obs = {k: None for k in obs_keys}
         outputs_all = []
         decode_dict_all = []
 
-        def policy(obs):
+        def policy(obs_dict):
             nonlocal cur_obs
-            obs = obs[..., : self.humanoid_obs_dim].unsqueeze(1)
-            if "humanoid_obs" in normalizer_stats:
-                obs = (
-                    obs - normalizer_stats["humanoid_obs"]["mean"].to(obs)
-                ) / normalizer_stats["humanoid_obs"]["std"].to(obs)
-            if cur_obs is None:
-                cur_obs = obs
-            else:
-                cur_obs = torch.cat([cur_obs, obs], dim=1)
-            num_fr = cur_obs.shape[1]
-            target_x = torch.zeros(B, num_fr, mdim).to(obs)
-            f_condition["humanoid_obs"][:, :num_fr, :] = cur_obs
+            for k in obs_keys:
+                if k == "humanoid_obs":
+                    obs_k = obs_dict["self_obs"]["policy"]
+                elif k == "humanoid_rgb_obs":
+                    obs_k = obs_dict["task_obs"]["rgb"]
+                elif k == "humanoid_contact_force":
+                    obs_k = obs_dict["task_obs"]["contact_forces"]
+                if k in normalizer_stats:
+                    obs_k = (
+                        obs_k - normalizer_stats[k]["mean"].to(obs_k)
+                    ) / normalizer_stats[k]["std"].to(obs_k)
+                obs_k = obs_k.unsqueeze(1)
+                if cur_obs[k] is None:
+                    cur_obs[k] = obs_k
+                else:
+                    cur_obs[k] = torch.cat([cur_obs[k], obs_k], dim=1)
+
+            num_fr = cur_obs["humanoid_obs"].shape[1]
+            target_x = torch.zeros(B, num_fr, mdim).to(obs_k.device)
+            for k in cur_obs:
+                f_condition[k][:, :num_fr, :] = cur_obs[k]
 
             f_cond, motion = self.generate_motion_rep(
                 inputs, target_x, first_k_frames=num_fr
@@ -740,16 +757,21 @@ class UNIMFMDiffusion(nn.Module):
 
             output = denoise_out.copy()
             decode_dict = self.endecoder.decode(output["pred_x"])
-            action = decode_dict["humanoid_clean_action"]
+            if "humanoid_z_action" in decode_dict:
+                action = decode_dict["humanoid_z_action"]
+            else:
+                action = decode_dict["humanoid_clean_action"]
             outputs_all.append(output)
             decode_dict_all.append(decode_dict)
             return action[:, -1, :]
 
-        ref_motions = [x["mid"] for x in inputs["meta"]]
+        if test_mode == "humanoid_vla":
+            # all_motion_names = humanoid.env.env.get_motion_names()
+            # ref_motions = np.random.choice(all_motion_names, size=B, replace=False).tolist()
+            ref_motions = None
+        else:
+            ref_motions = [x["mid"] for x in inputs["meta"]]
         humanoid.run_genmo_player(policy=policy, ref_motions=ref_motions, max_steps=L)
-        # for fr in range(L):
-        #     obs = torch.ones_like(f_condition['humanoid_obs'][:, fr:fr+1, :])
-        #     ar_output = policy(obs)
 
         output = outputs_all[-1]
 
@@ -775,13 +797,14 @@ class UNIMFMDiffusion(nn.Module):
         if train:
             return self.forward_train(inputs, train, postproc, static_cam, mode=mode)
         else:
-            if test_mode == "humanoid":
+            if "humanoid" in test_mode:
                 return self.forward_test_humanoid(
                     inputs,
                     train,
                     postproc,
                     static_cam,
                     mode=mode,
+                    test_mode=test_mode,
                     normalizer_stats=normalizer_stats,
                 )
             else:

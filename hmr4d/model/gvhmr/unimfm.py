@@ -665,12 +665,17 @@ class UNIMFM(pl.LightningModule):
         return res
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
-        if "is_2d" in batch and batch["is_2d"][0]:
-            return self.validation_2d(batch, batch_idx, dataloader_idx)
+        test_mode = batch["meta"][0].get("mode", "default")
+        if test_mode == "humanoid_vla":
+            return self.validation_humanoid_vla(
+                batch, test_mode, batch_idx, dataloader_idx
+            )
+        elif "is_2d" in batch and batch["is_2d"][0]:
+            return self.validation_2d(batch, test_mode, batch_idx, dataloader_idx)
         else:
-            return self.validation_3d(batch, batch_idx, dataloader_idx)
+            return self.validation_3d(batch, test_mode, batch_idx, dataloader_idx)
 
-    def validation_2d(self, batch, batch_idx, dataloader_idx=0):
+    def validation_2d(self, batch, test_mode, batch_idx, dataloader_idx=0):
         do_postproc = self.trainer.state.stage == "test"  # Only apply postproc in test
         B = batch["obs_kp2d"].shape[0]
         obs_kp2d = batch["obs_kp2d"].squeeze(2)
@@ -747,7 +752,7 @@ class UNIMFM(pl.LightningModule):
         outputs["vis_2d"] = self.model_cfg.get("vis_2d", False)
         return outputs
 
-    def validation_3d(self, batch, batch_idx, dataloader_idx=0):
+    def validation_3d(self, batch, test_mode, batch_idx, dataloader_idx=0):
         # Options & Check
         try:
             stage = self.trainer.state.stage
@@ -800,7 +805,12 @@ class UNIMFM(pl.LightningModule):
             "meta": batch["meta"],
             "has_humanoid_data": has_humanoid_data,
             "humanoid": self.humanoid,
+            "B": batch["B"],
         }
+        if test_mode == "humanoid":
+            for k, v in batch.items():
+                if "humanoid" in k:
+                    batch_[k] = v
 
         if infer_version == 3:
             batch_["R_w2c"] = batch["R_w2c"]
@@ -972,6 +982,35 @@ class UNIMFM(pl.LightningModule):
 
                 outputs["pred_smpl_params_global"]["body_pose"] = body_pose[0]
                 # outputs["pred_smpl_params_incam"]["body_pose"] = body_pose[0]
+
+        return outputs
+
+    def validation_humanoid_vla(self, batch, test_mode, batch_idx, dataloader_idx=0):
+        """Validation step for humanoid motion data from PHC dataset."""
+        B = self.humanoid.env.num_envs
+        L = 300
+        device = "cuda"
+
+        # Prepare model inputs
+        inputs = {
+            "mode": test_mode,
+            "meta": batch["meta"],
+            "humanoid": self.humanoid,
+            "B": B,
+            "L": L,
+            "length": torch.tensor([L] * B).to(device),
+            "device": device,
+            "obs": batch["humanoid_obs"],
+            "has_humanoid_data": torch.tensor([True] * B).to(device),
+        }
+        self.init_condition_exists(inputs)
+
+        # Forward pass in test mode
+        outputs = self.pipeline.forward(
+            inputs,
+            train=False,
+            test_mode=test_mode,
+        )
 
         return outputs
 
