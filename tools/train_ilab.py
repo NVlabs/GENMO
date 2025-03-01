@@ -89,7 +89,7 @@ def train(cfg: DictConfig) -> None:
         cfg.test_datasets.imgfeat_motionx.max_num_motions *= (
             cfg.pl_trainer.devices * num_nodes
         )
-    pl.seed_everything(cfg.seed)
+    pl.seed_everything(cfg.seed + global_rank)
     torch.cuda.set_device(global_rank % 8)  # for tinycudann default memory
     wandb_run = None
     version = None

@@ -101,6 +101,9 @@ class PHCDataset(ImgfeatMotionDatasetBase):
         if length < tgt_len:
             data = pad_data(data, tgt_len)
 
+        if "text_embed" in episode_data:
+            data["text_embed"] = episode_data["text_embed"]
+
         data["length"] = length
         return data
 
@@ -131,6 +134,8 @@ class PHCDataset(ImgfeatMotionDatasetBase):
             "humanoid_died_buf": data["died_buf"],
             "humanoid_timedout_buf": data["timedout_buf"],
         }
+        if "text_embed" in data:
+            return_data["text_embed"] = data["text_embed"]
         return_data["humanoid_contact_force_exists"] = torch.ones(
             *data["contact_forces_obs"].shape[:1]
         ).bool()
