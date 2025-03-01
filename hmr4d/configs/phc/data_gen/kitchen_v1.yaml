@@ -10,6 +10,6 @@ action_noise_std: 0.0
 
 # Environment settings
 env:
-  num_envs: 1024
+  num_envs: 256
   tile_env: True
   pos_reset: False

@@ -42,11 +42,15 @@ defaults:
       # - metric_3dpw_occ
   - _self_
 
+phc:
+  env:
+    num_envs: 256
+
 callbacks:
   phc_data_collect:
-    every_n_epochs: 16
+    every_n_epochs: 4
     collect_kwargs:
-      num_episodes: 680
+      num_episodes: 100
 
 exp_name_base: ${hydra:runtime.choices.exp}
 exp_name_var: ""

@@ -44,13 +44,13 @@ defaults:
 
 phc:
   env:
-    num_envs: 256
+    num_envs: 512
 
 callbacks:
   phc_data_collect:
     every_n_epochs: 4
     collect_kwargs:
-      num_episodes: 100
+      num_episodes: 200
 
 exp_name_base: ${hydra:runtime.choices.exp}
 exp_name_var: ""
