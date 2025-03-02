@@ -24,3 +24,4 @@ env:
   confound_object: True
   num_confound_objects: 5
   simple_text_label: True
+  multi_text_label: False
