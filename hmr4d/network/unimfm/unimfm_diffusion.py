@@ -16,6 +16,7 @@ from motiondiff.diffusion.resample import create_named_schedule_sampler
 from motiondiff.models.model_util import create_gaussian_diffusion
 
 from .unimfm_cfg_sampler import ClassifierFreeSampleModel
+from .utils import encode_text_batch, load_and_freeze_llm
 
 
 class UNIMFMDiffusion(nn.Module):
@@ -184,6 +185,7 @@ class UNIMFMDiffusion(nn.Module):
 
         self.denoiser = instantiate(self.model_cfg.denoiser)
         self.init_diffusion()
+        self.text_encoder, self.tokenizer = None, None
         return
 
     def init_diffusion(self):
@@ -661,13 +663,49 @@ class UNIMFMDiffusion(nn.Module):
         outputs_all = []
         decode_dict_all = []
 
-        def policy(obs_dict):
-            nonlocal cur_obs
+        humanoid_use_text = self.args.get("humanoid_use_text", False)
+        if humanoid_use_text:
+            if self.text_encoder is None:
+                self.text_encoder, self.tokenizer = load_and_freeze_llm("t5-3b")
+                self.text_encoder.eval()
+            self.text_encoder.to(humanoid_obs.device)
+        encoded_humanoid_text = None
+
+        def policy(obs_dict, extras):
+            nonlocal cur_obs, encoded_humanoid_text
             for k in obs_keys:
                 if k == "humanoid_obs":
                     obs_k = obs_dict["self_obs"]["policy"]
                 elif k == "humanoid_rgb_obs":
-                    obs_k = obs_dict["task_obs"]["rgb"]
+                    obs_rgb_raw = (
+                        extras["rgb_raw_new"].permute(0, 3, 1, 2).contiguous() / 255.0
+                    )
+                    obs_rgb_obs = obs_dict["task_obs"]["rgb"]
+                    if self.args.get("humanoid_use_rgb_raw", False):
+                        obs_k = obs_rgb_raw
+                    else:
+                        obs_k = obs_rgb_obs
+                    # obs_k = obs_rgb_obs
+                    # Save both raw and processed RGB images
+                    # if True:
+                    #     from PIL import Image
+                    #     import os
+                    #     num_fr = cur_obs["humanoid_obs"].shape[1]
+                    #     # Save rgb_raw (CHW -> HWC format)
+                    #     rgb_raw = obs_rgb_raw[0].permute(1, 2, 0).cpu().numpy()
+                    #     rgb_raw = (rgb_raw * 255).astype(np.uint8)
+                    #     img_raw = Image.fromarray(rgb_raw)
+                    #     fname = f'out/vis/rgb_raw/step{num_fr}.png'
+                    #     os.makedirs(os.path.dirname(fname), exist_ok=True)
+                    #     img_raw.save(fname)
+
+                    #     # Save rgb_obs (CHW -> HWC format)
+                    #     rgb_obs = obs_rgb_obs[0].permute(1, 2, 0).cpu().numpy()
+                    #     rgb_obs = (rgb_obs * 255).astype(np.uint8)
+                    #     img_obs = Image.fromarray(rgb_obs)
+                    #     fname = f'out/vis/rgb_obs/step{num_fr}.png'
+                    #     os.makedirs(os.path.dirname(fname), exist_ok=True)
+                    #     img_obs.save(fname)
                 elif k == "humanoid_contact_force":
                     obs_k = obs_dict["task_obs"]["contact_forces"]
                 if k in normalizer_stats:
@@ -684,6 +722,15 @@ class UNIMFMDiffusion(nn.Module):
             target_x = torch.zeros(B, num_fr, mdim).to(obs_k.device)
             for k in cur_obs:
                 f_condition[k][:, :num_fr, :] = cur_obs[k]
+
+            # print(extras["text_label"].tolist())
+            if humanoid_use_text and encoded_humanoid_text is None:
+                encoded_humanoid_text = encode_text_batch(
+                    extras["text_label"].tolist(),
+                    self.text_encoder,
+                    self.tokenizer,
+                    device=humanoid_obs.device,
+                )
 
             f_cond, motion = self.generate_motion_rep(
                 inputs, target_x, first_k_frames=num_fr
@@ -703,6 +750,8 @@ class UNIMFMDiffusion(nn.Module):
             }
             if "encoded_text" in inputs:
                 denoiser_kwargs["y"]["encoded_text"] = inputs["encoded_text"]
+            if encoded_humanoid_text is not None:
+                denoiser_kwargs["y"]["encoded_text"] = encoded_humanoid_text
 
             if regression_only:
                 t, t_weights = self.schedule_sampler.sample(

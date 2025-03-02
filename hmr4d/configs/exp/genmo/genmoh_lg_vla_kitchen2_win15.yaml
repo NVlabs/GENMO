@@ -44,13 +44,13 @@ defaults:
 
 phc:
   env:
-    num_envs: 256
+    num_envs: 512
 
 callbacks:
   phc_data_collect:
     every_n_epochs: 4
     collect_kwargs:
-      num_episodes: 100
+      num_episodes: 200
 
 exp_name_base: ${hydra:runtime.choices.exp}
 exp_name_var: ""
@@ -151,6 +151,7 @@ network:
     diffusion: ${model_cfg.diffusion}
     denoiser:
       _target_: hmr4d.network.unimfm.unimfm_denoiser.NetworkEncoderRoPE
+      max_len: 30 # effective max len is half for causal attention
       output_dim: 48
       xt_dim: ${.output_dim}
       njoints: ${.xt_dim}

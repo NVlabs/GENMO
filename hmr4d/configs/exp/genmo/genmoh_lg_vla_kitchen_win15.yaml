@@ -98,6 +98,8 @@ pipeline:
     use_cfg_sampler_for_text: true
     inpaint_x_start_gt: false
     regression_only: false
+    humanoid_use_rgb_raw: true
+    humanoid_use_text: true
     weights:
       simple: 0.
       cr_j3d: 0.
@@ -126,6 +128,7 @@ pipeline:
       - humanoid_obs
       - humanoid_contact_force
       - humanoid_rgb_obs
+    humanoid_rgb_obs_dim: [3, 128, 128]
     norm_attr_stats:
       humanoid_obs: "inputs/humanoid/running_stats/dais_rgbd_0223/humanoid_obs_stats.p"
       humanoid_contact_force: "inputs/humanoid/running_stats/dais_rgbd_0223/humanoid_contact_force_stats.p"
@@ -142,7 +145,7 @@ network:
   img_process_modules:
     humanoid_rgb_obs:
       _target_: phc.learning.vis_networkbuilder.PixelEncoder
-      input_dim: [3, 128, 128]
+      input_dim: ${pipeline.args.humanoid_rgb_obs_dim}
       latent_dim: ${network.model_cfg.denoiser.latent_dim}
   model_cfg:
     diffusion: ${model_cfg.diffusion}

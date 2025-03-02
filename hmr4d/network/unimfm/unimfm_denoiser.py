@@ -242,7 +242,7 @@ class NetworkEncoderRoPE(nn.Module):
 
         x = self.add_cond_linear(torch.cat([x, xt], dim=-1))
 
-        if "encoded_text" in inputs:
+        if "encoded_text" in y:
             enc_text = y["encoded_text"].clone()
             if self.training and self.text_mask_prob > 0:
                 mask = torch.rand((B,), device=x.device) < self.text_mask_prob

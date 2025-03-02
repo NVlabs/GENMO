@@ -44,13 +44,13 @@ defaults:
 
 phc:
   env:
-    num_envs: 256
+    num_envs: 512
 
 callbacks:
   phc_data_collect:
     every_n_epochs: 4
     collect_kwargs:
-      num_episodes: 100
+      num_episodes: 200
 
 exp_name_base: ${hydra:runtime.choices.exp}
 exp_name_var: ""
@@ -59,7 +59,7 @@ data_name: mocap_mixed_v1
 # pretrain_2d_ckpt: "/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/yey/gvhmr/mocap_mixed_v1/mv2d/diff2d/diff2d_base_tt/version_0/checkpoints/last.ckpt"
 
 model_cfg:
-  train_3d_modes: ["regression"]
+  train_3d_modes: ["regression", "diffusion"]
   train_2d_modes: []
   start_2d_training_steps: 0
   noisy_2d_obs: true
@@ -168,7 +168,7 @@ network:
 data:
   loader_opts:
     train:
-      batch_size: 64
+      batch_size: 32
       num_workers: 6
     train_2d:
       batch_size: 16
