@@ -97,12 +97,16 @@ class PHCDataset(ImgfeatMotionDatasetBase):
             "died_buf": episode_data["died_buf"][start:end],
             "timedout_buf": episode_data["timedout_buf"][start:end],
         }
+        if "text_label_ids" in episode_data:
+            data["text_label_ids"] = episode_data["text_label_ids"][start:end]
 
         if length < tgt_len:
             data = pad_data(data, tgt_len)
 
         if "text_embed" in episode_data:
             data["text_embed"] = episode_data["text_embed"]
+        if "multi_text_embed" in episode_data:
+            data["multi_text_embed"] = episode_data["multi_text_embed"]
 
         data["length"] = length
         return data
@@ -136,6 +140,10 @@ class PHCDataset(ImgfeatMotionDatasetBase):
         }
         if "text_embed" in data:
             return_data["text_embed"] = data["text_embed"]
+        if "multi_text_embed" in data:
+            return_data["multi_text_embed"] = data["multi_text_embed"]
+            return_data["text_label_ids"] = data["text_label_ids"]
+            return_data["meta"]["multi_text_label"] = True
         return_data["humanoid_contact_force_exists"] = torch.ones(
             *data["contact_forces_obs"].shape[:1]
         ).bool()

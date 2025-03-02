@@ -65,7 +65,7 @@ def pad_data(smpl_params, tgt_len):
                 smpl_params[key],
                 torch.zeros(
                     tgt_len - smpl_params[key].shape[0], *smpl_params[key].shape[1:]
-                ),
+                ).to(smpl_params[key]),
             ],
             dim=0,
         )

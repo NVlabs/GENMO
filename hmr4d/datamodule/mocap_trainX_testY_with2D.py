@@ -48,6 +48,20 @@ def collate_fn(batch, collate_cfg=None):
                     for d in batch
                 ]
             )
+        elif k == "multi_text_embed":
+            # Get max length across batch
+            max_len = max(d[k].shape[0] for d in batch)
+            padded_tensors = []
+            for d in batch:
+                padded = torch.cat(
+                    [
+                        d[k],
+                        torch.zeros(max_len - d[k].shape[0], *d[k].shape[1:]).to(d[k]),
+                    ],
+                    dim=0,
+                )
+                padded_tensors.append(padded)
+            return_dict[k] = default_collate(padded_tensors)
         else:
             return_dict[k] = default_collate([d[k] for d in batch])
     return_dict["B"] = len(batch)

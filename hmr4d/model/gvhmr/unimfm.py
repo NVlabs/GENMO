@@ -215,7 +215,10 @@ class UNIMFM(pl.LightningModule):
             "f_cam_angvel": "cam_angvel",
             "f_cliffcam": "obs",
         }
+        skip_keys = ["multi_text_embed"]
         for k in self.pipeline.args.in_attr:
+            if k in skip_keys:
+                continue
             batch_key = key_mapping.get(k, k)
             if f"{k}_exists" in batch:
                 f_condition_exists[k] = batch[f"{k}_exists"]

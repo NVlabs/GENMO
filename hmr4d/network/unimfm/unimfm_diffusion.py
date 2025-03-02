@@ -38,6 +38,7 @@ class UNIMFMDiffusion(nn.Module):
         cond_merge_strategy="add",
         cond_exists_dim=512,
         img_process_modules=None,
+        multi_text_module_cfg={},
         **kwargs,
     ):
         super().__init__()
@@ -133,6 +134,22 @@ class UNIMFMDiffusion(nn.Module):
                 nn.Dropout(dropout),
                 zero_module(nn.Linear(latent_dim, latent_dim)),
             )
+        if "multi_text_embed" in self.args.in_attr:
+            text_embed_dim = multi_text_module_cfg.get("text_embed_dim", 1024)
+            self.multi_text_embedder = nn.Linear(text_embed_dim, latent_dim)
+            encoder_layer = nn.TransformerEncoderLayer(
+                d_model=latent_dim,  # Input dimension
+                nhead=multi_text_module_cfg.get(
+                    "nhead", 8
+                ),  # Number of attention heads
+                dim_feedforward=multi_text_module_cfg.get("dim_feedforward", 2048),
+                dropout=dropout,
+                batch_first=True,
+            )
+            self.multi_text_transformer = nn.TransformerEncoder(
+                encoder_layer, num_layers=multi_text_module_cfg.get("num_layers", 3)
+            )
+
         self.add_features_dim = {
             "humanoid_contact_force": 90,
         }
@@ -145,6 +162,7 @@ class UNIMFMDiffusion(nn.Module):
             "observed_motion_3d",
             "humanoid_obs",
             "humanoid_rgb_obs",
+            "multi_text_embed",
         ]
         self.add_feature_embedders = nn.ModuleDict()
         for k in self.args.in_attr:
@@ -159,11 +177,12 @@ class UNIMFMDiffusion(nn.Module):
             self.add_feature_embedders[k] = module
 
         add_dim = 0
+        self.no_exist_keys = ["observed_motion_3d", "multi_text_embed"]
         if self.use_cond_exists_as_input:
             if cond_merge_strategy == "add":
                 self.cond_exists_embedder = nn.ModuleDict()
                 for k in self.args.in_attr:
-                    if k != "observed_motion_3d":
+                    if k not in self.no_exist_keys:
                         self.cond_exists_embedder[k] = nn.Sequential(
                             nn.Linear(latent_dim + 1, latent_dim),
                             nn.SiLU(),
@@ -175,8 +194,9 @@ class UNIMFMDiffusion(nn.Module):
         if cond_merge_strategy == "concat":
             # self.cond_merger = nn.Linear(len(self.args.in_attr) * (latent_dim + add_dim), latent_dim)
             in_dim = len(self.args.in_attr) * (latent_dim + add_dim)
-            if "observed_motion_3d" in self.args.in_attr:
-                in_dim -= add_dim
+            for x in self.no_exist_keys:
+                if x in self.args.in_attr:
+                    in_dim -= add_dim
             self.cond_merger = nn.Sequential(
                 nn.Linear(in_dim, latent_dim),
                 nn.SiLU(),
@@ -284,10 +304,23 @@ class UNIMFMDiffusion(nn.Module):
             f_cond_dict[k] = self.img_process_modules[k](img_batched)
             f_cond_dict[k] = f_cond_dict[k].view(B, -1, *f_cond_dict[k].shape[1:])
 
+        if "multi_text_embed" in f_condition:
+            x_text = f_condition["multi_text_embed"]
+            x_text = x_text.reshape(-1, *x_text.shape[2:])
+            x_text = self.multi_text_embedder(x_text)
+            x_text = self.multi_text_transformer(x_text)
+            x_text = x_text.mean(dim=1)
+            x_text = x_text.reshape(B, -1, *x_text.shape[1:])
+            text_label_id = inputs["text_label_ids"][:, :end_fr]
+            batch_indices = torch.arange(B, device=x_text.device)[:, None]  # [B, 1]
+            batch_indices = batch_indices.expand(-1, text_label_id.size(1))  # [B, F]
+            text_features = x_text[batch_indices, text_label_id]
+            f_cond_dict["multi_text_embed"] = text_features
+
         if self.cond_merge_strategy == "add":
             if self.use_cond_exists_as_input:
                 for k in f_cond_dict:
-                    if k != "observed_motion_3d":
+                    if k not in self.no_exist_keys:
                         f_cond_dict[k] = torch.cat(
                             [
                                 f_cond_dict[k],
@@ -305,7 +338,7 @@ class UNIMFMDiffusion(nn.Module):
                     .float()
                     .repeat(1, 1, self.cond_exists_dim)
                     for k in f_cond_dict
-                    if k != "observed_motion_3d"
+                    if k not in self.no_exist_keys
                 ],
                 dim=-1,
             )
