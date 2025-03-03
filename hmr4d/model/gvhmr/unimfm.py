@@ -1004,6 +1004,8 @@ class UNIMFM(pl.LightningModule):
             "length": torch.tensor([L] * B).to(device),
             "device": device,
             "obs": batch["humanoid_obs"],
+            "multi_text_embed": torch.zeros(B, 50, 50, 1024).to(device),
+            "text_label_ids": torch.zeros(B, L).long().to(device),
             "has_humanoid_data": torch.tensor([True] * B).to(device),
         }
         self.init_condition_exists(inputs)

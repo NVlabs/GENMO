@@ -2,7 +2,7 @@
 # based on unimfm_est_wtext_grep_reg_new3_j2d2_st_norm
 defaults:
   - /diffusion@model_cfg.diffusion: ddim
-  - /phc: config_kitchen_v2
+  - /phc: config_kitchen_v1
   - /phc/data_gen: kitchen_v1
   - override /data: mocap/trainX_testY
   - override /model: gvhmr/unimfm
@@ -44,13 +44,13 @@ defaults:
 
 phc:
   env:
-    num_envs: 256
+    num_envs: 512
 
 callbacks:
   phc_data_collect:
     every_n_epochs: 4
     collect_kwargs:
-      num_episodes: 100
+      num_episodes: 200
 
 exp_name_base: ${hydra:runtime.choices.exp}
 exp_name_var: ""
@@ -100,7 +100,6 @@ pipeline:
     regression_only: false
     humanoid_use_rgb_raw: true
     humanoid_use_text: true
-    humanoid_use_multi_text: true
     weights:
       simple: 0.
       cr_j3d: 0.
@@ -129,7 +128,6 @@ pipeline:
       - humanoid_obs
       - humanoid_contact_force
       - humanoid_rgb_obs
-      - multi_text_embed
     humanoid_rgb_obs_dim: [3, 128, 128]
     norm_attr_stats:
       humanoid_obs: "inputs/humanoid/running_stats/dais_rgbd_0223/humanoid_obs_stats.p"
@@ -146,9 +144,11 @@ network:
   cond_merge_strategy: "add"
   img_process_modules:
     humanoid_rgb_obs:
-      _target_: phc.learning.vis_networkbuilder.PixelEncoder
+      _target_: hmr4d.network.base_arch.vision.vit.VITEncoder
       input_dim: ${pipeline.args.humanoid_rgb_obs_dim}
       latent_dim: ${network.model_cfg.denoiser.latent_dim}
+  img_process_modules_enable_grad:
+    humanoid_rgb_obs: false
   model_cfg:
     diffusion: ${model_cfg.diffusion}
     denoiser:
@@ -159,7 +159,7 @@ network:
       text_mask_prob: 0.0
       use_text_pos_enc: true
       text_encoder_cfg:
-        mode: none
+        mode: all
         cross_attn_type: mha
       latent_dim: 512
       num_layers: 8
@@ -170,7 +170,7 @@ network:
 data:
   loader_opts:
     train:
-      batch_size: 64
+      batch_size: 32
       num_workers: 6
     train_2d:
       batch_size: 16

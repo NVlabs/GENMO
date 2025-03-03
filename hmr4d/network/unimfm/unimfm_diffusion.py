@@ -38,6 +38,7 @@ class UNIMFMDiffusion(nn.Module):
         cond_merge_strategy="add",
         cond_exists_dim=512,
         img_process_modules=None,
+        img_process_modules_enable_grad={},
         multi_text_module_cfg={},
         **kwargs,
     ):
@@ -68,6 +69,7 @@ class UNIMFMDiffusion(nn.Module):
             self.img_process_modules = nn.ModuleDict(instantiate(img_process_modules))
         else:
             self.img_process_modules = None
+        self.img_process_modules_enable_grad = img_process_modules_enable_grad
 
         if "obs" in self.args.in_attr:
             self.learned_pos_linear = nn.Linear(2, 32)
@@ -297,12 +299,14 @@ class UNIMFMDiffusion(nn.Module):
             f_cond_dict[k] = self.add_feature_embedders[k](f_condition[k][:, :end_fr])
 
         for k in self.img_process_modules:
-            B = f_condition[k].shape[0]
-            img_batched = f_condition[k][:, :end_fr].reshape(
-                -1, *f_condition[k].shape[2:]
-            )
-            f_cond_dict[k] = self.img_process_modules[k](img_batched)
-            f_cond_dict[k] = f_cond_dict[k].view(B, -1, *f_cond_dict[k].shape[1:])
+            enable_grad = self.img_process_modules_enable_grad.get(k, False)
+            with torch.set_grad_enabled(enable_grad):
+                B = f_condition[k].shape[0]
+                img_batched = f_condition[k][:, :end_fr].reshape(
+                    -1, *f_condition[k].shape[2:]
+                )
+                f_cond_dict[k] = self.img_process_modules[k](img_batched)
+                f_cond_dict[k] = f_cond_dict[k].view(B, -1, *f_cond_dict[k].shape[1:])
 
         if "multi_text_embed" in f_condition:
             x_text = f_condition["multi_text_embed"]
@@ -697,15 +701,26 @@ class UNIMFMDiffusion(nn.Module):
         decode_dict_all = []
 
         humanoid_use_text = self.args.get("humanoid_use_text", False)
-        if humanoid_use_text:
+        humanoid_use_multi_text = self.args.get("humanoid_use_multi_text", False)
+        if humanoid_use_text or humanoid_use_multi_text:
             if self.text_encoder is None:
                 self.text_encoder, self.tokenizer = load_and_freeze_llm("t5-3b")
                 self.text_encoder.eval()
             self.text_encoder.to(humanoid_obs.device)
         encoded_humanoid_text = None
+        cur_multi_text_embed = torch.zeros_like(f_condition["multi_text_embed"])
+        cur_text_label_ids = torch.zeros_like(inputs["text_label_ids"])
+        last_text_label = None
+        last_text_label_ids = None
 
         def policy(obs_dict, extras):
-            nonlocal cur_obs, encoded_humanoid_text
+            nonlocal \
+                cur_obs, \
+                encoded_humanoid_text, \
+                last_text_label, \
+                cur_multi_text_embed, \
+                last_text_label_ids, \
+                cur_text_label_ids
             for k in obs_keys:
                 if k == "humanoid_obs":
                     obs_k = obs_dict["self_obs"]["policy"]
@@ -756,10 +771,54 @@ class UNIMFMDiffusion(nn.Module):
             for k in cur_obs:
                 f_condition[k][:, :num_fr, :] = cur_obs[k]
 
-            # print(extras["text_label"].tolist())
-            if humanoid_use_text and encoded_humanoid_text is None:
+            text_label = extras["text_label"]
+            if humanoid_use_multi_text:
+                # print('before',text_label.tolist(), last_text_label_ids.tolist() if last_text_label_ids is not None else None, cur_text_label_ids[:, :num_fr].tolist())
+                print(
+                    text_label.tolist(),
+                    last_text_label_ids.tolist()
+                    if last_text_label_ids is not None
+                    else None,
+                )
+                if not (
+                    last_text_label is not None
+                    and (last_text_label == text_label).all()
+                ):
+                    text_embed = encode_text_batch(
+                        text_label,
+                        self.text_encoder,
+                        self.tokenizer,
+                        device=humanoid_obs.device,
+                    )
+                    if last_text_label is not None:
+                        ind = (last_text_label != text_label).nonzero()[0]
+                        cur_multi_text_embed[ind, last_text_label_ids[ind] + 1] = (
+                            text_embed[ind, :]
+                        )
+                        new_text_label_ids = last_text_label_ids.clone()
+                        new_text_label_ids[ind] += 1
+                    else:
+                        cur_multi_text_embed[:, 0] = text_embed
+                        new_text_label_ids = (
+                            torch.zeros(
+                                B,
+                            )
+                            .long()
+                            .to(humanoid_obs.device)
+                        )
+                else:
+                    new_text_label_ids = last_text_label_ids
+                cur_text_label_ids[:, num_fr - 1] = new_text_label_ids
+                last_text_label = text_label
+                last_text_label_ids = new_text_label_ids
+                f_condition["multi_text_embed"][:] = cur_multi_text_embed
+                inputs["text_label_ids"][:] = cur_text_label_ids
+                # print('after', text_label.tolist(), last_text_label_ids.tolist() if last_text_label_ids is not None else None, cur_text_label_ids[:, :num_fr].tolist())
+
+            elif humanoid_use_text and encoded_humanoid_text is None:
+                print(text_label.tolist())
                 encoded_humanoid_text = encode_text_batch(
-                    extras["text_label"].tolist(),
+                    text_label.tolist(),
                     self.text_encoder,
                     self.tokenizer,
                     device=humanoid_obs.device,
