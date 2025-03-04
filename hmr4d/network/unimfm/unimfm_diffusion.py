@@ -734,6 +734,8 @@ class UNIMFMDiffusion(nn.Module):
                     else:
                         obs_k = obs_rgb_obs
                     # obs_k = obs_rgb_obs
+                    # diff = obs_rgb_raw - obs_rgb_obs
+                    # print('rgb diff', diff.max(), diff.min(), diff.mean())
                     # Save both raw and processed RGB images
                     # if True:
                     #     from PIL import Image

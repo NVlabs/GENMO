@@ -3,7 +3,7 @@
 defaults:
   - /diffusion@model_cfg.diffusion: ddim
   - /phc: config_kitchen_v2
-  - /phc/data_gen: kitchen_v1
+  - /phc/data_gen: kitchen_v2
   - override /data: mocap/trainX_testY
   - override /model: gvhmr/unimfm
   - override /endecoder: gvhmr/humanoid_z_action
@@ -45,13 +45,13 @@ defaults:
 phc:
   env:
     num_envs: 256
-    vis_incontact_marker: true
+    pos_reset: true
 
 callbacks:
   phc_data_collect:
     every_n_epochs: 4
     collect_kwargs:
-      num_episodes: 50
+      num_episodes: 100
 
 exp_name_base: ${hydra:runtime.choices.exp}
 exp_name_var: ""
@@ -147,9 +147,11 @@ network:
   cond_merge_strategy: "add"
   img_process_modules:
     humanoid_rgb_obs:
-      _target_: phc.learning.vis_networkbuilder.PixelEncoder
+      _target_: hmr4d.network.base_arch.vision.vit.VITEncoder
       input_dim: ${pipeline.args.humanoid_rgb_obs_dim}
       latent_dim: ${network.model_cfg.denoiser.latent_dim}
+  img_process_modules_enable_grad:
+    humanoid_rgb_obs: false
   model_cfg:
     diffusion: ${model_cfg.diffusion}
     denoiser:
@@ -171,7 +173,7 @@ network:
 data:
   loader_opts:
     train:
-      batch_size: 64
+      batch_size: 32
       num_workers: 6
     train_2d:
       batch_size: 16
