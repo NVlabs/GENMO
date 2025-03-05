@@ -46,6 +46,7 @@ phc:
   env:
     num_envs: 256
     pos_reset: true
+    action_lpf: true
 
 callbacks:
   phc_data_collect:

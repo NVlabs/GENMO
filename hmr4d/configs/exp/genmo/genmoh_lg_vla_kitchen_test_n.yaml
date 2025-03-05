@@ -2,7 +2,7 @@
 # based on unimfm_est_wtext_grep_reg_new3_j2d2_st_norm
 defaults:
   - /diffusion@model_cfg.diffusion: ddim
-  - /phc: config_kitchen_v2
+  - /phc: config_kitchen_v1
   - /phc/data_gen: kitchen_v2
   - override /data: mocap/trainX_testY
   - override /model: gvhmr/unimfm
@@ -45,7 +45,6 @@ defaults:
 phc:
   env:
     num_envs: 256
-    pos_reset: true
 
 callbacks:
   phc_data_collect:
@@ -94,7 +93,6 @@ pipeline:
   args:
     endecoder_opt: ${endecoder}
     humanoid_obs_dim: 778
-    disable_random_null_condition: true
     normalize_cam_angvel: true
     use_regression_outputs_prob: 0.
     use_cfg_sampler_for_text: true
@@ -102,7 +100,6 @@ pipeline:
     regression_only: false
     humanoid_use_rgb_raw: true
     humanoid_use_text: true
-    humanoid_use_multi_text: true
     weights:
       simple: 0.
       cr_j3d: 0.
@@ -131,7 +128,6 @@ pipeline:
       - humanoid_obs
       - humanoid_contact_force
       - humanoid_rgb_obs
-      - multi_text_embed
     humanoid_rgb_obs_dim: [3, 128, 128]
     norm_attr_stats:
       humanoid_obs: "inputs/humanoid/running_stats/dais_rgbd_0223/humanoid_obs_stats.p"
@@ -161,7 +157,7 @@ network:
       text_mask_prob: 0.0
       use_text_pos_enc: true
       text_encoder_cfg:
-        mode: none
+        mode: all
         cross_attn_type: mha
       latent_dim: 512
       num_layers: 8

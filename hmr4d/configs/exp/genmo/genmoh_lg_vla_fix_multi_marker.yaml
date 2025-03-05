@@ -46,12 +46,13 @@ phc:
   env:
     num_envs: 256
     pos_reset: true
+    vis_incontact_marker: true
 
 callbacks:
   phc_data_collect:
     every_n_epochs: 4
     collect_kwargs:
-      num_episodes: 100
+      num_episodes: 64
 
 exp_name_base: ${hydra:runtime.choices.exp}
 exp_name_var: ""

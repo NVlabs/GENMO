@@ -3,7 +3,7 @@
 defaults:
   - /diffusion@model_cfg.diffusion: ddim
   - /phc: config_kitchen_v2
-  - /phc/data_gen: kitchen_v2
+  - /phc/data_gen: kitchen_v1
   - override /data: mocap/trainX_testY
   - override /model: gvhmr/unimfm
   - override /endecoder: gvhmr/humanoid_z_action
@@ -94,7 +94,6 @@ pipeline:
   args:
     endecoder_opt: ${endecoder}
     humanoid_obs_dim: 778
-    disable_random_null_condition: true
     normalize_cam_angvel: true
     use_regression_outputs_prob: 0.
     use_cfg_sampler_for_text: true

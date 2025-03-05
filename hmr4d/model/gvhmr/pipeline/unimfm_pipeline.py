@@ -148,8 +148,11 @@ class Pipeline(nn.Module):
                 1 - inputs["text_mask"][:, None, None].float()
             )
 
-        if train:
-            f_condition = randomly_set_null_condition(f_condition, 0.1)
+        if train and not self.args.get("disable_random_null_condition", False):
+            skip_keys = self.args.get("skip_keys_for_null_condition", ["humanoid_obs"])
+            f_condition = randomly_set_null_condition(
+                f_condition, 0.1, skip_keys=skip_keys
+            )
 
         eval_text_only = inputs.get("eval_text_only", False)
         if eval_text_only:
@@ -601,11 +604,11 @@ class Pipeline(nn.Module):
         return outputs
 
 
-def randomly_set_null_condition(f_condition, uncond_prob=0.1):
+def randomly_set_null_condition(f_condition, uncond_prob=0.1, skip_keys=[]):
     """Conditions are in shape (B, L, *)"""
     keys = list(f_condition.keys())
     for k in keys:
-        if k in ["humanoid_obs"]:
+        if k in skip_keys:
             continue
         if f_condition[k] is None or type(f_condition[k]) == bool:
             continue

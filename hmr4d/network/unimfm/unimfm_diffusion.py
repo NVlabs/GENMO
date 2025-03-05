@@ -305,6 +305,16 @@ class UNIMFMDiffusion(nn.Module):
                 img_batched = f_condition[k][:, :end_fr].reshape(
                     -1, *f_condition[k].shape[2:]
                 )
+                # Visualize batched images using PIL
+                # from PIL import Image
+                # import os
+                # os.makedirs('out/vis/batched_imgs', exist_ok=True)
+                # for i in range(img_batched.shape[0]):  # Save up to 10 images
+                #     img = img_batched[i].detach().cpu()
+                #     img = img.permute(1, 2, 0)
+                #     img = (img * 255).numpy().astype('uint8')
+                #     img = Image.fromarray(img)
+                #     img.save(f'out/vis/batched_imgs/batch_{i}.png')
                 f_cond_dict[k] = self.img_process_modules[k](img_batched)
                 f_cond_dict[k] = f_cond_dict[k].view(B, -1, *f_cond_dict[k].shape[1:])
 
@@ -707,11 +717,12 @@ class UNIMFMDiffusion(nn.Module):
                 self.text_encoder, self.tokenizer = load_and_freeze_llm("t5-3b")
                 self.text_encoder.eval()
             self.text_encoder.to(humanoid_obs.device)
-        encoded_humanoid_text = None
-        cur_multi_text_embed = torch.zeros_like(f_condition["multi_text_embed"])
-        cur_text_label_ids = torch.zeros_like(inputs["text_label_ids"])
         last_text_label = None
-        last_text_label_ids = None
+        encoded_humanoid_text = None
+        if humanoid_use_multi_text:
+            cur_multi_text_embed = torch.zeros_like(f_condition["multi_text_embed"])
+            cur_text_label_ids = torch.zeros_like(inputs["text_label_ids"])
+            last_text_label_ids = None
 
         def policy(obs_dict, extras):
             nonlocal \
@@ -817,14 +828,20 @@ class UNIMFMDiffusion(nn.Module):
                 inputs["text_label_ids"][:] = cur_text_label_ids
                 # print('after', text_label.tolist(), last_text_label_ids.tolist() if last_text_label_ids is not None else None, cur_text_label_ids[:, :num_fr].tolist())
 
-            elif humanoid_use_text and encoded_humanoid_text is None:
+            elif humanoid_use_text:
                 print(text_label.tolist())
-                encoded_humanoid_text = encode_text_batch(
-                    text_label.tolist(),
-                    self.text_encoder,
-                    self.tokenizer,
-                    device=humanoid_obs.device,
-                )
+                if (
+                    encoded_humanoid_text is None
+                    or last_text_label is None
+                    or last_text_label != text_label
+                ):
+                    encoded_humanoid_text = encode_text_batch(
+                        text_label.tolist(),
+                        self.text_encoder,
+                        self.tokenizer,
+                        device=humanoid_obs.device,
+                    )
+                    last_text_label = text_label
 
             f_cond, motion = self.generate_motion_rep(
                 inputs, target_x, first_k_frames=num_fr
