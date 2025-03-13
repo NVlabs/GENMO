@@ -124,10 +124,16 @@ def convert_image_to_mesh(img, offset, R_c2w):
 
 
 if __name__ == "__main__":
-    # data = torch.load("tmp.pth")
-    file_name = (
-        "000-P0_09_outdoor_walk-P7_55_outdoor_walk-a_person_jumps_forward_once..pth"
-    )
+    import argparse
+
+    arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument("--file_name", type=str, required=True)
+    # arg_parser.add_argument("--input_dir", type=str, required=True)
+    args = arg_parser.parse_args()
+
+    file_name = args.file_name
+    input_dir = os.path.dirname(file_name)
+    print(file_name)
     smplx = make_smplx("supermotion").to("cuda")
     smpl_model = {
         "male": make_smplx("smpl", gender="male"),
@@ -138,7 +144,7 @@ if __name__ == "__main__":
     J_regressor = torch.load("hmr4d/utils/body_model/smpl_neutral_J_regressor.pt").to(
         "cuda"
     )
-    data = torch.load(f"out/v1-text-v2/{file_name}")
+    data = torch.load(file_name)
 
     pred_smpl_params_global = data["pred_smpl_params_global"]
     time_pred_ay_smpl_out_list = smplx(**pred_smpl_params_global)
@@ -149,6 +155,11 @@ if __name__ == "__main__":
     vid2 = data["vid2"]
     start_ind = data["start_ind"]
     end_ind = data["end_ind"]
+    if "multicond_args" in data:
+        end_ind = max(
+            data["multicond_args"]["video2"]["start_ind"],
+            data["multicond_args"]["music1"]["end_ind"],
+        )
 
     verts_glob_list = move_to_start_point_face_z(pred_ay_verts, J_regressor)
     joints_glob_list = einsum(J_regressor, verts_glob_list, "j v, l v i -> l j i")
@@ -161,7 +172,9 @@ if __name__ == "__main__":
 
     device = verts_glob_list.device
     # global_video_path = f"out/{vis_type}_video/{fname}.mp4"
-    global_video_path = f"out/v1-text-v2-mp4/{file_name.replace('.pth', '.mp4')}"
+    global_video_path = file_name.replace(".pth", ".mp4").replace(
+        input_dir, f"{input_dir}_video"
+    )
     os.makedirs(os.path.dirname(global_video_path), exist_ok=True)
     writer = get_writer(global_video_path, fps=30, crf=CRF)
 
@@ -196,9 +209,12 @@ if __name__ == "__main__":
     lit_mat_box = mat_settings._materials[Settings.LIT]
 
     colors = color_purple[None, :].repeat(T, 1)
-    colors[:, 0] = torch.linspace(color_green[0], color_purple[0], T)
-    colors[:, 1] = torch.linspace(color_green[1], color_purple[1], T)
-    colors[:, 2] = torch.linspace(color_green[2], color_purple[2], T)
+    # colors[:, 0] = torch.linspace(color_green[0], color_purple[0], T)
+    # colors[:, 1] = torch.linspace(color_green[1], color_purple[1], T)
+    # colors[:, 2] = torch.linspace(color_green[2], color_purple[2], T)
+    colors[:, 0] = color_purple[0]
+    colors[:, 1] = color_purple[1]
+    colors[:, 2] = color_purple[2]
 
     colors_trans = torch.zeros_like(colors)
     colors_trans[:, 0] = torch.linspace(color_green[0], color_light_purple[0], T)
@@ -221,10 +237,11 @@ if __name__ == "__main__":
 
     T_c2w = camera.get_view_matrix()
     R_w2c = T_c2w[:3, :3].T
-    for t, verts in tqdm(enumerate(verts_glob_list)):
+    for t, verts in tqdm(enumerate(verts_glob_list[:])):
         verts = verts_glob_list[t]  # + [gv]
         mat = o3d.visualization.rendering.MaterialRecord()
-        mat.base_color = [0.9, 0.9, 0.9, 0.3 + t * 0.7 / T]
+        # mat.base_color = [0.9, 0.9, 0.9, 0.3 + t * 0.7 / T]
+        mat.base_color = color_purple.tolist() + [0.3]
         mat.shader = Settings.Transparency
         # mat.opacity = (i + 1) / N
         mat.thickness = 1.0
@@ -248,10 +265,11 @@ if __name__ == "__main__":
             img_path = f"/mnt/dhd/body-pose-dataset/EMDB/{pid}/{sid}/images/{t:05d}.jpg"
             input_img = cv2.imread(img_path)
             offset = verts.mean(dim=0).cpu().numpy()
-            offset[1] += 1.5
+            offset[1] += 0.8
+            # offset[2] -= 1.0
 
             img_h, img_w = input_img.shape[:2]
-            input_img = cv2.resize(input_img, (img_w // 4, img_h // 4))
+            input_img = cv2.resize(input_img, (img_w // 1, img_h // 1))
             img_mesh = convert_image_to_mesh(input_img[:, :, ::-1], offset, R_w2c)
             renderer.scene.add_geometry(
                 f"img_mesh_{t}", img_mesh, mat_settings._materials[Settings.LIT]
@@ -265,6 +283,8 @@ if __name__ == "__main__":
         img = renderer.render_to_image()
         # import ipdb; ipdb.set_trace()
         # o3d.io.write_image("out/tmp.png", img)
+        # output_dir = os.path.dirname(global_video_path)
+        # o3d.io.write_image(os.path.join(output_dir, f"tmp_{t:05d}.png"), img)
         # img = cv2.imread("out/tmp.png")
         writer.write_frame(np.array(img))
     writer.close()

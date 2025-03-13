@@ -3,7 +3,7 @@ import sys
 
 import torch
 
-sys.path.append("../")
+sys.path.append("./")
 
 # from o3d_materials import Settings
 import json
@@ -70,6 +70,9 @@ if __name__ == "__main__":
     # data = torch.load("tmp.pth")
     file_name = "out/motions/motion1-2"
     global_video_path = f"out/demo/motion1-2.mp4"
+    # file_name = "out/motions-1/motion1-1"
+    # global_video_path = f"out/demo/motion1-1.mp4"
+
     smplx = make_smplx("supermotion").to("cuda")
     smpl_model = {
         "male": make_smplx("smpl", gender="male"),
@@ -103,7 +106,7 @@ if __name__ == "__main__":
     writer = get_writer(global_video_path, fps=30, crf=CRF)
 
     # length, width, height = get_video_lwh(global_video_path)
-    width, height = 640 * 4, 480 * 4
+    width, height = 640 * 3, 480 * 3
     # _, _, K = create_camera_sensor(width, height, 24)  # render as 24mm lens
 
     mat_settings = Settings()
@@ -116,7 +119,7 @@ if __name__ == "__main__":
     scale, cx, cz = get_ground_params_from_points(
         joints_glob_list[:, 0], verts_glob_list
     )
-    ground_geometry = get_ground(scale * 1.5, cx, cz)
+    ground_geometry = get_ground(scale * 5, cx, cz)
     # color = torch.ones(3).float().cuda() * 0.8
 
     T, V, _ = verts_glob_list.shape
@@ -124,7 +127,7 @@ if __name__ == "__main__":
     position, target, up = get_global_cameras_static_v2(
         # verts_list[0].cpu(),
         verts_glob_list.cpu().clone(),
-        beta=1.8,
+        beta=2.5,
         cam_height_degree=20,
         target_center_height=1.0,
     )
@@ -133,9 +136,12 @@ if __name__ == "__main__":
     lit_mat_box = mat_settings._materials[Settings.LIT]
 
     colors = color_purple[None, :].repeat(T, 1)
-    colors[:, 0] = torch.linspace(color_green[0], color_purple[0], T)
-    colors[:, 1] = torch.linspace(color_green[1], color_purple[1], T)
-    colors[:, 2] = torch.linspace(color_green[2], color_purple[2], T)
+    # colors[:, 0] = torch.linspace(color_green[0], color_purple[0], T)
+    # colors[:, 1] = torch.linspace(color_green[1], color_purple[1], T)
+    # colors[:, 2] = torch.linspace(color_green[2], color_purple[2], T)
+    colors[:, 0] = color_purple[0]
+    colors[:, 1] = color_purple[1]
+    colors[:, 2] = color_purple[2]
 
     colors_trans = torch.zeros_like(colors)
     colors_trans[:, 0] = torch.linspace(color_green[0], color_light_purple[0], T)

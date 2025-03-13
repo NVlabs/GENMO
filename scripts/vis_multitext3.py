@@ -67,8 +67,8 @@ def compute_look_at(cam_R, cam_T):
 
 
 if __name__ == "__main__":
-    file_name = "out/motions/motion_monkey"
-    global_video_path = f"out/demo/motion_monkey.mp4"
+    file_name = "out/motions/motion_mix2"
+    global_video_path = f"out/demo/motion_mix.mp4"
 
     smplx = make_smplx("supermotion").to("cuda")
     smpl_model = {
@@ -122,8 +122,8 @@ if __name__ == "__main__":
     T, V, _ = verts_glob_list.shape
 
     verts_glob_list2 = verts_glob_list.clone()
-    verts_glob_list2[..., 2] -= 0.5
-    # verts_glob_list2[..., 0] -= 0.5
+    # verts_glob_list2[..., 2] -= 0.5
+    verts_glob_list2[..., 0] += 0.3
 
     position, target, up = get_global_cameras_static_v2(
         # verts_list[0].cpu(),
@@ -132,7 +132,7 @@ if __name__ == "__main__":
         beta=1.8,
         cam_height_degree=20,
         target_center_height=1.0,
-        vec_rot=90,
+        vec_rot=0,
     )
 
     trans_mat_box = mat_settings._materials[Settings.Transparency]
@@ -167,7 +167,7 @@ if __name__ == "__main__":
 
     T_c2w = camera.get_view_matrix()
     R_w2c = T_c2w[:3, :3].T
-    for t, verts in tqdm(enumerate(verts_glob_list)):
+    for t, verts in tqdm(enumerate(verts_glob_list[:])):
         verts = verts_glob_list[t]  # + [gv]
         mat = o3d.visualization.rendering.MaterialRecord()
         mat.base_color = [0.9, 0.9, 0.9, 0.3 + t * 0.7 / T]
