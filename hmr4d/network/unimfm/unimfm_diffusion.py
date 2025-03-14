@@ -68,7 +68,7 @@ class UNIMFMDiffusion(nn.Module):
         if img_process_modules is not None:
             self.img_process_modules = nn.ModuleDict(instantiate(img_process_modules))
         else:
-            self.img_process_modules = None
+            self.img_process_modules = {}
         self.img_process_modules_enable_grad = img_process_modules_enable_grad
 
         if "obs" in self.args.in_attr:
@@ -734,7 +734,16 @@ class UNIMFMDiffusion(nn.Module):
                 cur_text_label_ids
             for k in obs_keys:
                 if k == "humanoid_obs":
-                    obs_k = obs_dict["self_obs"]["policy"]
+                    if self.args.get("humanoid_obs_inc_task", False):
+                        obs_k = torch.cat(
+                            [
+                                obs_dict["self_obs"]["policy"],
+                                obs_dict["task_obs"]["policy"],
+                            ],
+                            dim=1,
+                        )
+                    else:
+                        obs_k = obs_dict["self_obs"]["policy"]
                 elif k == "humanoid_rgb_obs":
                     obs_rgb_raw = (
                         extras["rgb_raw_new"].permute(0, 3, 1, 2).contiguous() / 255.0
@@ -783,8 +792,9 @@ class UNIMFMDiffusion(nn.Module):
             target_x = torch.zeros(B, num_fr, mdim).to(obs_k.device)
             for k in cur_obs:
                 f_condition[k][:, :num_fr, :] = cur_obs[k]
+                f_condition_exists[k][:, :num_fr] = 1
 
-            text_label = extras["text_label"]
+            text_label = extras.get("text_label", None)
             if humanoid_use_multi_text:
                 # print('before',text_label.tolist(), last_text_label_ids.tolist() if last_text_label_ids is not None else None, cur_text_label_ids[:, :num_fr].tolist())
                 print(

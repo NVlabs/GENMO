@@ -669,10 +669,8 @@ class UNIMFM(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         test_mode = batch["meta"][0].get("mode", "default")
-        if test_mode == "humanoid_vla":
-            return self.validation_humanoid_vla(
-                batch, test_mode, batch_idx, dataloader_idx
-            )
+        if test_mode in ["humanoid_vla", "humanoid"]:
+            return self.validation_humanoid(batch, test_mode, batch_idx, dataloader_idx)
         elif "is_2d" in batch and batch["is_2d"][0]:
             return self.validation_2d(batch, test_mode, batch_idx, dataloader_idx)
         else:
@@ -809,6 +807,7 @@ class UNIMFM(pl.LightningModule):
             "has_humanoid_data": has_humanoid_data,
             "humanoid": self.humanoid,
             "B": batch["B"],
+            "L": obs.shape[1],
         }
         if test_mode == "humanoid":
             for k, v in batch.items():
@@ -925,6 +924,8 @@ class UNIMFM(pl.LightningModule):
                 "f_imgseq": flip_test["f_imgseq"],
                 "meta": batch["meta"],
                 "has_humanoid_data": has_humanoid_data,
+                "B": batch["B"],
+                "L": obs.shape[1],
             }
             if infer_version == 3:
                 batch_["R_w2c"] = flip_test["R_w2c"]
@@ -988,7 +989,7 @@ class UNIMFM(pl.LightningModule):
 
         return outputs
 
-    def validation_humanoid_vla(self, batch, test_mode, batch_idx, dataloader_idx=0):
+    def validation_humanoid(self, batch, test_mode, batch_idx, dataloader_idx=0):
         """Validation step for humanoid motion data from PHC dataset."""
         B = self.humanoid.env.num_envs
         L = 300
@@ -1003,7 +1004,6 @@ class UNIMFM(pl.LightningModule):
             "L": L,
             "length": torch.tensor([L] * B).to(device),
             "device": device,
-            "obs": batch["humanoid_obs"],
             "multi_text_embed": torch.zeros(B, 50, 50, 1024).to(device),
             "text_label_ids": torch.zeros(B, L).long().to(device),
             "has_humanoid_data": torch.tensor([True] * B).to(device),

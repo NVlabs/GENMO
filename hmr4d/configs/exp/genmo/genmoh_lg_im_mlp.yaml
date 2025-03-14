@@ -79,6 +79,7 @@ pipeline:
   args:
     endecoder_opt: ${endecoder}
     humanoid_obs_dim: 934
+    humanoid_obs_inc_task: true
     normalize_cam_angvel: true
     use_regression_outputs_prob: 0.
     use_cfg_sampler_for_text: true
@@ -111,7 +112,7 @@ pipeline:
       - f_cam_angvel
       - humanoid_obs
     norm_attr_stats:
-      humanoid_obs: "inputs/humanoid/data/traj_im_v1/stats"
+      humanoid_obs: "inputs/humanoid/data/traj_im_v1/stats.pth"
     mask_out_attr: ["obs", "f_cliffcam", "f_imgseq", "f_cam_angvel"] # ${.in_attr}
     out_attr: {}
 
