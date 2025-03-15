@@ -63,6 +63,7 @@ class NetworkEncoderRoPE(nn.Module):
         input_remove_global=False,
         input_remove_condition=False,
         allow_autoregressive=True,
+        separate_humanoid_action=False,
         **kwargs,
     ):
         super().__init__()
@@ -89,6 +90,7 @@ class NetworkEncoderRoPE(nn.Module):
         self.input_remove_global = input_remove_global
         self.input_remove_condition = input_remove_condition
         self.allow_autoregressive = allow_autoregressive
+        self.separate_humanoid_action = separate_humanoid_action
 
         # ===== build model ===== #
         # Input (Kp2d)
@@ -343,11 +345,13 @@ class NetworkEncoderRoPE(nn.Module):
         if self.static_conf_head:
             static_conf_logits = self.static_conf_head(x)  # (B, L, C')
 
-        humanoid_obs = inputs["f_condition"]["humanoid_obs"][:, :L]
-
-        # Merge x and humanoid_obs to produce clean action
-        clean_action = self.clean_action_mlp(torch.cat([x, humanoid_obs], dim=-1))
-        sample = torch.cat([sample, clean_action], dim=-1)
+        if "humanoid_obs" in inputs["f_condition"]:
+            humanoid_obs = inputs["f_condition"]["humanoid_obs"][:, :L]
+            clean_action = self.clean_action_mlp(torch.cat([x, humanoid_obs], dim=-1))
+            if not self.separate_humanoid_action:
+                sample = torch.cat([sample, clean_action], dim=-1)
+        else:
+            clean_action = None
 
         output = {
             "pred_context": x,
@@ -355,6 +359,7 @@ class NetworkEncoderRoPE(nn.Module):
             "pred_x_start": sample,
             "pred_cam": pred_cam,
             "static_conf_logits": static_conf_logits,
+            "humanoid_clean_action": clean_action,
         }
         return output
 

@@ -404,12 +404,11 @@ class Pipeline(nn.Module):
                 total_loss += extra_loss
                 outputs.update(extra_loss_dict)
 
-        if any(["humanoid" in x for x in self.endecoder.feature_arr]):
-            humanoid_loss, humanoid_loss_dict = compute_humanoid_loss(
-                inputs, outputs, self, mode
-            )
-            total_loss += humanoid_loss
-            outputs.update(humanoid_loss_dict)
+        humanoid_loss, humanoid_loss_dict = compute_humanoid_loss(
+            inputs, outputs, self, mode
+        )
+        total_loss += humanoid_loss
+        outputs.update(humanoid_loss_dict)
 
         outputs["loss"] = total_loss
         return outputs
@@ -661,7 +660,10 @@ def compute_humanoid_loss(inputs, outputs, ppl, mode):
     # add clean action loss
     if weights.get("humanoid_clean_action", 0.0) > 0.0:
         gt_humanoid_clean_action = inputs["humanoid_clean_action"]
-        humanoid_clean_action = outputs["decode_dict"]["humanoid_clean_action"]
+        if "humanoid_clean_action" in outputs["model_output"]:
+            humanoid_clean_action = outputs["model_output"]["humanoid_clean_action"]
+        else:
+            humanoid_clean_action = outputs["decode_dict"]["humanoid_clean_action"]
         humanoid_clean_action_loss = F.mse_loss(
             humanoid_clean_action, gt_humanoid_clean_action, reduction="none"
         )
