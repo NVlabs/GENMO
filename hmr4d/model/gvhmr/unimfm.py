@@ -808,6 +808,7 @@ class UNIMFM(pl.LightningModule):
             "humanoid": self.humanoid,
             "B": batch["B"],
             "L": obs.shape[1],
+            "device": obs.device,
         }
         if test_mode == "humanoid":
             for k, v in batch.items():
@@ -926,6 +927,7 @@ class UNIMFM(pl.LightningModule):
                 "has_humanoid_data": has_humanoid_data,
                 "B": batch["B"],
                 "L": obs.shape[1],
+                "device": obs.device,
             }
             if infer_version == 3:
                 batch_["R_w2c"] = flip_test["R_w2c"]
