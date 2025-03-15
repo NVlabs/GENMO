@@ -792,7 +792,7 @@ class UNIMFMDiffusion(nn.Module):
             target_x = torch.zeros(B, num_fr, mdim).to(obs_k.device)
             for k in cur_obs:
                 f_condition[k][:, :num_fr, :] = cur_obs[k]
-                f_condition_exists[k][:, :num_fr] = 1
+                f_condition_exists[k][:, :num_fr] = True
 
             text_label = extras.get("text_label", None)
             if humanoid_use_multi_text:
