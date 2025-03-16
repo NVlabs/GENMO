@@ -359,8 +359,9 @@ class NetworkEncoderRoPE(nn.Module):
             "pred_x_start": sample,
             "pred_cam": pred_cam,
             "static_conf_logits": static_conf_logits,
-            "humanoid_clean_action": clean_action,
         }
+        if clean_action is not None:
+            output["humanoid_clean_action"] = clean_action
         return output
 
 

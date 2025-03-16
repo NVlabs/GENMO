@@ -5,7 +5,7 @@ defaults:
   - /phc: config_v1
   - override /data: mocap/trainX_testY
   - override /model: gvhmr/unimfm
-  - override /endecoder: gvhmr/v1_amass_local_bedlam_cam
+  - override /endecoder: gvhmr/v1_amass_local_bedlam_cam_humanoid
   - override /optimizer: adamw_2e-4
   - override /scheduler_cfg: epoch_half_200_350
   - override /train_datasets:
@@ -99,7 +99,7 @@ pipeline:
       transl_w: 0.
       static_conf_bce: 1.
 
-      humanoid_clean_action: 0.
+      humanoid_clean_action: 1.
 
     static_conf:
       vel_thr: 0.15
@@ -109,14 +109,17 @@ pipeline:
       - f_cliffcam
       - f_imgseq
       - f_cam_angvel
-    mask_out_attr: ${.in_attr}
-    out_attr:
-      pred_cam: 3
+      - humanoid_obs
+    norm_attr_stats:
+      humanoid_obs: "inputs/humanoid/data/traj_v1/stats.pth"
+    mask_out_attr: ["obs", "f_cliffcam", "f_imgseq", "f_cam_angvel"] # ${.in_attr}
+    out_attr: {}
 
 network:
   _target_: hmr4d.network.unimfm.unimfm_diffusion.UNIMFMDiffusion
   args: ${pipeline.args}
   latent_dim: ${.model_cfg.denoiser.latent_dim}
+  humanoid_obs_dim: ${pipeline.args.humanoid_obs_dim}
   use_cond_exists_as_input: true
   cond_merge_strategy: "add"
   model_cfg:
@@ -124,7 +127,7 @@ network:
     denoiser:
       _target_: hmr4d.network.text2ctrl.unimfm_denoiser.NetworkEncoderRoPE
       output_dim: 151
-      xt_dim: ${.output_dim}
+      xt_dim: 220
       njoints: ${.xt_dim}
       text_mask_prob: 0.1
       use_text_pos_enc: true
@@ -136,7 +139,6 @@ network:
       num_heads: 8
       mlp_ratio: 4
       allow_autoregressive: false
-      separate_humanoid_action: true
 
 data:
   loader_opts:
@@ -154,7 +156,7 @@ pl_trainer:
   gradient_clip_val: 0.5
   max_epochs: null
   check_val_every_n_epoch: null
-  val_check_interval: 1
+  val_check_interval: 3000
   max_steps: 200000
   devices: 1
   strategy: ddp_find_unused_parameters_true
