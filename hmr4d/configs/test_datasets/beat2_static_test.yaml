@@ -1,0 +1,6 @@
+beat2_static_test:
+  _target_: hmr4d.dataset.beat2.beat2.BEAT2SmplDataset
+  split: test
+  motion_frames: 120
+  cam_augmentation: static
+  lazy_load: false

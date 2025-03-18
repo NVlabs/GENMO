@@ -45,7 +45,8 @@ else
     ln -s $results_dir outputs
     ln -s /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR ./inputs
 
-    pip install transformers==4.41.2 moviepy imageio einops dnspython numpy==1.23.5 scenepic
+    pip install transformers==4.41.2 moviepy imageio einops dnspython numpy==1.23.5 scenepic dill librosa
     # pip install -e third-party/DPVO
+    pip install git+https://github.com/google/aistplusplus_api.git
     pip install -e .
 fi

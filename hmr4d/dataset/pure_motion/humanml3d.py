@@ -487,7 +487,7 @@ class Humanml3dDataset(BaseDataset):
                 "dataset_id": "humanml3d",
                 "idx": idx,
                 "T_w2c": T_w2c,
-                "eval_text_only": self.eval_text_only,
+                "eval_gen_only": self.eval_text_only,
                 "mid": mid,
                 "text_ind": text_ind,
                 "mode": self.mode,
@@ -516,6 +516,7 @@ class Humanml3dDataset(BaseDataset):
                 "bbx_xys": False,
                 "f_imgseq": False,
                 "spv_incam_only": False,
+                "invalid_contact": False,
             },
         }
         if self.has_humanoid_data:

@@ -36,6 +36,10 @@ class DemoPL(pl.LightningModule):
             "R_w2c": data["R_w2c"][None],
             "f_imgseq": data["f_imgseq"][None],
         }
+        if "meta" in data:
+            batch["meta"] = data["meta"]
+        else:
+            batch["meta"] = None
         batch = {k: v.cuda() for k, v in batch.items()}
         if "vimo_smpl_params" in data:
             batch["vimo_smpl_params"] = {
@@ -43,7 +47,6 @@ class DemoPL(pl.LightningModule):
             }
             batch["scales"] = data["scales"][None].cuda()
             batch["mean_scale"] = torch.tensor(data["mean_scale"])[None].cuda()
-        batch["meta"] = None
         outputs = self.pipeline.forward(
             batch, train=False, postproc=False, static_cam=static_cam
         )

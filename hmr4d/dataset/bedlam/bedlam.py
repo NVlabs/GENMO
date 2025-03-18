@@ -228,6 +228,7 @@ class BedlamDatasetV2(ImgfeatMotionDatasetBase):
                 "bbx_xys": True,
                 "f_imgseq": True,
                 "spv_incam_only": False,
+                "invalid_contact": False,
             },
         }
 

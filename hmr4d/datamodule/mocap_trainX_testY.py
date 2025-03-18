@@ -70,6 +70,8 @@ def collate_fn(batch, collate_cfg=None):
     )
     return return_dict
 
+    return collate_fn
+
 
 class DataModule(pl.LightningDataModule):
     def __init__(

@@ -57,7 +57,7 @@ opt = {
     "dim_pos_ohot": len(POS_enumerator),
     "dim_motion_hidden": 1024,
     "max_text_len": 20,
-    "dim_text_hidden": 256,
+    "dim_text_hidden": 512,
     "dim_coemb_hidden": 512,
     "dim_pose": 263 if dataset_name == "humanml" else 251,
     "dim_movement_enc_hidden": 512,
@@ -460,7 +460,7 @@ text_embeds = torch.load("inputs/motionx_text_clip_embds.pth")
 matching_score, R_precision, all_motion_embeddings = evaluate_matching_score(
     text_embeds, test_motion_embs
 )
-breakpoint()
+# breakpoint()
 # breakpoint()
 
 ######## To generate the text features by CLIP:
@@ -492,50 +492,50 @@ text_embeds = torch.load("inputs/motionx_text_clip_embds.pth")
 
 
 # Initialize the models
-movement_enc = MovementConvEncoderWithDropout(
-    input_dim=opt["dim_pose"],  # Full input dimension
-    hidden_dim=opt["dim_movement_enc_hidden"],
-    latent_dim=opt["dim_movement_latent"],
-    dropout_prob=0.3,
-).to(opt["device"])
+# movement_enc = MovementConvEncoderWithDropout(
+#     input_dim=opt["dim_pose"],  # Full input dimension
+#     hidden_dim=opt["dim_movement_enc_hidden"],
+#     latent_dim=opt["dim_movement_latent"],
+#     dropout_prob=0.3,
+# ).to(opt["device"])
 
-motion_enc = MotionEncoderBiGRUCoWithDropout(
-    input_size=opt["dim_movement_latent"],
-    hidden_size=opt["dim_motion_hidden"],
-    output_size=opt["dim_coemb_hidden"],
-    device=opt["device"],
-    dropout_prob=0.3,
-).to(opt["device"])
+# motion_enc = MotionEncoderBiGRUCoWithDropout(
+#     input_size=opt["dim_movement_latent"],
+#     hidden_size=opt["dim_motion_hidden"],
+#     output_size=opt["dim_coemb_hidden"],
+#     device=opt["device"],
+#     dropout_prob=0.3,
+# ).to(opt["device"])
 
-motion_decoder = MotionDecoderWithDropout(
-    latent_dim=opt["dim_coemb_hidden"],
-    hidden_dim=opt["dim_motion_hidden"],
-    output_dim=opt["dim_pose"],
-    unit_length=opt["unit_length"],
-    dropout_prob=0.3,
-).to(opt["device"])
-
-
-# Function to load weights
-def load_weights(checkpoint_path, movement_enc, motion_enc, motion_decoder):
-    if os.path.exists(checkpoint_path):
-        checkpoint = torch.load(checkpoint_path)
-        movement_enc.load_state_dict(checkpoint["movement_enc_state_dict"])
-        motion_enc.load_state_dict(checkpoint["motion_enc_state_dict"])
-        motion_decoder.load_state_dict(checkpoint["motion_decoder_state_dict"])
-        print(f"Loaded weights from {checkpoint_path}")
-    else:
-        print(f"Checkpoint not found at {checkpoint_path}")
+# motion_decoder = MotionDecoderWithDropout(
+#     latent_dim=opt["dim_coemb_hidden"],
+#     hidden_dim=opt["dim_motion_hidden"],
+#     output_dim=opt["dim_pose"],
+#     unit_length=opt["unit_length"],
+#     dropout_prob=0.3,
+# ).to(opt["device"])
 
 
-checkpoint_path = "outputs/motionx_motion_encoder_decoder_weights.pth"
+# # Function to load weights
+# def load_weights(checkpoint_path, movement_enc, motion_enc, motion_decoder):
+#     if os.path.exists(checkpoint_path):
+#         checkpoint = torch.load(checkpoint_path)
+#         movement_enc.load_state_dict(checkpoint["movement_enc_state_dict"])
+#         motion_enc.load_state_dict(checkpoint["motion_enc_state_dict"])
+#         motion_decoder.load_state_dict(checkpoint["motion_decoder_state_dict"])
+#         print(f"Loaded weights from {checkpoint_path}")
+#     else:
+#         print(f"Checkpoint not found at {checkpoint_path}")
 
-load_weights(checkpoint_path, movement_enc, motion_enc, motion_decoder)
+
+# checkpoint_path = "outputs/motionx_motion_encoder_decoder_weights.pth"
+
+# load_weights(checkpoint_path, movement_enc, motion_enc, motion_decoder)
 
 # Set models to evaluation mode
 movement_enc.eval()
 motion_enc.eval()
-motion_decoder.eval()
+# motion_decoder.eval()
 
 
 def get_motion_embeds(all_motions):

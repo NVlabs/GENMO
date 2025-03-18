@@ -17,14 +17,14 @@ from os.path import join as pjoin
 import clip
 from transformers import AutoTokenizer, CLIPTextModelWithProjection
 
-from hmr4d.model.gvhmr.utils.endecoder import EnDecoder
+# from hmr4d.model.gvhmr.utils.endecoder import EnDecoder
 from motiondiff.utils.mdm_modules import (
     MotionEncoderBiGRUCo,
     MovementConvEncoder,
     TextEncoderBiGRUCo,
 )
 
-encoder = EnDecoder(stats_name="DEFAULT_01", encode_type="humanml3d").cuda()
+# encoder = EnDecoder(stats_name="DEFAULT_01", encode_type="humanml3d").cuda()
 
 dataset_name = "humanml"
 POS_enumerator = {
@@ -695,7 +695,7 @@ GT_feats = torch.tensor(GT_feats).float().cuda()
 gt_motion_embs = get_motion_embedding(GT_feats, gt_m_lens)
 # pred_motion_embs = get_motion_embedding(Pred_feats, pred_m_lens)
 # fid = compute_fid(gt_motion_embs.cpu().numpy(), all_motion_embeddings)
-
+breakpoint()
 # GT_feats = GT_feats * std + mean
 # Pred_feats = Pred_feats * std + mean
 

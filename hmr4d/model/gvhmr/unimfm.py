@@ -15,6 +15,7 @@ from hmr4d.model.gvhmr.utils.postprocess import (
     pp_static_joint_cam,
     process_ik,
 )
+from hmr4d.network.base_arch.transformer.layer import BasicBlock, zero_module
 from hmr4d.utils.geo.augment_noisy_pose import (
     get_invisible_legs_mask,
     get_visible_mask,
@@ -103,6 +104,15 @@ class UNIMFM(pl.LightningModule):
         else:
             self.use_text_encoder = False
 
+        self.audio_encoder = torch.nn.Sequential(
+            BasicBlock(1, 32, 15, 5),
+            BasicBlock(32, 32, 15, 6),
+            BasicBlock(32, 32, 15, 1),
+            BasicBlock(32, 64, 15, 5),
+            BasicBlock(64, 64, 15, 1),
+            BasicBlock(64, 128, 15, 4),
+        )
+
         self.humanoid = None
 
     def load_and_freeze_llm(self, llm_version):
@@ -168,7 +178,7 @@ class UNIMFM(pl.LightningModule):
         if "3d" in batch:
             with Timer("train_3d_step", enabled=self.timing):
                 if len(self.train_3d_modes) > 0:
-                    self.prepare_3d_batch(batch["3d"])
+                    self.prepare_3d_batch(batch["3d"])  # set "obs" (2d keypoints)
                 for mode in self.train_3d_modes:
                     outputs_3d = self.train_3d_step(batch["3d"], batch_idx, mode=mode)
                     outputs["loss"] += outputs_3d["loss"]
@@ -262,24 +272,30 @@ class UNIMFM(pl.LightningModule):
             and "regression_outputs" in batch
         ):
             batch["f_condition_mask"] = batch["regression_outputs"]["f_condition_mask"]
-            batch["text_only"] = batch["regression_outputs"]["text_only"]
+            batch["gen_only"] = batch["regression_outputs"]["gen_only"]
         else:
             f_condition_mask = dict()
             has_text = batch["has_text"]
+            has_audio = batch["has_audio"]
+            has_music = batch["has_music"]
             if regression_no_img_mask and mode == "regression":
                 mask_img_prob = 0
                 mask_f_imgseq_prob = 0
             if mask_img_prob > 0:
-                mask_img = has_text & (torch.rand(batch["B"]) < mask_img_prob).to(
-                    device
-                )
+                mask_img = (has_text | has_audio | has_music) & (
+                    torch.rand(batch["B"]) < mask_img_prob
+                ).to(device)
                 for k in ["obs", "f_cliffcam", "f_imgseq"]:
-                    f_condition_mask[k] = mask_img
-                batch["text_only"] = mask_img
+                    f_condition_mask[k] = mask_img  # 1: not used, 0: used
+                batch["gen_only"] = mask_img
+            # else:
+            #     mask_img = has_text | has_audio | has_music
+            #     batch["gen_only"] = mask_img
+
             if mask_cam_prob > 0:
-                mask_cam = has_text & (torch.rand(batch["B"]) < mask_cam_prob).to(
-                    device
-                )
+                mask_cam = (has_text | has_music | has_audio) & (
+                    torch.rand(batch["B"]) < mask_cam_prob
+                ).to(device)
                 for k in ["f_cam_angvel"]:
                     f_condition_mask[k] = mask_cam
             if mask_f_imgseq_prob > 0:
@@ -301,6 +317,26 @@ class UNIMFM(pl.LightningModule):
             batch["encoded_text"] = self.encode_text(
                 batch["caption"], batch["has_text"]
             )
+        if "music_embed" in batch:
+            batch["encoded_music"] = batch["music_embed"].cuda()
+        else:
+            batch["encoded_music"] = torch.zeros(
+                batch["obs"].shape[:2] + (self.pipeline.args.encoded_music_dim,),
+                device=batch["obs"].device,
+            )
+        if "audio_array" in batch:
+            encoded_audio = (
+                self.audio_encoder(batch["audio_array"].cuda().unsqueeze(1))
+                .transpose(1, 2)
+                .contiguous()
+            )
+            has_audio = batch["has_audio"]
+            encoded_audio[~has_audio] = 0
+            batch["encoded_audio"] = encoded_audio
+        else:
+            bs, T = batch["obs"].shape[:2]
+            batch["encoded_audio"] = torch.zeros(bs, T, 128, device=batch["obs"].device)
+
         batch["target_x"] = self.endecoder.encode(batch)  # (B, L, C)
         batch["device"] = batch["target_x"].device
         batch["B"], batch["L"] = batch["target_x"].shape[:2]
@@ -417,10 +453,10 @@ class UNIMFM(pl.LightningModule):
         )
         outputs["batch_size"] = batch["B"]
         outputs["f_condition_mask"] = batch["f_condition_mask"]
-        outputs["text_only"] = batch.get("text_only", None)
+        outputs["gen_only"] = batch.get("gen_only", None)
         outputs[f"{mode}_condition"] = {
             "f_condition_mask": batch["f_condition_mask"],
-            "text_only": batch.get("text_only", None),
+            "gen_only": batch.get("gen_only", None),
         }
         return outputs
 
@@ -433,6 +469,25 @@ class UNIMFM(pl.LightningModule):
             batch["encoded_text"] = self.encode_text(
                 batch["caption"], batch["has_text"]
             )
+        if "music_embed" in batch:
+            batch["encoded_music"] = batch["music_embed"].cuda()
+        else:
+            batch["encoded_music"] = torch.zeros(
+                batch["obs"].shape[:2] + (self.pipeline.args.encoded_music_dim,),
+                device=batch["obs"].device,
+            )
+        if "audio_array" in batch:
+            encoded_audio = (
+                self.audio_encoder(batch["audio_array"].cuda().unsqueeze(1))
+                .transpose(1, 2)
+                .contiguous()
+            )
+            has_audio = batch["has_audio"]
+            encoded_audio[~has_audio] = 0
+            batch["encoded_audio"] = encoded_audio
+        else:
+            bs, T = batch["obs"].shape[:2]
+            batch["encoded_audio"] = torch.zeros(bs, T, 128, device=batch["obs"].device)
 
         batch["obs_kp2d_raw"] = batch["obs_kp2d"].squeeze(2).clone()
         obs_kp2d = batch["obs_kp2d"].squeeze(2)
@@ -510,10 +565,10 @@ class UNIMFM(pl.LightningModule):
             )
         outputs["batch_size"] = batch["B"]
         outputs["f_condition_mask"] = batch["f_condition_mask"]
-        outputs["text_only"] = batch.get("text_only", None)
+        outputs["gen_only"] = batch.get("gen_only", None)
         outputs[f"{mode}_condition"] = {
             "f_condition_mask": batch["f_condition_mask"],
-            "text_only": batch.get("text_only", None),
+            "gen_only": batch.get("gen_only", None),
         }
         return outputs
 
@@ -719,13 +774,33 @@ class UNIMFM(pl.LightningModule):
         obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
         obs[~batch["mask"]] = 0
         batch["obs"] = obs
-        batch["eval_text_only"] = batch["meta"][0].get("eval_text_only", False)
+        batch["eval_gen_only"] = batch["meta"][0].get("eval_gen_only", False)
         if "text_embed" in batch:
             batch["encoded_text"] = batch["text_embed"].cuda()
         elif self.use_text_encoder:
             batch["encoded_text"] = self.encode_text(
                 batch["caption"], batch["has_text"]
             )
+        if "music_embed" in batch:
+            batch["encoded_music"] = batch["music_embed"].cuda()
+        else:
+            batch["encoded_music"] = torch.zeros(
+                batch["obs"].shape[:2] + (self.pipeline.args.encoded_music_dim,),
+                device=batch["obs"].device,
+            )
+        if "audio_array" in batch:
+            encoded_audio = (
+                self.audio_encoder(batch["audio_array"].cuda().unsqueeze(1))
+                .transpose(1, 2)
+                .contiguous()
+            )
+            has_audio = batch["has_audio"]
+            encoded_audio[~has_audio] = 0
+            batch["encoded_audio"] = encoded_audio
+        else:
+            bs, T = batch["obs"].shape[:2]
+            batch["encoded_audio"] = torch.zeros(bs, T, 128, device=batch["obs"].device)
+
         if "cam_angvel" not in batch:
             batch["cam_angvel"] = torch.zeros(
                 batch["obs"].shape[:2] + (6,), device=batch["obs"].device
@@ -750,7 +825,7 @@ class UNIMFM(pl.LightningModule):
             outputs["2d_pred_smpl_params_incam"] = {
                 k: v[0] for k, v in outputs["2d_pred_smpl_params_incam"].items()
             }
-        outputs["eval_text_only"] = batch["eval_text_only"]
+        outputs["eval_gen_only"] = batch["eval_gen_only"]
         outputs["batch"] = batch
         outputs["vis_2d"] = self.model_cfg.get("vis_2d", False)
         return outputs
@@ -790,7 +865,7 @@ class UNIMFM(pl.LightningModule):
                 mask = mask["valid"]
             obs[0, ~mask[0]] = 0
 
-        eval_text_only = batch["meta"][0].get("eval_text_only", False)
+        eval_gen_only = batch["meta"][0].get("eval_gen_only", False)
         has_humanoid_data = torch.tensor(
             [x.get("has_humanoid_data", False) for x in batch["meta"]]
         ).to(obs.device)
@@ -803,7 +878,7 @@ class UNIMFM(pl.LightningModule):
             "cam_angvel": batch["cam_angvel"],
             "f_imgseq": batch["f_imgseq"],
             "caption": batch["caption"],
-            "eval_text_only": eval_text_only,
+            "eval_gen_only": eval_gen_only,
             "mode": test_mode,
             "meta": batch["meta"],
             "has_humanoid_data": has_humanoid_data,
@@ -833,6 +908,27 @@ class UNIMFM(pl.LightningModule):
         elif self.use_text_encoder:
             batch_["encoded_text"] = self.encode_text(
                 batch["caption"], batch["has_text"]
+            )
+        if "music_embed" in batch:
+            batch_["encoded_music"] = batch["music_embed"].cuda()
+        else:
+            batch_["encoded_music"] = torch.zeros(
+                batch["obs"].shape[:2] + (self.pipeline.args.encoded_music_dim,),
+                device=batch["obs"].device,
+            )
+        if "audio_array" in batch:
+            encoded_audio = (
+                self.audio_encoder(batch["audio_array"].cuda().unsqueeze(1))
+                .transpose(1, 2)
+                .contiguous()
+            )
+            has_audio = batch["has_audio"]
+            encoded_audio[~has_audio] = 0
+            batch_["encoded_audio"] = encoded_audio
+        else:
+            bs, T = batch["obs"].shape[:2]
+            batch_["encoded_audio"] = torch.zeros(
+                bs, T, 128, device=batch["obs"].device
             )
 
         if test_mode == "infilling":
@@ -905,7 +1001,7 @@ class UNIMFM(pl.LightningModule):
             outputs["pred_smpl_params_incam"] = {
                 k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()
             }
-        outputs["eval_text_only"] = eval_text_only
+        outputs["eval_gen_only"] = eval_gen_only
         if test_mode == "infilling":
             outputs.update(mask_res)
 
@@ -944,6 +1040,30 @@ class UNIMFM(pl.LightningModule):
                 batch_["encoded_text"] = self.encode_text(
                     batch["caption"], batch["has_text"]
                 )
+
+            if "music_embed" in batch:
+                batch_["encoded_music"] = batch["music_embed"].cuda()
+            else:
+                batch_["encoded_music"] = torch.zeros(
+                    batch["obs"].shape[:2] + (self.pipeline.args.encoded_music_dim,),
+                    device=batch["obs"].device,
+                )
+
+            if "audio_array" in batch:
+                encoded_audio = (
+                    self.audio_encoder(batch["audio_array"].cuda().unsqueeze(1))
+                    .transpose(1, 2)
+                    .contiguous()
+                )
+                has_audio = batch["has_audio"]
+                encoded_audio[~has_audio] = 0
+                batch_["encoded_audio"] = encoded_audio
+            else:
+                bs, T = batch["obs"].shape[:2]
+                batch_["encoded_audio"] = torch.zeros(
+                    bs, T, 128, device=batch["obs"].device
+                )
+
             self.init_condition_exists(batch_)
             flipped_outputs = self.pipeline.forward(
                 batch_, train=False, global_step=global_step

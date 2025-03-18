@@ -236,6 +236,7 @@ class BaseDataset(Dataset):
                 "bbx_xys": False,
                 "f_imgseq": False,
                 "spv_incam_only": False,
+                "invalid_contact": False,
             },
         }
 

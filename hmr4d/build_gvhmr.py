@@ -3,6 +3,7 @@ from omegaconf import OmegaConf
 
 from hmr4d import PROJ_ROOT
 from hmr4d.model.gvhmr.gvhmr_pl_demo import DemoPL
+from hmr4d.model.gvhmr.unimfm_demo import UNIMFM_demo
 
 
 def build_gvhmr_demo():

@@ -30,6 +30,8 @@ class UNIMFMDiffusion(nn.Module):
         cam_t_vel_dim=3,
         imgseq_dim=1024,
         observed_motion_3d_dim=151,
+        encoded_music_dim=438,
+        encoded_audio_dim=128,
         humanoid_obs_dim=358,
         latent_dim=512,
         dropout=0.1,
@@ -37,6 +39,7 @@ class UNIMFMDiffusion(nn.Module):
         use_cond_exists_as_input=False,
         cond_merge_strategy="add",
         cond_exists_dim=512,
+        music_mask_prob=0.1,
         img_process_modules=None,
         img_process_modules_enable_grad={},
         multi_text_module_cfg={},
@@ -52,6 +55,8 @@ class UNIMFMDiffusion(nn.Module):
         self.cam_angvel_dim = cam_angvel_dim
         self.cam_t_vel_dim = cam_t_vel_dim
         self.imgseq_dim = imgseq_dim
+        self.encoded_music_dim = encoded_music_dim
+        self.encoded_audio_dim = encoded_audio_dim
         self.observed_motion_3d_dim = observed_motion_3d_dim
         self.humanoid_obs_dim = humanoid_obs_dim
         self.s_pred_ind = 0
@@ -119,6 +124,20 @@ class UNIMFMDiffusion(nn.Module):
             self.imgseq_embedder = nn.Sequential(
                 nn.LayerNorm(self.imgseq_dim),
                 zero_module(nn.Linear(self.imgseq_dim, latent_dim)),
+            )
+
+        if "encoded_music" in self.args.in_attr:
+            self.music_embedder = Mlp(
+                self.encoded_music_dim,
+                hidden_features=self.latent_dim * 2,
+                out_features=self.latent_dim,
+                drop=dropout,
+            )
+            self.music_mask_prob = music_mask_prob
+        if "encoded_audio" in self.args.in_attr:
+            self.audio_embedder = nn.Sequential(
+                nn.LayerNorm(self.encoded_audio_dim),
+                zero_module(nn.Linear(self.encoded_audio_dim, latent_dim)),
             )
 
         if "observed_motion_3d" in self.args.in_attr:
@@ -217,15 +236,15 @@ class UNIMFMDiffusion(nn.Module):
         self.test_diffusion = create_gaussian_diffusion(
             self.model_cfg.diffusion, training=False
         )
-        text_only_diffusion = deepcopy(self.model_cfg.diffusion)
-        text_only_diffusion.test_timestep_respacing = self.model_cfg.diffusion.get(
-            "text_only_test_timestep_respacing", "50"
+        gen_only_diffusion = deepcopy(self.model_cfg.diffusion)
+        gen_only_diffusion.test_timestep_respacing = self.model_cfg.diffusion.get(
+            "gen_only_test_timestep_respacing", "50"
         )
         print(
-            f"Text only test timestep respacing: {text_only_diffusion.test_timestep_respacing}"
+            f"Gen only test timestep respacing: {gen_only_diffusion.test_timestep_respacing}"
         )
-        self.test_text_only_diffusion = create_gaussian_diffusion(
-            text_only_diffusion, training=False
+        self.test_gen_only_diffusion = create_gaussian_diffusion(
+            gen_only_diffusion, training=False
         )
         self.schedule_sampler = create_named_schedule_sampler(
             self.model_cfg.diffusion.schedule_sampler_type, self.train_diffusion
@@ -241,6 +260,8 @@ class UNIMFMDiffusion(nn.Module):
             length = length.clamp(max=first_k_frames)
 
         f_cond_dict = {}
+        f_uncond_dict = {}
+        f_uncond_exists = {k: f_condition_exists[k].clone() for k in f_condition_exists}
         if "obs" in f_condition:
             obs = f_condition["obs"][:, :end_fr]
             B, L, J, C = obs.shape
@@ -257,23 +278,61 @@ class UNIMFMDiffusion(nn.Module):
                 f_obs.view(B, L, -1)
             )  # (B, L, J*32) -> (B, L, C)
             f_cond_dict["obs"] = f_obs
+            f_uncond_dict["obs"] = f_obs
 
         if "f_cliffcam" in f_condition:
             f_cliffcam = f_condition["f_cliffcam"][:, :end_fr]  # (B, L, 3)
             f_cliffcam = self.cliffcam_embedder(f_cliffcam)
             f_cond_dict["f_cliffcam"] = f_cliffcam
+            f_uncond_dict["f_cliffcam"] = f_cliffcam
         if "f_cam_angvel" in f_condition:
             f_cam_angvel = f_condition["f_cam_angvel"][:, :end_fr]  # (B, L, 6)
             f_cam_angvel = self.cam_angvel_embedder(f_cam_angvel)
             f_cond_dict["f_cam_angvel"] = f_cam_angvel
+            f_uncond_dict["f_cam_angvel"] = f_cam_angvel
         if "f_cam_t_vel" in f_condition:
             f_cam_t_vel = f_condition["f_cam_t_vel"][:, :end_fr]  # (B, L, 3)
             f_cam_t_vel = self.cam_t_vel_embedder(f_cam_t_vel)
             f_cond_dict["f_cam_t_vel"] = f_cam_t_vel
+            f_uncond_dict["f_cam_t_vel"] = f_cam_t_vel
         if "f_imgseq" in f_condition:
             f_imgseq = f_condition["f_imgseq"][:, :end_fr]  # (B, L, C)
             f_imgseq = self.imgseq_embedder(f_imgseq)
             f_cond_dict["f_imgseq"] = f_imgseq
+            f_uncond_dict["f_imgseq"] = f_imgseq
+        if "encoded_music" in f_condition:
+            f_encoded_music = f_condition["encoded_music"]  # (B, L, C)
+            f_encoded_music = self.music_embedder(f_encoded_music)
+
+            if self.training and self.music_mask_prob > 0:
+                mask = (
+                    torch.rand((B,), device=f_encoded_music.device)
+                    < self.music_mask_prob
+                )
+                f_encoded_music = f_encoded_music * (1 - mask[:, None, None].float())
+                f_condition_exists["encoded_music"] = (
+                    f_condition_exists["encoded_music"]
+                    * (1 - mask[:, None].float()).bool()
+                )
+            f_cond_dict["encoded_music"] = f_encoded_music
+
+            f_uncond_dict["encoded_music"] = torch.zeros_like(f_encoded_music)
+            f_uncond_exists["encoded_music"] = torch.zeros_like(
+                f_condition_exists["encoded_music"]
+            )
+        else:
+            assert False, "encoded_music must be in f_condition"
+
+        if "encoded_audio" in f_condition:
+            f_encoded_audio = f_condition["encoded_audio"]  # (B, L, C)
+            f_encoded_audio = self.audio_embedder(f_encoded_audio)
+            f_cond_dict["encoded_audio"] = f_encoded_audio
+            f_uncond_dict["encoded_audio"] = torch.zeros_like(f_encoded_audio)
+            f_uncond_exists["encoded_audio"] = torch.zeros_like(
+                f_condition_exists["encoded_audio"]
+            )
+        else:
+            assert False, "encoded_audio must be in f_condition"
         if "observed_motion_3d" in f_condition:
             motion_mask_3d = inputs.get(
                 "motion_mask_3d", torch.zeros_like(f_condition["observed_motion_3d"])
@@ -285,6 +344,52 @@ class UNIMFMDiffusion(nn.Module):
                 f_observed_motion_3d
             )
             f_cond_dict["observed_motion_3d"] = f_observed_motion_3d
+            f_uncond_dict["observed_motion_3d"] = torch.zeros_like(f_observed_motion_3d)
+
+        if "humanoid_obs" in f_condition:
+            f_humanoid_obs = f_condition["humanoid_obs"][
+                :, :end_fr
+            ]  # (B, L, humanoid_obs_dim)
+            f_humanoid_obs = self.humanoid_obs_embedder(f_humanoid_obs)
+            f_cond_dict["humanoid_obs"] = f_humanoid_obs
+
+        for k in self.args.in_attr:
+            if k in self.not_add_features:
+                continue
+            f_cond_dict[k] = self.add_feature_embedders[k](f_condition[k][:, :end_fr])
+
+        for k in self.img_process_modules:
+            enable_grad = self.img_process_modules_enable_grad.get(k, False)
+            with torch.set_grad_enabled(enable_grad):
+                B = f_condition[k].shape[0]
+                img_batched = f_condition[k][:, :end_fr].reshape(
+                    -1, *f_condition[k].shape[2:]
+                )
+                # Visualize batched images using PIL
+                # from PIL import Image
+                # import os
+                # os.makedirs('out/vis/batched_imgs', exist_ok=True)
+                # for i in range(img_batched.shape[0]):  # Save up to 10 images
+                #     img = img_batched[i].detach().cpu()
+                #     img = img.permute(1, 2, 0)
+                #     img = (img * 255).numpy().astype('uint8')
+                #     img = Image.fromarray(img)
+                #     img.save(f'out/vis/batched_imgs/batch_{i}.png')
+                f_cond_dict[k] = self.img_process_modules[k](img_batched)
+                f_cond_dict[k] = f_cond_dict[k].view(B, -1, *f_cond_dict[k].shape[1:])
+
+        if "multi_text_embed" in f_condition:
+            x_text = f_condition["multi_text_embed"]
+            x_text = x_text.reshape(-1, *x_text.shape[2:])
+            x_text = self.multi_text_embedder(x_text)
+            x_text = self.multi_text_transformer(x_text)
+            x_text = x_text.mean(dim=1)
+            x_text = x_text.reshape(B, -1, *x_text.shape[1:])
+            text_label_id = inputs["text_label_ids"][:, :end_fr]
+            batch_indices = torch.arange(B, device=x_text.device)[:, None]  # [B, 1]
+            batch_indices = batch_indices.expand(-1, text_label_id.size(1))  # [B, F]
+            text_features = x_text[batch_indices, text_label_id]
+            f_cond_dict["multi_text_embed"] = text_features
 
         if "humanoid_obs" in f_condition:
             f_humanoid_obs = f_condition["humanoid_obs"][
@@ -343,7 +448,17 @@ class UNIMFMDiffusion(nn.Module):
                             dim=-1,
                         )
                         f_cond_dict[k] = self.cond_exists_embedder[k](f_cond_dict[k])
+                for k in f_uncond_dict:
+                    if k != "observed_motion_3d":
+                        f_uncond_dict[k] = torch.cat(
+                            [f_uncond_dict[k], f_uncond_exists[k][:, :, None].float()],
+                            dim=-1,
+                        )
+                        f_uncond_dict[k] = self.cond_exists_embedder[k](
+                            f_uncond_dict[k]
+                        )
             f_cond = sum(f_cond_dict.values())
+            f_uncond = sum(f_uncond_dict.values())
         elif self.cond_merge_strategy == "concat":
             f_cond = torch.cat(list(f_cond_dict.values()), dim=-1)
             f_cond_exists = torch.cat(
@@ -356,15 +471,38 @@ class UNIMFMDiffusion(nn.Module):
                 ],
                 dim=-1,
             )
+            f_uncond = torch.cat(list(f_uncond_dict.values()), dim=-1)
+            f_uncond_exists = torch.cat(
+                [
+                    f_uncond_exists[k][:, :, None]
+                    .float()
+                    .repeat(1, 1, self.cond_exists_dim)
+                    for k in f_uncond_dict
+                    if k not in self.no_exist_keys
+                ],
+                dim=-1,
+            )
+            f_uncond = torch.cat(list(f_uncond_dict.values()), dim=-1)
+            f_uncond_exists = torch.cat(
+                [
+                    f_uncond_exists[k][:, :, None]
+                    .float()
+                    .repeat(1, 1, self.cond_exists_dim)
+                    for k in f_uncond_dict
+                    if k != "observed_motion_3d"
+                ],
+                dim=-1,
+            )
             if self.use_cond_exists_as_input:
                 f_cond = torch.cat([f_cond, f_cond_exists], dim=-1)
+                f_uncond = torch.cat([f_uncond, f_uncond_exists], dim=-1)
             f_cond = self.cond_merger(f_cond)
-
+            f_uncond = self.cond_merger(f_uncond)
         vis_mask = length_to_mask(length, f_cond.shape[1])[:, :end_fr]  # (B, L)
 
         motion = target_x * vis_mask[..., None]
         motion = motion[:, :end_fr]
-        return f_cond, motion
+        return f_cond, f_uncond, motion
 
     def forward_train(
         self, inputs, train=False, postproc=False, static_cam=False, mode=None
@@ -374,7 +512,7 @@ class UNIMFMDiffusion(nn.Module):
         length = inputs["length"]
         target_x = inputs["target_x"]
 
-        f_cond, motion = self.generate_motion_rep(inputs, target_x)
+        f_cond, f_uncond, motion = self.generate_motion_rep(inputs, target_x)
         B, L, _ = motion.shape
         vis_mask = length_to_mask(length, L)  # (B, L)
         valid_mask = inputs["mask"]["valid"]
@@ -431,8 +569,8 @@ class UNIMFMDiffusion(nn.Module):
             regression_mask = (
                 torch.rand(B).to(motion.device) < self.args.use_regression_outputs_prob
             ).float()
-            if "text_only" in inputs and self.args.get("use_gt_for_text_only", True):
-                regression_mask[inputs["text_only"]] = 0
+            if "gen_only" in inputs and self.args.get("use_gt_for_gen_only", True):
+                regression_mask[inputs["gen_only"]] = 0
             x_start = x_start_reg * regression_mask[:, None, None] + x_start_gt * (
                 1 - regression_mask[:, None, None]
             )
@@ -465,7 +603,7 @@ class UNIMFMDiffusion(nn.Module):
         mdim = self.endecoder.get_motion_dim()
         target_x = torch.zeros(B, L, mdim).to(obs)
 
-        f_cond, motion = self.generate_motion_rep(inputs, target_x)
+        f_cond, f_uncond, motion = self.generate_motion_rep(inputs, target_x)
         # Setup length and make padding mask
         vis_mask = length_to_mask(length, L)  # (B, L)
 
@@ -531,15 +669,15 @@ class UNIMFMDiffusion(nn.Module):
         mode=None,
     ):
         assert not self.training, "forward_test should only be called during inference"
-        eval_text_only = inputs.get("eval_text_only", False)
+        eval_gen_only = inputs.get("eval_gen_only", False)
         diffusion = (
-            self.test_text_only_diffusion if eval_text_only else self.test_diffusion
+            self.test_gen_only_diffusion if eval_gen_only else self.test_diffusion
         )
         denoiser = self.denoiser
         length = (
             torch.ones_like(inputs["length"]) * self.max_len
         )  # use max length for test
-        regression_only = self.args.get("regression_only", False) and not eval_text_only
+        regression_only = self.args.get("regression_only", False) and not eval_gen_only
         if self.args.get("force_regression_only", False):
             regression_only = True
 
@@ -586,7 +724,7 @@ class UNIMFMDiffusion(nn.Module):
         mdim = self.endecoder.get_motion_dim()
         target_x = torch.zeros(B, L, mdim).to(obs)
 
-        f_cond, motion = self.generate_motion_rep(inputs, target_x)
+        f_cond, f_uncond, motion = self.generate_motion_rep(inputs, target_x)
 
         vis_mask = length_to_mask(length, L)  # (B, L)
 
@@ -594,6 +732,7 @@ class UNIMFMDiffusion(nn.Module):
             "y": {
                 "text": inputs.get("caption", [""] * B),
                 "f_cond": f_cond,
+                "f_uncond": f_uncond,
                 "mask": vis_mask,
                 "length": length,
             },
@@ -623,7 +762,7 @@ class UNIMFMDiffusion(nn.Module):
                 **denoiser_kwargs,
             )
         else:
-            if self.args.get("use_cfg_sampler_for_text", False) and eval_text_only:
+            if self.args.get("use_cfg_sampler_for_gen", False) and eval_gen_only:
                 denoiser = ClassifierFreeSampleModel(denoiser)
                 denoiser_kwargs["y"]["scale"] = self.model_cfg.diffusion.guidance_param
             diff_sampler = self.model_cfg.diffusion.get("sampler", "ddim")
@@ -635,8 +774,10 @@ class UNIMFMDiffusion(nn.Module):
 
             if self.args.get("force_zero_noise", False):
                 noise = torch.zeros_like(motion)
+            elif self.args.get("force_rand_noise", False):
+                noise = torch.randn_like(motion)
             else:
-                if eval_text_only:
+                if eval_gen_only:
                     noise = torch.randn_like(motion)
                 else:
                     noise = torch.zeros_like(motion)
