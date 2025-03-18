@@ -157,6 +157,7 @@ class ThreedpwOccSmplDataset(ImgfeatMotionDatasetBase):
                 "bbx_xys": True,
                 "f_imgseq": True,
                 "spv_incam_only": True,
+                "invalid_contact": True,
             },
             "use_det_kp": torch.ones(length),  # default: False
         }

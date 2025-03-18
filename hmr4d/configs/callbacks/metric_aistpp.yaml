@@ -1,0 +1,2 @@
+metric_aistpp:
+  _target_: hmr4d.model.gvhmr.callbacks.metric_aistpp.MetricMusic

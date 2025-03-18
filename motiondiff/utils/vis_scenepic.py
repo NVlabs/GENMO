@@ -7,9 +7,9 @@ import time
 import numpy as np
 import scenepic as sp
 import torch
-import wandb
 from matplotlib import cm
 
+import wandb
 from motiondiff.models.common.smpl import SMPL
 from motiondiff.utils.torch_transform import (
     angle_axis_to_quaternion,
@@ -270,6 +270,10 @@ class ScenepicVisualizer:
             main_frame = main.create_frame()
             frame_list.append(main_frame)
             main_frame.camera = self.load_default_camera()
+
+            coord_ax = scene.create_mesh(layer_id="coord")
+            coord_ax.add_coordinate_axes()
+            main_frame.add_mesh(coord_ax)
 
             for i, (skel_name, pose_dict) in enumerate(smpl_seq.items()):
                 colors = self.color_sequences[i % len(self.color_sequences)]

@@ -15,7 +15,6 @@ from hmr4d.model.gvhmr.utils.postprocess import (
     pp_static_joint_cam,
     process_ik,
 )
-from hmr4d.network.base_arch.transformer.layer import BasicBlock, zero_module
 from hmr4d.utils.geo.augment_noisy_pose import (
     get_invisible_legs_mask,
     get_visible_mask,
@@ -58,40 +57,19 @@ from .utils.mv2d_utils import (
 )
 
 
-class UNIMFM(pl.LightningModule):
+class UNIMFM_demo(pl.LightningModule):
     def __init__(
         self,
         pipeline,
-        optimizer=None,
-        scheduler_cfg=None,
-        model_cfg=None,
-        ignored_weights_prefix=["smplx", "pipeline.endecoder"],
+        model_cfg,
     ):
         super().__init__()
         self.pipeline = instantiate(pipeline, _recursive_=False)
-        self.endecoder = self.pipeline.endecoder
-        self.optimizer = instantiate(optimizer)
         self.model_cfg = model_cfg
-        self.scheduler_cfg = scheduler_cfg
-        self.enable_test_time_opt = model_cfg.get("enable_test_time_opt", False)
-        self.train_3d_modes = model_cfg.get("train_3d_modes", [])
-        self.train_2d_modes = model_cfg.get("train_2d_modes", [])
-        self.infer_mode = model_cfg.get("infer_mode", "regression")
-        if isinstance(self.train_3d_modes, str):
-            self.train_3d_modes = [self.train_3d_modes]
-        if isinstance(self.train_2d_modes, str):
-            self.train_2d_modes = [self.train_2d_modes]
-
-        # Options
-        self.ignored_weights_prefix = ignored_weights_prefix
-
-        # The test step is the same as validation
-        self.test_step = self.predict_step = self.validation_step
-        self.timing = os.environ.get("DEBUG_TIMING", "FALSE") == "TRUE"
 
         # SMPLX
         self.smplx = make_smplx("supermotion_v437coco17")
-
+        self.max_text_len = 50
         if "text_encoder" in model_cfg:
             self.use_text_encoder = True
             if model_cfg.text_encoder.get("load_llm", False):
@@ -104,15 +82,6 @@ class UNIMFM(pl.LightningModule):
         else:
             self.use_text_encoder = False
 
-        self.audio_encoder = torch.nn.Sequential(
-            BasicBlock(1, 32, 15, 5),
-            BasicBlock(32, 32, 15, 6),
-            BasicBlock(32, 32, 15, 1),
-            BasicBlock(32, 64, 15, 5),
-            BasicBlock(64, 64, 15, 1),
-            BasicBlock(64, 128, 15, 4),
-        )
-
     def load_and_freeze_llm(self, llm_version):
         tokenizer = T5Tokenizer.from_pretrained(llm_version)
         model = T5EncoderModel.from_pretrained(llm_version)
@@ -122,103 +91,11 @@ class UNIMFM(pl.LightningModule):
             p.requires_grad = False
         return model, tokenizer
 
-    def encode_text(self, raw_text, has_text=None):
-        # raw_text - list (batch_size length) of strings with input text prompts
-        device = next(self.parameters()).device
-        with torch.no_grad():
-            with torch.cuda.amp.autocast(enabled=False):
-                max_text_len = self.max_text_len
-
-                encoded = self.tokenizer.batch_encode_plus(
-                    raw_text,
-                    return_tensors="pt",
-                    padding="max_length",
-                    max_length=max_text_len,
-                    truncation=True,
-                )
-                # We expect all the processing is done in GPU.
-                input_ids = encoded.input_ids.to(device)
-                attn_mask = encoded.attention_mask.to(device)
-
-                with torch.no_grad():
-                    output = self.text_encoder[0](
-                        input_ids=input_ids, attention_mask=attn_mask
-                    )
-                    encoded_text = output.last_hidden_state.detach()
-
-                encoded_text = encoded_text[:, :max_text_len]
-                attn_mask = attn_mask[:, :max_text_len]
-                encoded_text *= attn_mask.unsqueeze(-1)
-                # for bnum in range(encoded_text.shape[0]):
-                #     nvalid_elem = attn_mask[bnum].sum().item()
-                #     encoded_text[bnum][nvalid_elem:] = 0
-        if has_text is not None:
-            no_text = ~has_text
-            encoded_text[no_text] = 0
-        return encoded_text
-
-    def training_step(self, batch, batch_idx):
-        if not ("3d" in batch or "2d" in batch):
-            if "is_2d" in batch and batch["is_2d"][0]:
-                batch = {"2d": batch}
-            else:
-                batch = {"3d": batch}
-
-        def append_mode_to_loss(outputs, mode, suffix=""):
-            if suffix != "":
-                suffix = f"_{suffix}"
-            for k in list(outputs.keys()):
-                if "_loss" in k or k in {"loss", "loss_2d"}:
-                    outputs[f"Loss_{mode}{suffix}/{k}"] = outputs.pop(k)
-            return outputs
-
-        outputs = {"loss": 0}
-        if "3d" in batch:
-            with Timer("train_3d_step", enabled=self.timing):
-                if len(self.train_3d_modes) > 0:
-                    self.prepare_3d_batch(batch["3d"])  # set "obs" (2d keypoints)
-                for mode in self.train_3d_modes:
-                    outputs_3d = self.train_3d_step(batch["3d"], batch_idx, mode=mode)
-                    outputs["loss"] += outputs_3d["loss"]
-                    append_mode_to_loss(outputs_3d, mode)
-                    outputs.update(outputs_3d)
-                    if mode == "regression" and "diffusion" in self.train_3d_modes:
-                        batch["3d"]["regression_outputs"] = outputs_3d.copy()
-                    batch["3d"][f"{mode}_condition"] = outputs_3d[f"{mode}_condition"]
-
-        start_2d_training_steps = self.model_cfg.get("start_2d_training_steps", 0)
-        if "2d" in batch and self.trainer.global_step >= start_2d_training_steps:
-            with Timer("train_2d_step", enabled=self.timing):
-                if len(self.train_2d_modes) > 0:
-                    self.prepare_2d_batch(batch["2d"])
-                for mode in self.train_2d_modes:
-                    outputs_2d = self.train_2d_step(batch["2d"], batch_idx, mode=mode)
-                    outputs["loss"] += outputs_2d["loss_2d"]
-                    append_mode_to_loss(outputs_2d, mode, suffix="2d")
-                    outputs.update(outputs_2d)
-                    if mode == "regression" and "diffusion" in self.train_2d_modes:
-                        batch["2d"]["regression_outputs"] = outputs_2d.copy()
-                    batch["2d"][f"{mode}_condition"] = outputs_2d[f"{mode}_condition"]
-
-        # Log
-        log_kwargs = {
-            "on_epoch": True,
-            "prog_bar": True,
-            "logger": True,
-            "sync_dist": True,
-            "batch_size": outputs["batch_size"],
-        }
-        self.log("train/loss", outputs["loss"], **log_kwargs)
-        for k, v in outputs.items():
-            if "_loss" in k:
-                self.log(f"{k}", v, **log_kwargs)
-
-        return outputs
-
     def init_condition_exists(self, batch):
         B, L = batch["obs"].shape[:2]
         f_condition_exists = dict()
-        if self.model_cfg.get("perframe_condition_exists", False):
+        # import ipdb; ipdb.set_trace()
+        if self.model_cfg.get("perframe_condition_exists", False) or True:
             f_condition_exists["obs"] = batch["obs"].view(B, L, -1).norm(dim=-1) > 1e-4
             f_condition_exists["f_cliffcam"] = f_condition_exists["obs"].clone()
             f_condition_exists["f_imgseq"] = (
@@ -332,10 +209,6 @@ class UNIMFM(pl.LightningModule):
                 for k in ["obs", "f_cliffcam", "f_imgseq"]:
                     f_condition_mask[k] = mask_img  # 1: not used, 0: used
                 batch["gen_only"] = mask_img
-            # else:
-            #     mask_img = has_text | has_audio | has_music
-            #     batch["gen_only"] = mask_img
-
             if mask_cam_prob > 0:
                 mask_cam = (has_text | has_music | has_audio) & (
                     torch.rand(batch["B"]) < mask_cam_prob
@@ -452,12 +325,6 @@ class UNIMFM(pl.LightningModule):
         batch["obs"] = obs
         batch["j2d_visible_mask"] = j2d_visible_mask
 
-        if "motion_3d_mask_cfg" in self.model_cfg:
-            mask_res = self.generate_motion_3d_mask(
-                self.model_cfg.motion_3d_mask_cfg, batch["target_x"], batch["length"]
-            )
-            batch.update(mask_res)
-
         if True:  # Use some detected vitpose (presave data)
             prob = 0.5
             mask_real_vitpose = (torch.rand(B).to(obs_kp2d) < prob) * batch["mask"][
@@ -487,10 +354,10 @@ class UNIMFM(pl.LightningModule):
         )
         outputs["batch_size"] = batch["B"]
         outputs["f_condition_mask"] = batch["f_condition_mask"]
-        outputs["gen_only"] = batch.get("gen_only", None)
+        outputs["text_only"] = batch.get("text_only", None)
         outputs[f"{mode}_condition"] = {
             "f_condition_mask": batch["f_condition_mask"],
-            "gen_only": batch.get("gen_only", None),
+            "text_only": batch.get("text_only", None),
         }
         return outputs
 
@@ -501,25 +368,6 @@ class UNIMFM(pl.LightningModule):
             batch["encoded_text"] = self.encode_text(
                 batch["caption"], batch["has_text"]
             )
-        if "music_embed" in batch:
-            batch["encoded_music"] = batch["music_embed"].cuda()
-        else:
-            batch["encoded_music"] = torch.zeros(
-                batch["obs"].shape[:2] + (self.pipeline.args.encoded_music_dim,),
-                device=batch["obs"].device,
-            )
-        if "audio_array" in batch:
-            encoded_audio = (
-                self.audio_encoder(batch["audio_array"].cuda().unsqueeze(1))
-                .transpose(1, 2)
-                .contiguous()
-            )
-            has_audio = batch["has_audio"]
-            encoded_audio[~has_audio] = 0
-            batch["encoded_audio"] = encoded_audio
-        else:
-            bs, T = batch["obs"].shape[:2]
-            batch["encoded_audio"] = torch.zeros(bs, T, 128, device=batch["obs"].device)
 
         batch["obs_kp2d_raw"] = batch["obs_kp2d"].squeeze(2).clone()
         obs_kp2d = batch["obs_kp2d"].squeeze(2)
@@ -580,29 +428,6 @@ class UNIMFM(pl.LightningModule):
         # mv2d_norm = torch.cat([mv2d_norm, (mv2d_norm[..., [11], :] + mv2d_norm[..., [12], :]) * 0.5], dim=-2)
         # draw_motion_2d((mv2d_norm[vis_ind, ..., :2].cpu() + 1.0) * 500, f"out/debug_vis/motionx_test_obs.mp4", coco_joint_parents, 1000, 1000, fps=30, mask=mv2d_norm[vis_ind, ..., 2].cpu())
         return batch
-
-    def train_2d_step(self, batch, batch_idx, mode):
-        batch = batch.copy()
-        for k, v in batch.items():
-            if isinstance(v, torch.Tensor):
-                # print(k, v.shape)
-                batch[k] = v.detach().clone()
-
-        cond_mask_cfg = self.model_cfg.get("condition_mask_2d", {})
-        self.create_condition_mask(batch, cond_mask_cfg, mode)
-
-        if mode in {"regression", "diffusion"}:
-            outputs = self.pipeline.forward_2d(
-                batch, train=True, global_step=self.trainer.global_step, mode=mode
-            )
-        outputs["batch_size"] = batch["B"]
-        outputs["f_condition_mask"] = batch["f_condition_mask"]
-        outputs["gen_only"] = batch.get("gen_only", None)
-        outputs[f"{mode}_condition"] = {
-            "f_condition_mask": batch["f_condition_mask"],
-            "gen_only": batch.get("gen_only", None),
-        }
-        return outputs
 
     def generate_mask(self, mask_cfg, orig_mask, length):
         _cfg = mask_cfg
@@ -665,95 +490,6 @@ class UNIMFM(pl.LightningModule):
                     mask[..., child] *= mask[..., parent]
         return mask
 
-    def generate_motion_3d_mask(
-        self, motion_mask_cfg, motion, length, use_mask_type=None, rng=None
-    ):
-        if rng is None:
-            rng = np.random
-        mask_type = use_mask_type
-        if "mask_probs" in motion_mask_cfg:
-            mask_probs = np.array(motion_mask_cfg.mask_probs) / np.sum(
-                motion_mask_cfg.mask_probs
-            )
-            if use_mask_type is not None:
-                mask_type = use_mask_type
-            else:
-                mask_type = rng.choice(motion_mask_cfg.mask_types, p=mask_probs)
-
-        if not isinstance(mask_type, list):
-            mask_type = [mask_type]
-
-        motion_mask = torch.zeros_like(motion)
-        rm_text_flag = torch.zeros(motion.shape[0], device=motion.device)
-        all_keyframe_idx = None
-
-        def get_keyframe_obs_ind(root_obs):
-            indices = []
-            for obs in root_obs:
-                indices.append(self.endecoder.get_obs_indices(obs))
-            indices = torch.cat(indices, dim=0)
-            return indices
-
-        def keyframes(_cfg):
-            nonlocal motion_mask, rm_text_flag, all_keyframe_idx
-            all_keyframe_idx = _cfg.get("keyframe_idx", None)
-            sample_keyframes = all_keyframe_idx is None
-            if sample_keyframes:
-                all_keyframe_idx = []
-            obs_ind = get_keyframe_obs_ind(_cfg.obs)
-            for i in range(motion.shape[0]):
-                if sample_keyframes:
-                    mlen = length if isinstance(length, int) else length[i].item()
-                    num_keyframes = rng.randint(
-                        _cfg.num_range[0], min(_cfg.num_range[1], mlen) + 1
-                    )
-                    keyframe_idx = rng.choice(mlen, num_keyframes, replace=False)
-                    all_keyframe_idx.append(keyframe_idx)
-                else:
-                    keyframe_idx = all_keyframe_idx[i]
-                for j in keyframe_idx:
-                    motion_mask[i, j, obs_ind] = 1.0
-            rm_text_flag = torch.from_numpy(
-                rng.binomial(1, _cfg.mask_text_prob, size=motion.shape[0])
-            ).to(motion.device)
-
-        def forecast(_cfg):
-            nonlocal motion_mask, rm_text_flag, all_keyframe_idx
-            min_len = _cfg.get("min_len", 1)
-            all_keyframe_idx = []
-            if "obs" in _cfg:
-                obs_ind = get_keyframe_obs_ind(_cfg.obs)
-            else:
-                obs_ind = np.arange(motion.shape[-1])
-            for i in range(motion.shape[0]):
-                mlen = length if isinstance(length, int) else length[i].item()
-                history_mlen = np.random.randint(min_len, mlen)
-                all_keyframe_idx.append(np.arange(history_mlen))
-                motion_mask[i, :history_mlen, obs_ind] = 1.0
-            rm_text_flag = torch.from_numpy(
-                rng.binomial(1, _cfg.mask_text_prob, size=motion.shape[0])
-            ).to(motion.device)
-
-        for mi, cur_mask_type in enumerate(mask_type):
-            # motion_mask is updated in place so can aggregate over all types
-            if cur_mask_type != "no_mask":
-                mask_cfg = motion_mask_cfg.get(cur_mask_type, {})
-                mask_func = locals()[mask_cfg.get("func", cur_mask_type)]
-                assert mask_func != "global_joints", (
-                    "multi-masking does not support global joints right now!"
-                )
-                mask_func(mask_cfg)
-
-        observed_motion = motion_mask * motion
-        res = {
-            "mask_type": "-".join(mask_type),
-            "motion_mask_3d": motion_mask,
-            "observed_motion_3d": observed_motion,
-            "rm_text_flag": rm_text_flag,
-            "all_3d_keyframe_idx": all_keyframe_idx,
-        }
-        return res
-
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         if "is_2d" in batch and batch["is_2d"][0]:
             return self.validation_2d(batch, batch_idx, dataloader_idx)
@@ -762,6 +498,8 @@ class UNIMFM(pl.LightningModule):
 
     def validation_2d(self, batch, batch_idx, dataloader_idx=0):
         do_postproc = self.trainer.state.stage == "test"  # Only apply postproc in test
+        if self.infer_version == 3:
+            do_postproc = False
         B = batch["obs_kp2d"].shape[0]
         obs_kp2d = batch["obs_kp2d"].squeeze(2)
         conf = batch["conf"]
@@ -803,33 +541,13 @@ class UNIMFM(pl.LightningModule):
         obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
         obs[~batch["mask"]] = 0
         batch["obs"] = obs
-        batch["eval_gen_only"] = batch["meta"][0].get("eval_gen_only", False)
+        batch["eval_text_only"] = batch["meta"][0].get("eval_text_only", False)
         if "text_embed" in batch:
             batch["encoded_text"] = batch["text_embed"].cuda()
         elif self.use_text_encoder:
             batch["encoded_text"] = self.encode_text(
                 batch["caption"], batch["has_text"]
             )
-        if "music_embed" in batch:
-            batch["encoded_music"] = batch["music_embed"].cuda()
-        else:
-            batch["encoded_music"] = torch.zeros(
-                batch["obs"].shape[:2] + (self.pipeline.args.encoded_music_dim,),
-                device=batch["obs"].device,
-            )
-        if "audio_array" in batch:
-            encoded_audio = (
-                self.audio_encoder(batch["audio_array"].cuda().unsqueeze(1))
-                .transpose(1, 2)
-                .contiguous()
-            )
-            has_audio = batch["has_audio"]
-            encoded_audio[~has_audio] = 0
-            batch["encoded_audio"] = encoded_audio
-        else:
-            bs, T = batch["obs"].shape[:2]
-            batch["encoded_audio"] = torch.zeros(bs, T, 128, device=batch["obs"].device)
-
         if "cam_angvel" not in batch:
             batch["cam_angvel"] = torch.zeros(
                 batch["obs"].shape[:2] + (6,), device=batch["obs"].device
@@ -852,10 +570,124 @@ class UNIMFM(pl.LightningModule):
             outputs["2d_pred_smpl_params_incam"] = {
                 k: v[0] for k, v in outputs["2d_pred_smpl_params_incam"].items()
             }
-        outputs["eval_gen_only"] = batch["eval_gen_only"]
+        outputs["eval_text_only"] = batch["eval_text_only"]
         outputs["batch"] = batch
         outputs["vis_2d"] = self.model_cfg.get("vis_2d", False)
         return outputs
+
+    @torch.no_grad()
+    def predict(self, data, static_cam=False):
+        # ROPE inference
+        eval_gen_only = data["meta"][0].get("eval_gen_only", False)
+        batch = {
+            "length": data["length"][None],
+            "obs": normalize_kp2d(data["kp2d"], data["bbx_xys"])[None],
+            "bbx_xys": data["bbx_xys"][None],
+            "K_fullimg": data["K_fullimg"][None],
+            "cam_angvel": data["cam_angvel"][None],
+            "cam_tvel": data["cam_tvel"][None],
+            "R_w2c": data["R_w2c"][None],
+            "f_imgseq": data["f_imgseq"][None],
+        }
+        batch = {k: v.cuda() for k, v in batch.items()}
+        if "meta" in data:
+            batch["meta"] = data["meta"]
+        else:
+            batch["meta"] = None
+        if "eval_gen_only_mask" in data:
+            batch["eval_gen_only_mask"] = data["eval_gen_only_mask"][None].cuda()
+        batch["eval_gen_only"] = eval_gen_only
+        if "vimo_smpl_params" in data:
+            batch["vimo_smpl_params"] = {
+                k: v[None].cuda() for k, v in data["vimo_smpl_params"].items()
+            }
+            batch["scales"] = data["scales"][None].cuda()
+            batch["mean_scale"] = torch.tensor(data["mean_scale"])[None].cuda()
+
+        if "text_embed" in batch:
+            batch["encoded_text"] = batch["text_embed"].cuda()
+        else:
+            if "caption" in data:
+                batch["caption"] = [data["caption"]]
+            else:
+                batch["caption"] = [""]
+            batch["has_text"] = torch.tensor([True])
+            batch["encoded_text"] = self.encode_text(
+                batch["caption"], batch["has_text"]
+            )
+
+        if "music_embed" in batch:
+            batch["encoded_music"] = batch["music_embed"].cuda()
+        else:
+            batch["encoded_music"] = torch.zeros(
+                batch["obs"].shape[:2] + (self.pipeline.args.encoded_music_dim,),
+                device=batch["obs"].device,
+            )
+        if "multi_text_data" in batch["meta"][0]:
+            if "text_embed" not in batch["meta"][0]["multi_text_data"]:
+                multi_text_data = batch["meta"][0]["multi_text_data"]
+                num_text = len(multi_text_data["caption"])
+                text_embed = self.encode_text(
+                    multi_text_data["caption"], torch.tensor([True] * num_text)
+                )
+                batch["meta"][0]["multi_text_data"]["text_embed"] = text_embed
+
+        self.init_condition_exists(batch)
+
+        if self.pipeline.args.infer_version == 3:
+            postproc = False
+        else:
+            postproc = True
+        outputs = self.pipeline.forward(
+            batch, train=False, postproc=postproc, static_cam=static_cam
+        )
+
+        pred = {
+            "smpl_params_global": {
+                k: v[0] for k, v in outputs["pred_smpl_params_global"].items()
+            },
+            "smpl_params_incam": {
+                k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()
+            },
+            "K_fullimg": data["K_fullimg"],
+            "net_outputs": outputs,  # intermediate outputs
+        }
+        return pred
+
+    def encode_text(self, raw_text, has_text=None):
+        # raw_text - list (batch_size length) of strings with input text prompts
+        device = next(self.parameters()).device
+        with torch.no_grad():
+            with torch.cuda.amp.autocast(enabled=False):
+                max_text_len = self.max_text_len
+
+                encoded = self.tokenizer.batch_encode_plus(
+                    raw_text,
+                    return_tensors="pt",
+                    padding="max_length",
+                    max_length=max_text_len,
+                    truncation=True,
+                )
+                # We expect all the processing is done in GPU.
+                input_ids = encoded.input_ids.to(device)
+                attn_mask = encoded.attention_mask.to(device)
+
+                with torch.no_grad():
+                    output = self.text_encoder[0](
+                        input_ids=input_ids, attention_mask=attn_mask
+                    )
+                    encoded_text = output.last_hidden_state.detach()
+
+                encoded_text = encoded_text[:, :max_text_len]
+                attn_mask = attn_mask[:, :max_text_len]
+                encoded_text *= attn_mask.unsqueeze(-1)
+                # for bnum in range(encoded_text.shape[0]):
+                #     nvalid_elem = attn_mask[bnum].sum().item()
+                #     encoded_text[bnum][nvalid_elem:] = 0
+        if has_text is not None:
+            no_text = ~has_text
+            encoded_text[no_text] = 0
+        return encoded_text
 
     def validation_3d(self, batch, batch_idx, dataloader_idx=0):
         # Options & Check
@@ -873,6 +705,8 @@ class UNIMFM(pl.LightningModule):
         assert batch["B"] == 1, "Only support batch size 1 in evalution."
         infer_version = self.pipeline.args.get("infer_version", 2)
 
+        if infer_version == 3:
+            do_postproc = False
         # ROPE inference
         obs = normalize_kp2d(batch["kp2d"], batch["bbx_xys"])
 
@@ -892,8 +726,7 @@ class UNIMFM(pl.LightningModule):
                 mask = mask["valid"]
             obs[0, ~mask[0]] = 0
 
-        eval_gen_only = batch["meta"][0].get("eval_gen_only", False)
-        mode = batch["meta"][0].get("mode", "default")
+        eval_text_only = batch["meta"][0].get("eval_text_only", False)
         batch_ = {
             "length": batch["length"],
             "obs": obs,
@@ -901,8 +734,7 @@ class UNIMFM(pl.LightningModule):
             "K_fullimg": batch["K_fullimg"],
             "cam_angvel": batch["cam_angvel"],
             "f_imgseq": batch["f_imgseq"],
-            "eval_gen_only": eval_gen_only,
-            "mode": mode,
+            "eval_text_only": eval_text_only,
             "meta": batch["meta"],
         }
         if infer_version == 3:
@@ -922,82 +754,6 @@ class UNIMFM(pl.LightningModule):
             batch_["encoded_text"] = self.encode_text(
                 batch["caption"], batch["has_text"]
             )
-        if "music_embed" in batch:
-            batch_["encoded_music"] = batch["music_embed"].cuda()
-        else:
-            batch_["encoded_music"] = torch.zeros(
-                batch["obs"].shape[:2] + (self.pipeline.args.encoded_music_dim,),
-                device=batch["obs"].device,
-            )
-        if "audio_array" in batch:
-            encoded_audio = (
-                self.audio_encoder(batch["audio_array"].cuda().unsqueeze(1))
-                .transpose(1, 2)
-                .contiguous()
-            )
-            has_audio = batch["has_audio"]
-            encoded_audio[~has_audio] = 0
-            batch_["encoded_audio"] = encoded_audio
-        else:
-            bs, T = batch["obs"].shape[:2]
-            batch_["encoded_audio"] = torch.zeros(
-                bs, T, 128, device=batch["obs"].device
-            )
-
-        if mode == "infilling":
-            batch["target_x"] = self.endecoder.encode(batch)  # (B, L, C)
-            rng = np.random.RandomState(
-                batch["meta"][0].get("eval_seed", 7) + batch_idx
-            )
-            assert "motion_3d_mask_cfg" in self.model_cfg
-            all_mask_types = [
-                x
-                for x in self.model_cfg.motion_3d_mask_cfg.mask_types
-                if x != "no_mask"
-            ]
-            use_mask_type = all_mask_types[batch_idx % len(all_mask_types)]
-            mask_res = self.generate_motion_3d_mask(
-                self.model_cfg.motion_3d_mask_cfg,
-                batch["target_x"],
-                batch["length"],
-                rng=rng,
-                use_mask_type=use_mask_type,
-            )
-            batch_.update(mask_res)
-
-        if "inpainting_3d" in self.model_cfg:
-            batch_["observed_motion_3d"] = self.endecoder.encode(batch)
-            motion_mask_3d = torch.zeros_like(batch_["observed_motion_3d"]).cuda()
-            L = batch["length"][0]
-            keyframes = [i for i in range(L)]
-            if self.model_cfg["inpainting_3d"]["mode"] == "body_pose_dense":
-                motion_mask_3d[:, :, : 126 + 10] = 1
-            elif self.model_cfg["inpainting_3d"]["mode"] == "body_pose_root_rot_dense":
-                motion_mask_3d[:, :, : 126 + 10 + 12] = 1
-            elif (
-                self.model_cfg["inpainting_3d"]["mode"]
-                == "body_pose_root_rot_keyframe2"
-            ):
-                # keyframes = [0, L-1] # start and fix end
-                keyframes = [
-                    0,
-                    np.random.choice(keyframes[L // 2 :], 1)[0],
-                ]  # start and random end
-                motion_mask_3d[:, keyframes, : 126 + 10 + 12] = 1
-            elif (
-                self.model_cfg["inpainting_3d"]["mode"]
-                == "body_pose_root_rot_keyframe5"
-            ):
-                keyframes = [int((L - 1) * i / 4) for i in range(5)]
-                motion_mask_3d[:, keyframes, : 126 + 10 + 12] = 1
-            elif self.model_cfg["inpainting_3d"]["mode"] == "root_rot_vel_dense":
-                motion_mask_3d[:, :, 126:] = 1
-            else:
-                raise ValueError(
-                    f"Unknown inpainting mode [{self.model_cfg['inpainting_3d']['mode']}]"
-                )
-            batch_["motion_mask_3d"] = motion_mask_3d
-            batch["keyframes"] = keyframes
         self.init_condition_exists(batch_)
         outputs = self.pipeline.forward(
             batch_,
@@ -1012,9 +768,7 @@ class UNIMFM(pl.LightningModule):
             outputs["pred_smpl_params_incam"] = {
                 k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()
             }
-        outputs["eval_gen_only"] = eval_gen_only
-        if mode == "infilling":
-            outputs.update(mask_res)
+        outputs["eval_text_only"] = eval_text_only
 
         if do_flip_test:
             flip_test = batch["flip_test"]
@@ -1047,30 +801,6 @@ class UNIMFM(pl.LightningModule):
                 batch_["encoded_text"] = self.encode_text(
                     batch["caption"], batch["has_text"]
                 )
-
-            if "music_embed" in batch:
-                batch_["encoded_music"] = batch["music_embed"].cuda()
-            else:
-                batch_["encoded_music"] = torch.zeros(
-                    batch["obs"].shape[:2] + (self.pipeline.args.encoded_music_dim,),
-                    device=batch["obs"].device,
-                )
-
-            if "audio_array" in batch:
-                encoded_audio = (
-                    self.audio_encoder(batch["audio_array"].cuda().unsqueeze(1))
-                    .transpose(1, 2)
-                    .contiguous()
-                )
-                has_audio = batch["has_audio"]
-                encoded_audio[~has_audio] = 0
-                batch_["encoded_audio"] = encoded_audio
-            else:
-                bs, T = batch["obs"].shape[:2]
-                batch_["encoded_audio"] = torch.zeros(
-                    bs, T, 128, device=batch["obs"].device
-                )
-
             self.init_condition_exists(batch_)
             flipped_outputs = self.pipeline.forward(
                 batch_, train=False, global_step=global_step
@@ -1167,11 +897,8 @@ class UNIMFM(pl.LightningModule):
 
 
 unimfm = builds(
-    UNIMFM,
+    UNIMFM_demo,
     pipeline="${pipeline}",
-    optimizer="${optimizer}",
-    scheduler_cfg="${scheduler_cfg}",
     model_cfg="${model_cfg}",
-    populate_full_signature=True,  # Adds all the arguments to the signature
 )
-MainStore.store(name="unimfm", node=unimfm, group="model/gvhmr")
+MainStore.store(name="unimfm_demo", node=unimfm, group="model/gvhmr")
