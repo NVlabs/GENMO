@@ -71,41 +71,60 @@ class VisHumanoid(pl.Callback):
         if dataset_id not in ["humanml3d"]:  # Only process humanoid dataset
             return
 
-        # # Move models to GPU if needed
-        # for g in ["male", "female", "neutral"]:
-        #     self.smplx_model[g] = self.smplx_model[g].cuda()
-        # self.smplx = self.smplx.cuda()
-        # self.J_regressor = self.J_regressor.cuda()
-        # self.smplx2smpl = self.smplx2smpl.cuda()
+        # Move to cuda if not
+        for g in ["male", "female", "neutral"]:
+            self.smplx_model[g] = self.smplx_model[g].cuda()
+        self.smplx = self.smplx.cuda()
+        self.J_regressor = self.J_regressor.cuda()
+        self.smplx2smpl = self.smplx2smpl.cuda()
 
-        # # Get sequence info
-        # seq_id = batch["meta"][0].get("seq_id", "unknown")
-        # seq_length = batch["length"][0].item()
-        # gender = "neutral"
+        # print(batch_idx)
+        # os.makedirs('out/motions', exist_ok=True)
+        # torch.save(outputs, f'out/motions/outputs_{batch_idx}.pt')
+        # if 'multi_text_data' in batch['meta'][0]:
+        #     multi_text_data = batch['meta'][0]['multi_text_data']
+        #     for i in range(len(multi_text_data['vid'])):
+        #         print(multi_text_data['vid'][i], multi_text_data['caption'][i])
 
-        # # Process predictions
-        # pred_smpl_params_global = outputs["pred_smpl_params_global"]
-        # pred_ay_j3d = self.smplx_model["neutral"](**pred_smpl_params_global)
+        text = batch["caption"][0]
+        vid = text.replace(" ", "_").replace(".", "_").replace(",", "_")
+        seq_length = batch["length"][0].item()
+        gender = "neutral"
+        smpl_key = (
+            "2d_pred_smpl_params_global"
+            if dataset_id == "motion-x++2d"
+            else "pred_smpl_params_global"
+        )
 
-        # # Get ground truth if available
-        # target_w_j3d = None
-        # if "smpl_params_w" in batch:
-        #     target_w_params = {k: v[0] for k, v in batch["smpl_params_w"].items()}
-        #     target_w_j3d = self.smplx_model[gender](**target_w_params)
-        #     offset = batch["smpl_params_w"]["transl"][0, :, None] - target_w_j3d[:, [0]]
-        #     target_w_j3d = target_w_j3d + offset
+        # Groundtruth (world, cam)
+        if dataset_id == "humanml3d":
+            target_w_params = {k: v[0] for k, v in batch["smpl_params_w"].items()}
+            target_w_j3d = self.smplx_model[gender](**target_w_params)
+            offset = batch["smpl_params_w"]["transl"][0, :, None] - target_w_j3d[:, [0]]
+            target_w_j3d = target_w_j3d + offset
+            # target_w_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in target_w_output.vertices])
+            # target_w_j3d = torch.matmul(self.J_regressor, target_w_verts)
+        else:
+            target_w_j3d = None
 
-        # # Visualize
-        # if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
-        #     wandb_dict = visualize_smpl_scene(
-        #         f"vis_humanoid_global",
-        #         batch_idx,
-        #         seq_id,
-        #         pred_ay_j3d,
-        #         target_w_j3d,
-        #         transform_mode="global",
-        #     )
-        #     self.wandb_html_dict.update(wandb_dict)
+        # 2. ay
+        pred_smpl_params_global = outputs[smpl_key]
+        pred_ay_j3d = self.smplx_model["neutral"](**pred_smpl_params_global)[0]
+        # pred_ay_verts = torch.stack([torch.matmul(self.smplx2smpl, v_) for v_ in smpl_out.vertices])
+        # pred_ay_j3d = einsum(self.J_regressor, pred_ay_verts, "j v, l v i -> l j i")
+
+        # Visualize
+        if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
+            wandb_dict = visualize_smpl_scene(
+                f"vis_text_global_{dataset_id}",
+                batch_idx,
+                vid,
+                pred_ay_j3d,
+                target_w_j3d,
+                transform_mode="global",
+            )
+            self.wandb_html_dict.update(wandb_dict)
+        return
 
     def on_predict_epoch_start(self, trainer, pl_module):
         """Initialize visualization dictionary at start of epoch"""

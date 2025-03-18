@@ -64,6 +64,7 @@ class NetworkEncoderRoPE(nn.Module):
         input_remove_condition=False,
         allow_autoregressive=True,
         separate_humanoid_action=False,
+        action_pred_source="context",
         **kwargs,
     ):
         super().__init__()
@@ -91,6 +92,7 @@ class NetworkEncoderRoPE(nn.Module):
         self.input_remove_condition = input_remove_condition
         self.allow_autoregressive = allow_autoregressive
         self.separate_humanoid_action = separate_humanoid_action
+        self.action_pred_source = action_pred_source
 
         # ===== build model ===== #
         # Input (Kp2d)
@@ -180,8 +182,18 @@ class NetworkEncoderRoPE(nn.Module):
         self.add_cond_linear = nn.Linear(xt_dim + self.latent_dim, self.latent_dim)
 
         # Add MLP for merging x and humanoid_obs
+        if self.action_pred_source == "context":
+            context_dim = self.latent_dim
+        elif self.action_pred_source == "task_obs":
+            context_dim = 576
+        elif self.action_pred_source == "sample":
+            context_dim = self.output_dim
+        elif self.action_pred_source == "target_x":
+            context_dim = self.output_dim
+        else:
+            raise ValueError(f"Invalid action_pred_source {self.action_pred_source}")
         self.clean_action_mlp = Mlp(
-            self.latent_dim + 358, hidden_features=2 * self.latent_dim, out_features=69
+            context_dim + 358, hidden_features=2 * self.latent_dim, out_features=69
         )
 
         self.avgbeta = avgbeta
@@ -345,9 +357,24 @@ class NetworkEncoderRoPE(nn.Module):
         if self.static_conf_head:
             static_conf_logits = self.static_conf_head(x)  # (B, L, C')
 
-        if "humanoid_obs" in inputs["f_condition"]:
-            humanoid_obs = inputs["f_condition"]["humanoid_obs"][:, :L]
-            clean_action = self.predict_action(x, humanoid_obs)
+        if "humanoid_obs" in inputs:
+            humanoid_obs = inputs["humanoid_obs"][:, :L]
+            if self.action_pred_source == "context":
+                clean_action = self.predict_action(x, humanoid_obs)
+            elif self.action_pred_source == "task_obs":
+                clean_action = self.predict_action(
+                    inputs["humanoid_task_obs"][:, :L], humanoid_obs
+                )
+            elif self.action_pred_source == "sample":
+                clean_action = self.predict_action(sample, humanoid_obs)
+            elif self.action_pred_source == "target_x":
+                clean_action = self.predict_action(
+                    inputs["target_x"][:, :L], humanoid_obs
+                )
+            else:
+                raise ValueError(
+                    f"Invalid action_pred_source {self.action_pred_source}"
+                )
             if not self.separate_humanoid_action:
                 sample = torch.cat([sample, clean_action], dim=-1)
         else:

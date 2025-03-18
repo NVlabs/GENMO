@@ -996,7 +996,7 @@ class UNIMFM(pl.LightningModule):
     def validation_humanoid(self, batch, test_mode, batch_idx, dataloader_idx=0):
         """Validation step for humanoid motion data from PHC dataset."""
         B = self.humanoid.env.num_envs
-        L = 300
+        L = self.pipeline.args.get("test_motion_len", 300)
         device = "cuda"
 
         # Prepare model inputs
@@ -1009,6 +1009,7 @@ class UNIMFM(pl.LightningModule):
             "length": torch.tensor([L] * B).to(device),
             "device": device,
             "multi_text_embed": torch.zeros(B, 50, 50, 1024).to(device),
+            "cam_angvel": torch.zeros(B, L, 6).to(device),
             "text_label_ids": torch.zeros(B, L).long().to(device),
             "has_humanoid_data": torch.tensor([True] * B).to(device),
             "eval_text_only": batch["meta"][0].get("eval_text_only", False),
@@ -1022,6 +1023,7 @@ class UNIMFM(pl.LightningModule):
             inputs,
             train=False,
             test_mode=test_mode,
+            postproc=True,
         )
 
         return outputs

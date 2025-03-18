@@ -120,11 +120,13 @@ class Pipeline(nn.Module):
             inputs["f_cam_angvel"] = f_cam_angvel
 
         f_condition = dict()
+        for k in self.normalizer_stats:
+            if k in inputs:
+                inputs[k] = self.normalize_attr(inputs[k], k)
+
         for k in self.args.in_attr:
             if k in inputs:
                 f_condition[k] = inputs[k]
-                if k in self.normalizer_stats:
-                    f_condition[k] = self.normalize_attr(f_condition[k], k)
             else:
                 f_condition[k] = torch.zeros(B, L, *self.f_condition_dim[k]).to(
                     inputs["device"]
@@ -196,8 +198,10 @@ class Pipeline(nn.Module):
             ]
             outputs["intermediate_decode_dict"] = int_decode_dict
 
-        # Post-processing
-        if "gvhmr" in self.endecoder.feature_arr and "humanoid" not in test_mode:
+        # Post-processing``
+        if "gvhmr" in self.endecoder.feature_arr and not (
+            type(test_mode) == str and "humanoid" in test_mode
+        ):
             outputs["pred_smpl_params_incam"] = {
                 "body_pose": decode_dict["body_pose"],  # (B, L, 63)
                 "betas": decode_dict["betas"],  # (B, L, 10)
@@ -225,111 +229,104 @@ class Pipeline(nn.Module):
             # if eval_text_only:
             #     inputs["cam_angvel"] = torch.zeros(decode_dict["global_orient_gv"].shape[:2] + (6,), device=decode_dict["global_orient_gv"].device)
             if "gvhmr" in self.endecoder.feature_arr:
-                if "humanoid" not in test_mode:
-                    if self.args.get("infer_version", 2) == 2:
-                        pred_smpl_params_global = (
-                            get_smpl_params_w_Rt_v2(  # This function has for-loop
-                                global_orient_gv=decode_dict["global_orient_gv"],
-                                local_transl_vel=decode_dict["local_transl_vel"],
-                                global_orient_c=decode_dict["global_orient"],
-                                cam_angvel=inputs["cam_angvel"],
-                            )
-                        )
-                        outputs["pred_smpl_params_global"] = {
-                            "body_pose": decode_dict["body_pose"],
-                            "betas": decode_dict["betas"],
-                            **pred_smpl_params_global,
-                        }
-                        if "intermediate_decode_dict" in outputs:
-                            intermediate_pred_smpl_params_global = []
-                            for int_decode_dict in outputs["intermediate_decode_dict"]:
-                                pred_smpl_params_global = get_smpl_params_w_Rt_v2(
-                                    global_orient_gv=int_decode_dict[
-                                        "global_orient_gv"
-                                    ],
-                                    local_transl_vel=int_decode_dict[
-                                        "local_transl_vel"
-                                    ],
-                                    global_orient_c=int_decode_dict["global_orient"],
-                                    cam_angvel=inputs["cam_angvel"],
-                                )
-                                pred_smpl_params_global = {
-                                    "body_pose": int_decode_dict["body_pose"],
-                                    "betas": int_decode_dict["betas"],
-                                    **pred_smpl_params_global,
-                                }
-                                intermediate_pred_smpl_params_global.append(
-                                    pred_smpl_params_global
-                                )
-                            outputs["intermediate_pred_smpl_params_global"] = (
-                                intermediate_pred_smpl_params_global
-                            )
-                    elif self.args.get("infer_version", 2) == 3:
-                        if "vimo_smpl_params" in inputs:
-                            vimo_smpl_params = inputs["vimo_smpl_params"]
-                            transl_c = vimo_smpl_params["pred_trans_c"].squeeze(2)
-                            # transl_c = outputs["pred_smpl_params_incam"]["transl"]
-                            slam_scales = inputs["scales"]
-                            mean_scale = inputs["mean_scale"]
-                            std_slam_scales = slam_scales.std(dim=-1, keepdim=True)
-                            conf_scales = (
-                                slam_scales - mean_scale
-                            ).abs() < std_slam_scales
-                        else:
-                            transl_c = outputs["pred_smpl_params_incam"]["transl"]
-                            conf_scales = None
-
-                        if "cam_angvel" in self.args.out_attr:
-                            cam_angvel = model_output["cam_angvel"]
-                        else:
-                            cam_angvel = inputs["cam_angvel"]
-
-                        if "cam_t_vel" in self.args.out_attr:
-                            cam_tvel = model_output["pred_cam_t_vel"]
-                        else:
-                            cam_tvel = inputs["cam_tvel"]
-
-                        if "cam_scale" in self.args.out_attr:
-                            cam_scale = model_output["pred_cam_scale"]
-                            cam_tvel = inputs["cam_tvel"] * cam_scale
-
-                        (
-                            pred_smpl_params_global,
-                            pred_T_w2c,
-                            pred_smpl_params_body_pose,
-                            static_conf_logits,
-                        ) = get_smpl_params_w_Rt_v3(  # This function has for-loop
-                            endecoder=self.endecoder,
+                if self.args.get("infer_version", 2) == 2:
+                    pred_smpl_params_global = (
+                        get_smpl_params_w_Rt_v2(  # This function has for-loop
                             global_orient_gv=decode_dict["global_orient_gv"],
                             local_transl_vel=decode_dict["local_transl_vel"],
-                            local_transl_c=transl_c,
                             global_orient_c=decode_dict["global_orient"],
-                            offset=decode_dict["offset"],
-                            cam_angvel=cam_angvel,
-                            cam_tvel=cam_tvel,
-                            slam_R_w2c=inputs["R_w2c"],
-                            static_conf_logits=model_output["static_conf_logits"],
-                            conf_scales=conf_scales,
-                            betas=decode_dict["betas"],
-                            body_pose=decode_dict["body_pose"],
-                            slam_scales=slam_scales,
-                            mean_scale=mean_scale,
+                            cam_angvel=inputs["cam_angvel"],
                         )
-                        outputs["pred_T_w2c"] = pred_T_w2c
-                        outputs["pred_smpl_params_global"] = {
-                            # "body_pose": decode_dict["body_pose"],
-                            "body_pose": pred_smpl_params_body_pose,
-                            "betas": decode_dict["betas"],
-                            **pred_smpl_params_global,
-                        }
-                        model_output["static_conf_logits"] = static_conf_logits
-                        decode_dict["body_pose"] = pred_smpl_params_body_pose
-                        outputs["pred_smpl_params_global"]["body_pose"] = (
-                            pred_smpl_params_body_pose
+                    )
+                    outputs["pred_smpl_params_global"] = {
+                        "body_pose": decode_dict["body_pose"],
+                        "betas": decode_dict["betas"],
+                        **pred_smpl_params_global,
+                    }
+                    if "intermediate_decode_dict" in outputs:
+                        intermediate_pred_smpl_params_global = []
+                        for int_decode_dict in outputs["intermediate_decode_dict"]:
+                            pred_smpl_params_global = get_smpl_params_w_Rt_v2(
+                                global_orient_gv=int_decode_dict["global_orient_gv"],
+                                local_transl_vel=int_decode_dict["local_transl_vel"],
+                                global_orient_c=int_decode_dict["global_orient"],
+                                cam_angvel=inputs["cam_angvel"],
+                            )
+                            pred_smpl_params_global = {
+                                "body_pose": int_decode_dict["body_pose"],
+                                "betas": int_decode_dict["betas"],
+                                **pred_smpl_params_global,
+                            }
+                            intermediate_pred_smpl_params_global.append(
+                                pred_smpl_params_global
+                            )
+                        outputs["intermediate_pred_smpl_params_global"] = (
+                            intermediate_pred_smpl_params_global
                         )
-                        outputs["pred_smpl_params_incam"]["body_pose"] = (
-                            pred_smpl_params_body_pose
-                        )
+                elif self.args.get("infer_version", 2) == 3:
+                    if "vimo_smpl_params" in inputs:
+                        vimo_smpl_params = inputs["vimo_smpl_params"]
+                        transl_c = vimo_smpl_params["pred_trans_c"].squeeze(2)
+                        # transl_c = outputs["pred_smpl_params_incam"]["transl"]
+                        slam_scales = inputs["scales"]
+                        mean_scale = inputs["mean_scale"]
+                        std_slam_scales = slam_scales.std(dim=-1, keepdim=True)
+                        conf_scales = (slam_scales - mean_scale).abs() < std_slam_scales
+                    else:
+                        transl_c = outputs["pred_smpl_params_incam"]["transl"]
+                        conf_scales = None
+
+                    if "cam_angvel" in self.args.out_attr:
+                        cam_angvel = model_output["cam_angvel"]
+                    else:
+                        cam_angvel = inputs["cam_angvel"]
+
+                    if "cam_t_vel" in self.args.out_attr:
+                        cam_tvel = model_output["pred_cam_t_vel"]
+                    else:
+                        cam_tvel = inputs["cam_tvel"]
+
+                    if "cam_scale" in self.args.out_attr:
+                        cam_scale = model_output["pred_cam_scale"]
+                        cam_tvel = inputs["cam_tvel"] * cam_scale
+
+                    (
+                        pred_smpl_params_global,
+                        pred_T_w2c,
+                        pred_smpl_params_body_pose,
+                        static_conf_logits,
+                    ) = get_smpl_params_w_Rt_v3(  # This function has for-loop
+                        endecoder=self.endecoder,
+                        global_orient_gv=decode_dict["global_orient_gv"],
+                        local_transl_vel=decode_dict["local_transl_vel"],
+                        local_transl_c=transl_c,
+                        global_orient_c=decode_dict["global_orient"],
+                        offset=decode_dict["offset"],
+                        cam_angvel=cam_angvel,
+                        cam_tvel=cam_tvel,
+                        slam_R_w2c=inputs["R_w2c"],
+                        static_conf_logits=model_output["static_conf_logits"],
+                        conf_scales=conf_scales,
+                        betas=decode_dict["betas"],
+                        body_pose=decode_dict["body_pose"],
+                        slam_scales=slam_scales,
+                        mean_scale=mean_scale,
+                    )
+                    outputs["pred_T_w2c"] = pred_T_w2c
+                    outputs["pred_smpl_params_global"] = {
+                        # "body_pose": decode_dict["body_pose"],
+                        "body_pose": pred_smpl_params_body_pose,
+                        "betas": decode_dict["betas"],
+                        **pred_smpl_params_global,
+                    }
+                    model_output["static_conf_logits"] = static_conf_logits
+                    decode_dict["body_pose"] = pred_smpl_params_body_pose
+                    outputs["pred_smpl_params_global"]["body_pose"] = (
+                        pred_smpl_params_body_pose
+                    )
+                    outputs["pred_smpl_params_incam"]["body_pose"] = (
+                        pred_smpl_params_body_pose
+                    )
             elif "body_pose" in decode_dict:
                 outputs["pred_smpl_params_global"] = {
                     "body_pose": decode_dict["body_pose"],
@@ -343,7 +340,6 @@ class Pipeline(nn.Module):
             if (
                 postproc
                 and "gvhmr" in self.endecoder.feature_arr
-                and "humanoid" not in test_mode
                 and self.args.get("infer_version", 2) != 3
             ):  # apply post-processing
                 if static_cam:  # extra post-processing to utilize static camera prior
@@ -368,7 +364,8 @@ class Pipeline(nn.Module):
                 body_pose = process_ik(outputs, self.endecoder)
                 decode_dict["body_pose"] = body_pose
                 outputs["pred_smpl_params_global"]["body_pose"] = body_pose
-                outputs["pred_smpl_params_incam"]["body_pose"] = body_pose
+                if "pred_smpl_params_incam" in outputs:
+                    outputs["pred_smpl_params_incam"]["body_pose"] = body_pose
 
             return outputs
 

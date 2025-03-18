@@ -65,6 +65,8 @@ class Humanml3dDataset(BaseDataset):
         eval_seed=None,
         humanoid_data_dir=None,
         humanoid_noise_seq=None,
+        humanoid_separate_task_obs=False,
+        humanoid_self_obs_dim=358,
         discard_last_frame=False,
     ):
         self.root = Path("inputs/HumanML3D_SMPL/hmr4d_support")
@@ -113,6 +115,8 @@ class Humanml3dDataset(BaseDataset):
         self.humanoid_data_dir = humanoid_data_dir
         self.humanoid_noise_seq = humanoid_noise_seq
         self.has_humanoid_data = humanoid_data_dir is not None
+        self.humanoid_separate_task_obs = humanoid_separate_task_obs
+        self.humanoid_self_obs_dim = humanoid_self_obs_dim
         self.discard_last_frame = discard_last_frame
         super().__init__(cam_augmentation, limit_size)
         if self.use_multi_text:
@@ -517,6 +521,13 @@ class Humanml3dDataset(BaseDataset):
         if self.has_humanoid_data:
             return_data["humanoid_obs"] = humanoid_obs
             return_data["humanoid_clean_action"] = humanoid_clean_action
+            if self.humanoid_separate_task_obs:
+                return_data["humanoid_obs"] = humanoid_obs[
+                    :, : self.humanoid_self_obs_dim
+                ]
+                return_data["humanoid_task_obs"] = humanoid_obs[
+                    :, self.humanoid_self_obs_dim :
+                ]
 
         # Batchable
         return_data["smpl_params_c"] = repeat_to_max_len_dict(
@@ -644,6 +655,19 @@ MainStore.store(
         split="train",
         humanoid_data_dir="inputs/humanoid/data/traj_im_v1",
         humanoid_noise_seq=["noise_0", "noise_0.07"],
+        discard_last_frame=True,
+    ),
+    group=train_group_name,
+)
+MainStore.store(
+    name="humanoid_train_im_v1_taskobs",
+    node=builds(
+        Humanml3dDataset,
+        cam_augmentation="static",
+        split="train",
+        humanoid_data_dir="inputs/humanoid/data/traj_im_v1",
+        humanoid_noise_seq=["noise_0", "noise_0.07"],
+        humanoid_separate_task_obs=True,
         discard_last_frame=True,
     ),
     group=train_group_name,
