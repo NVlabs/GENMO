@@ -1,0 +1,172 @@
+defaults:
+  - /diffusion@model_cfg.diffusion: ddim
+  - model: gvhmr/unimfm_demo
+  - endecoder: gvhmr/v1_amass_local_bedlam_cam
+  - _self_
+multicond_args: null
+
+model_cfg:
+  train_3d_modes: ["regression", "diffusion"]
+  train_2d_modes: ["regression", "diffusion"]
+  start_2d_training_steps: 0
+  noisy_2d_obs: true
+  kp2d_noise_scale: 0.5
+
+  diffusion:
+    test_timestep_respacing: "5"
+    guidance_param: 2.5
+
+  text_encoder:
+    load_llm: true
+    llm_version: "t5-3b"
+    max_text_len: 50
+
+  condition_mask:
+    mask_img_prob: 1.0
+    mask_cam_prob: 1.0
+    reuse_regression_mask: false
+    regression_no_img_mask: true
+
+  condition_mask_2d:
+    mask_text_prob:
+      regression: 0.5
+      diffusion: 0.0
+    mask_img_prob: 1.0
+    mask_cam_prob: 1.0
+    reuse_regression_mask: false
+    regression_no_img_mask: true
+
+  mask_cfg:
+    drop_prob: 0.75
+    max_num_drops: 3
+    min_drop_nframes: 1
+    max_drop_nframes: 30
+  body_mask_cfg:
+    drop_prob: 0.75
+    joint_drop_prob: 0.25
+    max_num_drops: 3
+    min_drop_nframes: 1
+    max_drop_nframes: 30
+
+pipeline:
+  _target_: hmr4d.model.gvhmr.pipeline.unimfm_pipeline.Pipeline
+  args_denoiser3d: ${network}
+  args:
+    endecoder_opt: ${endecoder}
+    normalize_cam_angvel: true
+    use_regression_outputs_prob: 0.
+    use_cfg_sampler_for_gen: true
+    inpaint_x_start_gt: false
+    # regression_only: true
+    infer_version: 2
+    encoded_music_dim: 35
+    multicond_args: ${multicond_args}
+    weights:
+      cr_j3d: 500.
+      transl_c: 1.
+      cr_verts: 500.
+      j2d: 1000.
+      verts2d: 1000.
+
+      j2d_train2d: 1000.
+      proj_gt_j2d_to_bi01: true
+      # norm_j2d: 1000.
+      train2d_skip_regression: false
+
+      transl_w: 1.
+      static_conf_bce: 1.
+
+      text_only_losses: ["simple", "static_conf_bce"]
+      text_only_no_reg_loss: true
+
+    static_conf:
+      vel_thr: 0.15
+
+    in_attr:
+      - obs
+      - f_cliffcam
+      - f_imgseq
+      - f_cam_angvel
+      - encoded_music
+      - encoded_audio
+    mask_out_attr: [] # ${.in_attr}
+    out_attr:
+      pred_cam: 3
+
+network:
+  _target_: hmr4d.network.unimfm.unimfm_diffusion.UNIMFMDiffusion
+  args: ${pipeline.args}
+  latent_dim: ${.model_cfg.denoiser.latent_dim}
+  use_cond_exists_as_input: true
+  cond_merge_strategy: "add"
+  music_mask_prob: ${.model_cfg.denoiser.music_mask_prob}
+  encoded_music_dim: ${pipeline.args.encoded_music_dim}
+  model_cfg:
+    diffusion: ${model_cfg.diffusion}
+    denoiser:
+      _target_: hmr4d.network.unimfm.unimfm_denoiser.NetworkEncoderRoPE
+      output_dim: 151
+      xt_dim: ${.output_dim}
+      njoints: ${.xt_dim}
+      text_mask_prob: 0.1
+      music_mask_prob: 0.1
+      use_text_pos_enc: true
+      text_encoder_cfg:
+        mode: all
+        cross_attn_type: mha
+      # input_remove_static_conf: true
+      latent_dim: 1024
+      num_layers: 16
+      num_heads: 8
+      mlp_ratio: 4
+
+# ckpt_path: outputs/mocap_mixed_v1/genmo/genmo_lg_music/version_0/checkpoints/last.ckpt
+ckpt_path: outputs/mocap_mixed_v1/genmo/genmo_lg_music_pf/version_0/checkpoints/last.ckpt
+
+# ================================ #
+#          global setting          #
+# ================================ #
+
+video1_name: ???
+video1_width: ???
+video1_height: ???
+# video2_name: ???
+# text1: ???
+# orig_fps1: ???
+# orig_fps2: ???
+output_root: outputs/demo
+output_dir: "${output_root}/${video1_name}"
+preprocess_dir: ${output_dir}/preprocess
+# video1_path: "${output_dir}/0_input_video1.mp4"
+# video2_path: "${output_dir}/0_input_video2.mp4"
+# text1_video_path: "${output_dir}/0_input_text1.mp4"
+
+text_length: 300
+# Options
+static_cam1: False
+static_cam2: False
+verbose: False
+
+paths:
+  # bbx1: ${preprocess_dir}_1/bbx.pt
+  # bbx2: ${preprocess_dir}_2/bbx.pt
+  # bbx_xyxy_video_overlay1: ${preprocess_dir}_1/bbx_xyxy_video_overlay.mp4
+  # bbx_xyxy_video_overlay2: ${preprocess_dir}_2/bbx_xyxy_video_overlay.mp4
+  # vit_features1: ${preprocess_dir}_1/vit_features.pt
+  # vit_features2: ${preprocess_dir}_2/vit_features.pt
+  # vimo_pred1: ${preprocess_dir}_1/vimo_pred.pt
+  # vimo_pred2: ${preprocess_dir}_2/vimo_pred.pt
+  # vitpose1: ${preprocess_dir}_1/vitpose.pt
+  # vitpose2: ${preprocess_dir}_2/vitpose.pt
+  # vitpose_video_overlay1: ${preprocess_dir}_1/vitpose_video_overlay.mp4
+  # vitpose_video_overlay2: ${preprocess_dir}_2/vitpose_video_overlay.mp4
+  hmr4d_results: ${output_dir}/hmr4d_results.pt
+  # hmr4d_results1: ${output_dir}/hmr4d_results_1.pt
+  # hmr4d_results2: ${output_dir}/hmr4d_results_2.pt
+  incam_video: ${output_dir}/1_incam.mp4
+  # incam_video1: ${output_dir}/1_incam1.mp4
+  # incam_video2: ${output_dir}/1_incam2.mp4
+  global_video: ${output_dir}/2_global1.mp4
+  incam_global_horiz_video: ${output_dir}/3_${video1_name}_incam_global_horiz.mp4
+  # slam1: ${preprocess_dir}_1/camera.npy
+  # slam2: ${preprocess_dir}_2/camera.npy

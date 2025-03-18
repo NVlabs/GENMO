@@ -1,0 +1,69 @@
+# @package _global_
+defaults:
+  - override /data: mocap/testY
+  - override /test_datasets:
+      - emdb2_videotext
+  - override /callbacks:
+      - metric_emdb2_videotext
+  - _self_
+
+task: test
+remote_results_path: /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jiefengl/gvhmr
+# remote_results_path: /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jiefengl/gvhmr
+# remote_results_path: outputs
+ckpt_path: ??? # will not override previous setting if already set
+
+multicond_args:
+  video1:
+    start_ind: 0
+    end_ind: 200
+  music1:
+    start_ind: 500
+    end_ind: 500
+  video2:
+    start_ind: 500
+    end_ind: 1600
+  text1:
+    start_ind: 200
+    end_ind: 500
+  # video1:
+  #   start_ind: 0
+  #   end_ind: 200
+  # music1:
+  #   start_ind: 0
+  #   end_ind: 880
+  # video2:
+  #   start_ind: 500
+  #   end_ind: 1600
+  # text1:
+  #   start_ind: 879
+  #   end_ind: 881
+  type: "fix"
+  use_multicond: true
+
+test_datasets:
+  emdb2_videotext:
+    multicond_args: ${multicond_args}
+    music_feat_version: v2
+  # start_ind: ${start_ind}
+  # end_ind: ${end_ind}
+  # type: ${type}
+
+pipeline:
+  args:
+    regression_only: false
+    force_rand_noise: true
+
+# lightning utilities
+pl_trainer:
+  devices: 1
+logger:
+  _target_: pytorch_lightning.loggers.WandbLogger
+  project: "mfm-hmr-test"
+  entity: "nvr-lpr"
+  save_dir: "/tmp" # /save_dir/name/version/sub_dir
+  name: ""
+  version: ""
+  resume: "allow"
+  dir: "/tmp"
+  id: null

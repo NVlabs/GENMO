@@ -7,6 +7,7 @@ from typing import Optional
 
 import torch
 import torch.nn.functional as F
+from pytorch3d.transforms.rotation_conversions import matrix_to_axis_angle
 
 """
 The transformation matrices returned from the functions in this file assume
@@ -430,20 +431,20 @@ def axis_angle_to_matrix(axis_angle):
     return quaternion_to_matrix(axis_angle_to_quaternion(axis_angle))
 
 
-def matrix_to_axis_angle(matrix):
-    """
-    Convert rotations given as rotation matrices to axis/angle.
+# def matrix_to_axis_angle(matrix):
+#     """
+#     Convert rotations given as rotation matrices to axis/angle.
 
-    Args:
-        matrix: Rotation matrices as tensor of shape (..., 3, 3).
+#     Args:
+#         matrix: Rotation matrices as tensor of shape (..., 3, 3).
 
-    Returns:
-        Rotations given as a vector in axis angle form, as a tensor
-            of shape (..., 3), where the magnitude is the angle
-            turned anticlockwise in radians around the vector's
-            direction.
-    """
-    return quaternion_to_axis_angle(matrix_to_quaternion(matrix))
+#     Returns:
+#         Rotations given as a vector in axis angle form, as a tensor
+#             of shape (..., 3), where the magnitude is the angle
+#             turned anticlockwise in radians around the vector's
+#             direction.
+#     """
+#     return quaternion_to_axis_angle(matrix_to_quaternion(matrix))
 
 
 def axis_angle_to_quaternion(axis_angle):

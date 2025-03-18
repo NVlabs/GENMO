@@ -15,7 +15,6 @@ defaults:
       - imgfeat_3dpw/v1
       - imgfeat_3dpw_occ/v1
       - aistpp_train
-      - beat2_static_train
   - override /train_2d_datasets:
       - bones_2d
   - override /test_datasets:
@@ -62,9 +61,6 @@ model_cfg:
   start_2d_training_steps: 0
   noisy_2d_obs: true
   kp2d_noise_scale: 0.5
-  perframe_condition_exists: true
-  train2d_mask_invis_obs: true
-  mask_occluded_imgfeats: true
 
   diffusion:
     test_timestep_respacing: "50"
@@ -76,7 +72,7 @@ model_cfg:
     max_text_len: 50
 
   condition_mask:
-    mask_img_prob: 0.5
+    mask_img_prob: 1.0
     mask_cam_prob: 1.0
     reuse_regression_mask: false
     regression_no_img_mask: true
@@ -144,7 +140,6 @@ network:
   use_cond_exists_as_input: true
   cond_merge_strategy: "add"
   music_mask_prob: ${.model_cfg.denoiser.music_mask_prob}
-  speech_mask_prob: ${.model_cfg.denoiser.speech_mask_prob}
   encoded_music_dim: ${pipeline.args.encoded_music_dim}
   model_cfg:
     diffusion: ${model_cfg.diffusion}
@@ -155,7 +150,6 @@ network:
       njoints: ${.xt_dim}
       text_mask_prob: 0.1
       music_mask_prob: 0.1
-      speech_mask_prob: 0.1
       use_text_pos_enc: true
       text_encoder_cfg:
         mode: all

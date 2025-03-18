@@ -16,6 +16,7 @@ import hmr4d.model.common_utils.optimizer
 import hmr4d.model.common_utils.scheduler_cfg
 import hmr4d.model.gvhmr.callbacks.metric_3dpw
 import hmr4d.model.gvhmr.callbacks.metric_3dpw_occ
+import hmr4d.model.gvhmr.callbacks.metric_aistpp
 
 # Metric
 import hmr4d.model.gvhmr.callbacks.metric_emdb

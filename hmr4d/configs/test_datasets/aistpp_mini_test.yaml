@@ -1,0 +1,5 @@
+aistpp_mini_train:
+  _target_: hmr4d.dataset.aistplusplus.aistplusplus.AISTPlusPlusSmplDataset
+  split: minitest
+  motion_frames: 120
+  lazy_load: false

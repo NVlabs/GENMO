@@ -15,7 +15,6 @@ defaults:
       - imgfeat_3dpw/v1
       - imgfeat_3dpw_occ/v1
       - aistpp_train
-      - beat2_static_train
   - override /train_2d_datasets:
       - bones_2d
   - override /test_datasets:
@@ -49,12 +48,10 @@ data_name: mocap_mixed_v1
 
 train_datasets:
   aistpp_train:
-    feat_version: v2
+    feat_version: vjukebox
 # test_datasets:
 #   aistpp_test:
-#       feat_version: v2
-
-multicond_args: null
+#       feat_version: vjukebox
 
 model_cfg:
   train_3d_modes: ["regression", "diffusion"]
@@ -67,7 +64,7 @@ model_cfg:
   mask_occluded_imgfeats: true
 
   diffusion:
-    test_timestep_respacing: "50"
+    test_timestep_respacing: "5"
     guidance_param: 2.5
 
   text_encoder:
@@ -103,8 +100,7 @@ pipeline:
     use_cfg_sampler_for_gen: true
     inpaint_x_start_gt: false
     regression_only: true
-    encoded_music_dim: 35
-    multicond_args: ${multicond_args}
+    encoded_music_dim: 4800
     weights:
       cr_j3d: 500.
       transl_c: 1.
@@ -120,8 +116,8 @@ pipeline:
       transl_w: 1.
       static_conf_bce: 1.
 
-      gen_only_losses: ["simple", "static_conf_bce"]
-      gen_only_no_reg_loss: true
+      # text_only_losses: ["simple", "static_conf_bce"]
+      # text_only_no_reg_loss: true
 
     static_conf:
       vel_thr: 0.15
@@ -144,7 +140,6 @@ network:
   use_cond_exists_as_input: true
   cond_merge_strategy: "add"
   music_mask_prob: ${.model_cfg.denoiser.music_mask_prob}
-  speech_mask_prob: ${.model_cfg.denoiser.speech_mask_prob}
   encoded_music_dim: ${pipeline.args.encoded_music_dim}
   model_cfg:
     diffusion: ${model_cfg.diffusion}
@@ -155,7 +150,6 @@ network:
       njoints: ${.xt_dim}
       text_mask_prob: 0.1
       music_mask_prob: 0.1
-      speech_mask_prob: 0.1
       use_text_pos_enc: true
       text_encoder_cfg:
         mode: all

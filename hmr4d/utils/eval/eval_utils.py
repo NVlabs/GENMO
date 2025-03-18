@@ -1,5 +1,7 @@
 import numpy as np
 import torch
+from scipy.ndimage import gaussian_filter
+from scipy.signal import argrelextrema
 
 
 @torch.no_grad()
@@ -54,6 +56,69 @@ def compute_camcoord_metrics(batch, pelvis_idxs=[1, 2], fps=30, mask=None):
         "accel": accel,
     }
     return camcoord_metrics
+
+
+@torch.no_grad()
+def compute_music_metrics(batch, mask=None):
+    """
+    Args:
+        batch (dict): {
+            "pred_j3d": (..., J, 3) tensor
+            "target_j3d":
+            "music_beats": (T,) numpy array
+        }
+    Returns:
+        music_metrics (dict): {
+            "PFC":
+        }
+    """
+    # All data is in global coordinates
+    pred_j3d_glob = batch["pred_j3d_glob"].cpu().numpy()  # (..., J, 3)
+    # pred_j3d_glob = batch["target_j3d_glob"].cpu().numpy()  # (..., J, 3)
+    up_dir = 1  # y is up
+    flat_dirs = [i for i in range(3) if i != up_dir]
+
+    DT = 1 / 30
+    assert pred_j3d_glob.ndim == 3
+
+    root_v = (
+        pred_j3d_glob[1:, 0, :] - pred_j3d_glob[:-1, 0, :]
+    ) / DT  # root velocity (T-1, 3)
+    root_a = (root_v[1:, :] - root_v[:-1, :]) / DT  # root acceleration (T-2, 3)
+
+    # clamp the up-direction of root acceleration
+    root_a[:, up_dir] = np.maximum(root_a[:, up_dir], 0)  # (T-2, 3)
+    # l2 norm
+    root_a = np.linalg.norm(root_a, axis=-1)  # (T-2,)
+    scaling = root_a.max()
+    root_a = root_a / scaling
+
+    foot_idx = [7, 10, 8, 11]
+    feet = pred_j3d_glob[:, foot_idx, :]  # (T, 4, 3)
+    foot_v = np.linalg.norm(
+        feet[2:, :, flat_dirs] - feet[1:-1, :, flat_dirs], axis=-1
+    )  # horizontal velocity (T-2, 4)
+    foot_mins = np.zeros((len(foot_v), 2))
+    foot_mins[:, 0] = np.minimum(foot_v[:, 0], foot_v[:, 1])
+    foot_mins[:, 1] = np.minimum(foot_v[:, 2], foot_v[:, 3])
+    foot_v = np.maximum(foot_mins, 0)
+
+    foot_loss = (
+        foot_mins[:, 0] * foot_mins[:, 1] * root_a
+    )  # min leftv * min rightv * root_a (T-2,)
+    pfc = foot_loss.mean() * 10000
+
+    # compute Beat Align Score
+    motion_beats = compute_motion_beats(pred_j3d_glob)[0]
+    music_beats = compute_music_beats(batch["music_beats"])
+    ba = 0
+    for bb in music_beats:
+        ba += np.exp(-np.min((motion_beats - bb) ** 2) / 2 / 9)
+    bas = ba / len(music_beats)
+    return {
+        "PFC": pfc,
+        "BAS": bas,
+    }
 
 
 @torch.no_grad()
@@ -524,3 +589,21 @@ def as_np_array(d):
         return d
     else:
         return np.array(d)
+
+
+def compute_motion_beats(keypoints):
+    keypoints = keypoints.reshape(-1, 24, 3)
+    kinetic_vel = np.mean(
+        np.sqrt(np.sum((keypoints[1:] - keypoints[:-1]) ** 2, axis=2)), axis=1
+    )
+    kinetic_vel = gaussian_filter(kinetic_vel, sigma=5)
+    motion_beats = argrelextrema(kinetic_vel, np.less)
+    return motion_beats
+
+
+def compute_music_beats(beats):
+    beats = beats.astype(bool)
+    beat_axis = np.arange(len(beats))
+    beat_axis = beat_axis[beats]
+
+    return beat_axis

@@ -158,6 +158,7 @@ class ThreedpwSmplDataset(ImgfeatMotionDatasetBase):
                 "bbx_xys": True,
                 "f_imgseq": True,
                 "spv_incam_only": True,
+                "invalid_contact": True,
             },
         }
 

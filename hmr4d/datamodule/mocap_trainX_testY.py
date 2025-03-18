@@ -14,40 +14,94 @@ rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (4096, rlimit[1]))
 
 
-def collate_fn(batch):
-    """Handle meta and Add batch size to the return dict
-    Args:
-        batch: list of dict, each dict is a data point
-    """
-    # Assume all keys in the batch are the same
-    return_dict = {}
-    keys = set(batch[0].keys())
-    keys.add("caption")
-    keys.add("text_embed")
-    keys.add("use_det_kp")
-    for k in keys:
-        if k.startswith("meta"):  # data information, do not batch
-            return_dict[k] = [d[k] for d in batch]
-        elif k == "caption":
-            return_dict[k] = [d[k] if k in d else "" for d in batch]
-        elif k == "text_embed":
-            return_dict[k] = torch.stack(
-                [d[k] if k in d else torch.zeros(50, 1024) for d in batch]
-            )
-        elif k == "use_det_kp":
-            return_dict[k] = default_collate(
-                [
-                    d[k] if k in d else torch.zeros(d["K_fullimg"].shape[0])
-                    for d in batch
-                ]
-            )
-        else:
-            return_dict[k] = default_collate([d[k] for d in batch])
-    return_dict["B"] = len(batch)
-    return_dict["has_text"] = torch.tensor(
-        [text != "" for text in return_dict["caption"]]
-    )
-    return return_dict
+def get_collate_fn(encoded_music_dim=35, **kwargs):
+    def collate_fn(batch):
+        """Handle meta and Add batch size to the return dict
+        Args:
+            batch: list of dict, each dict is a data point
+        """
+        # Assume all keys in the batch are the same
+        return_dict = {}
+        keys = set(batch[0].keys())
+        keys.add("caption")
+        keys.add("text_embed")
+        keys.add("use_det_kp")
+        keys.add("music_embed")
+        keys.add("audio_array")
+        keys.add("music_array")
+        keys.add("music_fps")
+        keys.add("music_beats")
+        for k in keys:
+            if k.startswith("meta"):  # data information, do not batch
+                return_dict[k] = [d[k] for d in batch]
+            elif k == "caption":
+                return_dict[k] = [d[k] if k in d else "" for d in batch]
+            elif k == "text_embed":
+                return_dict[k] = torch.stack(
+                    [d[k] if k in d else torch.zeros(50, 1024) for d in batch]
+                )
+            elif k == "music_embed":
+                return_dict["has_music"] = torch.tensor(
+                    [True if k in d else False for d in batch]
+                )
+                return_dict[k] = torch.stack(
+                    [
+                        d[k]
+                        if k in d
+                        else torch.zeros(d["K_fullimg"].shape[0], encoded_music_dim)
+                        for d in batch
+                    ]
+                )
+            elif k == "music_array":
+                has_music_array = False
+                for d in batch:
+                    if k in d:
+                        has_music_array = True
+                        music_length = d[k].shape[0]
+                        break
+                if has_music_array:
+                    length = music_length
+                else:
+                    length = batch[0]["K_fullimg"].shape[0]
+                return_dict[k] = torch.stack(
+                    [d[k] if k in d else torch.zeros(length, 1024) for d in batch]
+                )
+            elif k == "music_beats":
+                length = batch[0]["K_fullimg"].shape[0]
+                return_dict[k] = torch.stack(
+                    [d[k] if k in d else torch.zeros(length) for d in batch]
+                )
+            elif k == "music_fps":
+                return_dict[k] = default_collate(
+                    [d[k] if k in d else 30 for d in batch]
+                )
+            elif k == "audio_array":
+                T = batch[0]["K_fullimg"].shape[0]
+                return_dict["has_audio"] = torch.tensor(
+                    [True if k in d else False for d in batch]
+                )
+                return_dict[k] = torch.stack(
+                    [
+                        d[k] if k in d else torch.zeros(T * int(18000 / 30))
+                        for d in batch
+                    ]
+                )
+            elif k == "use_det_kp":
+                return_dict[k] = default_collate(
+                    [
+                        d[k] if k in d else torch.zeros(d["K_fullimg"].shape[0])
+                        for d in batch
+                    ]
+                )
+            else:
+                return_dict[k] = default_collate([d[k] for d in batch])
+        return_dict["B"] = len(batch)
+        return_dict["has_text"] = torch.tensor(
+            [text != "" for text in return_dict["caption"]]
+        )
+        return return_dict
+
+    return collate_fn
 
 
 class DataModule(pl.LightningDataModule):
@@ -135,7 +189,9 @@ class DataModule(pl.LightningDataModule):
                 persistent_workers=True and self.loader_opts.train.num_workers > 0,
                 batch_size=self.loader_opts.train.batch_size,
                 drop_last=True,
-                collate_fn=collate_fn,
+                collate_fn=get_collate_fn(
+                    encoded_music_dim=self.loader_opts.encoded_music_dim,
+                ),
             )
         else:
             return super().train_dataloader()
@@ -152,7 +208,9 @@ class DataModule(pl.LightningDataModule):
                         persistent_workers=True
                         and self.loader_opts.val.num_workers > 0,
                         batch_size=self.loader_opts.val.batch_size,
-                        collate_fn=collate_fn,
+                        collate_fn=get_collate_fn(
+                            encoded_music_dim=self.loader_opts.encoded_music_dim,
+                        ),
                     )
                 )
             return CombinedLoader(loaders, mode="sequential")
@@ -170,7 +228,9 @@ class DataModule(pl.LightningDataModule):
                         num_workers=self.loader_opts.test.num_workers,
                         persistent_workers=False,
                         batch_size=self.loader_opts.test.batch_size,
-                        collate_fn=collate_fn,
+                        collate_fn=get_collate_fn(
+                            encoded_music_dim=self.loader_opts.encoded_music_dim,
+                        ),
                     )
                 )
             return CombinedLoader(loaders, mode="sequential")

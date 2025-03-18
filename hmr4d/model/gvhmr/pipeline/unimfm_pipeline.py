@@ -78,6 +78,9 @@ class Pipeline(nn.Module):
             "f_cliffcam": 3,
             "f_cam_angvel": 6,
             "f_imgseq": 1024,
+            # "encoded_music": 438,
+            "encoded_music": self.args.encoded_music_dim,
+            "encoded_audio": 128,
             "observed_motion_3d": 151,
         }
 
@@ -130,12 +133,31 @@ class Pipeline(nn.Module):
         if train:
             f_condition = randomly_set_null_condition(f_condition, 0.1)
 
-        eval_text_only = inputs.get("eval_text_only", False)
-        if eval_text_only:
+        eval_gen_only = inputs.get("eval_gen_only", False)
+        if eval_gen_only:
             for k in f_condition.keys():
+                if k in ["encoded_music", "encoded_audio"]:
+                    continue
                 f_condition[k] = torch.zeros_like(f_condition[k])
                 if k in inputs["f_condition_exists"]:
                     inputs["f_condition_exists"][k][:] = False
+
+        eval_gen_only_mask = inputs.get("eval_gen_only_mask", None)
+        if eval_gen_only_mask is not None:
+            for k in f_condition.keys():
+                print(k)
+                if f_condition[k].ndim == 4:
+                    f_condition[k] = f_condition[k] * (
+                        1 - eval_gen_only_mask[:, :, None, None].float()
+                    )
+                elif f_condition[k].ndim == 3:
+                    f_condition[k] = f_condition[k] * (
+                        1 - eval_gen_only_mask[:, :, None].float()
+                    )
+                if k in inputs["f_condition_exists"]:
+                    inputs["f_condition_exists"][k] = (
+                        inputs["f_condition_exists"][k] & ~eval_gen_only_mask.bool()
+                    )
 
         inputs["f_condition"] = f_condition
         return inputs
@@ -191,7 +213,7 @@ class Pipeline(nn.Module):
                 ]
 
         if not train:
-            # if eval_text_only:
+            # if eval_gen_only:
             #     inputs["cam_angvel"] = torch.zeros(decode_dict["global_orient_gv"].shape[:2] + (6,), device=decode_dict["global_orient_gv"].device)
             if self.endecoder.encode_type == "gvhmr":
                 if self.args.get("infer_version", 2) == 2:
@@ -335,18 +357,18 @@ class Pipeline(nn.Module):
         # ========== Compute Loss ========== #
         total_loss = 0
         mask = inputs["mask"]["valid"]  # (B, L)
-        text_only = inputs.get("text_only", None)
+        gen_only = inputs.get("gen_only", None)
 
         # 1. Simple loss: MSE
         pred_x = model_output["pred_x"]  # (B, L, C)
         target_x = inputs["target_x"]  # (B, L, C)
         simple_loss = F.mse_loss(pred_x, target_x, reduction="none")
         if (
-            text_only is not None
-            and self.weights.get("text_only_no_reg_loss", False)
+            gen_only is not None
+            and self.weights.get("gen_only_no_reg_loss", False)
             and mode == "regression"
         ):
-            simple_loss[text_only] = 0
+            simple_loss[gen_only] = 0
         mask_simple = (
             mask[:, :, None].expand(-1, -1, pred_x.size(2)).clone()
         )  # (B, L, C)
@@ -465,8 +487,8 @@ class Pipeline(nn.Module):
         # ========== Compute Loss ========== #
         total_loss = 0
         mask = inputs["mask"]
-        text_only_losses = self.weights.get("text_only_losses", "all")
-        text_only = inputs.get("text_only", None)
+        gen_only_losses = self.weights.get("gen_only_losses", "all")
+        gen_only = inputs.get("gen_only", None)
 
         # 1. Simple loss: MSE
         if self.weights.get("simple_diffusion2d", 0.0) > 0.0 and mode == "diffusion":
@@ -516,11 +538,11 @@ class Pipeline(nn.Module):
 
                 j2d_loss = F.mse_loss(pred_j2d_01, gt_c_j17_2d, reduction="none")
                 if (
-                    text_only is not None
-                    and text_only_losses != "all"
-                    and "j2d_train2d" not in text_only_losses
+                    gen_only is not None
+                    and gen_only_losses != "all"
+                    and "j2d_train2d" not in gen_only_losses
                 ):
-                    j2d_loss[text_only] = 0
+                    j2d_loss[gen_only] = 0
                 j2d_loss = (
                     j2d_loss * mask[..., None, None] * conf_2d[..., None]
                 ).mean()
@@ -548,11 +570,11 @@ class Pipeline(nn.Module):
 
                 norm_j2d_loss = F.mse_loss(kp2d_norm, kp2d_gt, reduction="none")
                 if (
-                    text_only is not None
-                    and text_only_losses != "all"
-                    and "norm_j2d" not in text_only_losses
+                    gen_only is not None
+                    and gen_only_losses != "all"
+                    and "norm_j2d" not in gen_only_losses
                 ):
-                    norm_j2d_loss[text_only] = 0
+                    norm_j2d_loss[gen_only] = 0
                 norm_j2d_loss = (
                     norm_j2d_loss * mask[..., None, None] * conf_2d[..., None]
                 ).mean()
@@ -583,10 +605,10 @@ def compute_extra_incam_loss(inputs, outputs, ppl, mode):
     weights = ppl.weights
     args = ppl.args
 
-    text_only_losses = weights.get("text_only_losses", "all")
-    text_only = inputs.get("text_only", None)
-    if weights.get("text_only_no_reg_loss", False) and mode == "regression":
-        text_only_losses = []
+    gen_only_losses = weights.get("gen_only_losses", "all")
+    gen_only = inputs.get("gen_only", None)
+    if weights.get("gen_only_no_reg_loss", False) and mode == "regression":
+        gen_only_losses = []
 
     extra_loss_dict = {}
     extra_loss = 0
@@ -606,11 +628,11 @@ def compute_extra_incam_loss(inputs, outputs, ppl, mode):
     if weights.cr_j3d > 0.0:
         cr_j3d_loss = F.mse_loss(pred_cr_j3d, gt_cr_j3d, reduction="none")
         if (
-            text_only is not None
-            and text_only_losses != "all"
-            and "cr_j3d" not in text_only_losses
+            gen_only is not None
+            and gen_only_losses != "all"
+            and "cr_j3d" not in gen_only_losses
         ):
-            cr_j3d_loss[text_only] = 0
+            cr_j3d_loss[gen_only] = 0
         cr_j3d_loss = (cr_j3d_loss * mask[..., None, None]).mean()
         extra_loss += cr_j3d_loss * weights.cr_j3d
         extra_loss_dict["cr_j3d_loss"] = cr_j3d_loss
@@ -645,11 +667,11 @@ def compute_extra_incam_loss(inputs, outputs, ppl, mode):
         )[..., None]
         transl_c_loss = F.mse_loss(pred_cam, gt_pred_cam, reduction="none")
         if (
-            text_only is not None
-            and text_only_losses != "all"
-            and "transl_c" not in text_only_losses
+            gen_only is not None
+            and gen_only_losses != "all"
+            and "transl_c" not in gen_only_losses
         ):
-            transl_c_loss[text_only] = 0
+            transl_c_loss[gen_only] = 0
         transl_c_loss = (transl_c_loss * mask[..., None] * valid_mask).mean()
 
         extra_loss_dict["transl_c_loss"] = transl_c_loss
@@ -681,11 +703,11 @@ def compute_extra_incam_loss(inputs, outputs, ppl, mode):
         valid_mask[~mask_reproj] = False  # Do not supervise on 3dpw
         j2d_loss = F.mse_loss(pred_j2d_01, gt_j2d_01, reduction="none")
         if (
-            text_only is not None
-            and text_only_losses != "all"
-            and "j2d" not in text_only_losses
+            gen_only is not None
+            and gen_only_losses != "all"
+            and "j2d" not in gen_only_losses
         ):
-            j2d_loss[text_only] = 0
+            j2d_loss[gen_only] = 0
         j2d_loss = (j2d_loss * mask[..., None, None] * valid_mask).mean()
 
         extra_loss += j2d_loss * weights.j2d
@@ -702,11 +724,11 @@ def compute_extra_incam_loss(inputs, outputs, ppl, mode):
         gt_cr_verts437 = inputs["gt_cr_verts437"]  # (B, L, 437, 3)
         cr_vert_loss = F.mse_loss(pred_cr_verts437, gt_cr_verts437, reduction="none")
         if (
-            text_only is not None
-            and text_only_losses != "all"
-            and "cr_verts" not in text_only_losses
+            gen_only is not None
+            and gen_only_losses != "all"
+            and "cr_verts" not in gen_only_losses
         ):
-            cr_vert_loss[text_only] = 0
+            cr_vert_loss[gen_only] = 0
         cr_vert_loss = (cr_vert_loss * mask[:, :, None, None]).mean()
         extra_loss += cr_vert_loss * weights.cr_verts
         extra_loss_dict["cr_vert_loss"] = cr_vert_loss
@@ -739,11 +761,11 @@ def compute_extra_incam_loss(inputs, outputs, ppl, mode):
         valid_mask[~mask_reproj] = False  # Do not supervise on 3dpw
         verts2d_loss = F.mse_loss(pred_verts2d_01, gt_verts2d_01, reduction="none")
         if (
-            text_only is not None
-            and text_only_losses != "all"
-            and "verts2d" not in text_only_losses
+            gen_only is not None
+            and gen_only_losses != "all"
+            and "verts2d" not in gen_only_losses
         ):
-            verts2d_loss[text_only] = 0
+            verts2d_loss[gen_only] = 0
         verts2d_loss = (verts2d_loss * mask[..., None, None] * valid_mask).mean()
 
         extra_loss += verts2d_loss * weights.verts2d
@@ -762,11 +784,13 @@ def compute_extra_global_loss(inputs, outputs, ppl, mode):
     extra_loss = 0
     mask = inputs["mask"]["valid"].clone()  # (B, L)
     mask[inputs["mask"]["spv_incam_only"]] = False
+    mask_contact = mask.clone()
+    mask_contact[inputs["mask"]["invalid_contact"]] = False
 
-    text_only_losses = weights.get("text_only_losses", "all")
-    text_only = inputs.get("text_only", None)
-    if weights.get("text_only_no_reg_loss", False) and mode == "regression":
-        text_only_losses = []
+    gen_only_losses = weights.get("gen_only_losses", "all")
+    gen_only = inputs.get("gen_only", None)
+    if weights.get("gen_only_no_reg_loss", False) and mode == "regression":
+        gen_only_losses = []
 
     if weights.transl_w > 0:
         # compute pred_transl_w by rollout
@@ -779,11 +803,11 @@ def compute_extra_global_loss(inputs, outputs, ppl, mode):
 
         trans_w_loss = F.l1_loss(pred_transl_w, gt_transl_w, reduction="none")
         if (
-            text_only is not None
-            and text_only_losses != "all"
-            and "transl_w" not in text_only_losses
+            gen_only is not None
+            and gen_only_losses != "all"
+            and "transl_w" not in gen_only_losses
         ):
-            trans_w_loss[text_only] = 0
+            trans_w_loss[gen_only] = 0
         trans_w_loss = (trans_w_loss * mask[..., None]).mean()
         extra_loss += trans_w_loss * weights.transl_w
         extra_loss_dict["transl_w_loss"] = trans_w_loss
@@ -812,12 +836,12 @@ def compute_extra_global_loss(inputs, outputs, ppl, mode):
             pred_static_conf_logits, static_gt, reduction="none"
         )
         if (
-            text_only is not None
-            and text_only_losses != "all"
-            and "static_conf_bce" not in text_only_losses
+            gen_only is not None
+            and gen_only_losses != "all"
+            and "static_conf_bce" not in gen_only_losses
         ):
-            static_conf_loss[text_only] = 0
-        static_conf_loss = (static_conf_loss * mask[..., None]).mean()
+            static_conf_loss[gen_only] = 0
+        static_conf_loss = (static_conf_loss * mask_contact[..., None]).mean()
         extra_loss += static_conf_loss * weights.static_conf_bce
         extra_loss_dict["static_conf_loss"] = static_conf_loss
 

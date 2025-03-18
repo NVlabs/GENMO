@@ -1,0 +1,6 @@
+aistpp_train:
+  _target_: hmr4d.dataset.aistplusplus.aistplusplus.AISTPlusPlusSmplDataset
+  split: train
+  motion_frames: 120
+  lazy_load: false
+  eval_gen_only: true
