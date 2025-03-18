@@ -956,6 +956,171 @@ class UNIMFMDiffusion(nn.Module):
             assert x in output, f"Output {x} not found in denoise_out"
         return output
 
+    def forward_test_humanoid_batch(
+        self,
+        inputs,
+        train=False,
+        postproc=False,
+        static_cam=False,
+        progress=False,
+        mode=None,
+        test_mode=None,
+        normalizer_stats=None,
+    ):
+        """First generate the entire motion sequence, then map to humanoid actions autoregressively."""
+        assert not self.training, (
+            "forward_test_humanoid_batch should only be called during inference"
+        )
+        eval_text_only = inputs.get("eval_text_only", False)
+        diffusion = (
+            self.test_text_only_diffusion if eval_text_only else self.test_diffusion
+        )
+        denoiser = self.denoiser
+        length = inputs["length"]  # (B,) effective length of each sample
+        regression_only = self.args.get("regression_only", False) and not eval_text_only
+        if self.args.get("force_regression_only", False):
+            regression_only = True
+
+        f_condition = inputs["f_condition"]
+        f_condition_exists = inputs["f_condition_exists"]
+        humanoid_obs = f_condition["humanoid_obs"]
+        B, L = humanoid_obs.shape[:2]
+        mdim = self.endecoder.get_motion_dim()
+        target_x = torch.zeros(B, L, mdim).to(humanoid_obs.device)
+
+        # Generate motion representation
+        f_cond, motion = self.generate_motion_rep(inputs, target_x)
+        vis_mask = length_to_mask(length, L)  # (B, L)
+
+        denoiser_kwargs = {
+            "y": {
+                "text": inputs.get("caption", [""] * B),
+                "f_cond": f_cond,
+                "mask": vis_mask,
+                "length": length,
+            },
+            "inputs": inputs,
+        }
+        if "encoded_text" in inputs:
+            denoiser_kwargs["y"]["encoded_text"] = inputs["encoded_text"]
+        if "meta" in inputs and "multi_text_data" in inputs["meta"][0]:
+            denoiser_kwargs["y"]["multi_text_data"] = inputs["meta"][0][
+                "multi_text_data"
+            ]
+        if "observed_motion_3d" in inputs:
+            denoiser_kwargs["observed_motion_3d"] = inputs["observed_motion_3d"]
+            denoiser_kwargs["motion_mask_3d"] = inputs["motion_mask_3d"]
+            denoiser_kwargs["rm_text_flag"] = inputs.get("rm_text_flag", None)
+
+        if regression_only:
+            t, t_weights = self.schedule_sampler.sample(motion.shape[0], motion.device)
+            t = (torch.ones_like(t) * diffusion.original_num_steps).long()
+            t_weights = torch.ones_like(t_weights)
+            x_t = torch.zeros_like(motion)
+
+            denoise_out = denoiser(
+                x_t,
+                self.train_diffusion._scale_timesteps(t),
+                return_aux=False,
+                **denoiser_kwargs,
+            )
+        else:
+            if self.args.get("use_cfg_sampler_for_text", False) and eval_text_only:
+                denoiser = ClassifierFreeSampleModel(denoiser)
+                denoiser_kwargs["y"]["scale"] = self.model_cfg.diffusion.guidance_param
+            diff_sampler = self.model_cfg.diffusion.get("sampler", "ddim")
+            if diff_sampler == "ddim":
+                sample_fn = diffusion.ddim_sample_loop_with_aux
+                kwargs = {"eta": self.model_cfg.diffusion.ddim_eta}
+            else:
+                raise NotImplementedError(f"Sampler {diff_sampler} not implemented")
+
+            if self.args.get("force_zero_noise", False):
+                noise = torch.zeros_like(motion)
+            else:
+                if eval_text_only:
+                    noise = torch.randn_like(motion)
+                else:
+                    noise = torch.zeros_like(motion)
+
+            if self.args.get("return_mid", False):
+                kwargs["return_mid"] = True
+
+            denoise_out = sample_fn(
+                denoiser,
+                motion.shape,
+                clip_denoised=False,
+                model_kwargs=denoiser_kwargs,
+                skip_timesteps=0,
+                init_image=None,
+                progress=progress,
+                dump_steps=None,
+                noise=noise,
+                const_noise=False,
+                **kwargs,
+            )
+
+        output = denoise_out.copy()
+
+        # Now map the generated motion to humanoid actions autoregressively
+        humanoid = inputs["humanoid"]
+        obs_keys = [
+            x
+            for x in self.args.in_attr
+            if x in ["humanoid_obs", "humanoid_rgb_obs", "humanoid_contact_force"]
+        ]
+        cur_obs = {k: None for k in obs_keys}
+
+        def policy(obs_dict, extras):
+            nonlocal cur_obs, output
+            for k in obs_keys:
+                if k == "humanoid_obs":
+                    if self.args.get("humanoid_obs_inc_task", False):
+                        obs_k = torch.cat(
+                            [
+                                obs_dict["self_obs"]["policy"],
+                                obs_dict["task_obs"]["policy"],
+                            ],
+                            dim=1,
+                        )
+                    else:
+                        obs_k = obs_dict["self_obs"]["policy"]
+                elif k == "humanoid_rgb_obs":
+                    obs_rgb_raw = (
+                        extras["rgb_raw_new"].permute(0, 3, 1, 2).contiguous() / 255.0
+                    )
+                    obs_rgb_obs = obs_dict["task_obs"]["rgb"]
+                    obs_k = (
+                        obs_rgb_raw
+                        if self.args.get("humanoid_use_rgb_raw", False)
+                        else obs_rgb_obs
+                    )
+                elif k == "humanoid_contact_force":
+                    obs_k = obs_dict["task_obs"]["contact_forces"]
+
+                if k in normalizer_stats:
+                    obs_k = (
+                        obs_k - normalizer_stats[k]["mean"].to(obs_k)
+                    ) / normalizer_stats[k]["std"].to(obs_k)
+                obs_k = obs_k.unsqueeze(1)
+                if cur_obs[k] is None:
+                    cur_obs[k] = obs_k
+                else:
+                    cur_obs[k] = torch.cat([cur_obs[k], obs_k], dim=1)
+
+            num_fr = cur_obs["humanoid_obs"].shape[1]
+            action = self.denoiser.predict_action(
+                output["pred_context"][:, :num_fr], cur_obs["humanoid_obs"][:, :num_fr]
+            )
+            return action[:, -1, :]
+
+        ref_motions = [x["mid"] for x in inputs["meta"]]
+        humanoid.run_genmo_player(policy=policy, ref_motions=ref_motions, max_steps=L)
+
+        for x in self.args.out_attr:
+            assert x in output, f"Output {x} not found in denoise_out"
+        return output
+
     def forward(
         self,
         inputs,
@@ -970,7 +1135,12 @@ class UNIMFMDiffusion(nn.Module):
             return self.forward_train(inputs, train, postproc, static_cam, mode=mode)
         else:
             if "humanoid" in test_mode:
-                return self.forward_test_humanoid(
+                test_func = (
+                    self.forward_test_humanoid_batch
+                    if self.args.get("test_humanoid_batch", False)
+                    else self.forward_test_humanoid
+                )
+                return test_func(
                     inputs,
                     train,
                     postproc,

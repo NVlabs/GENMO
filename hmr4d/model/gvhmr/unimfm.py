@@ -1011,7 +1011,10 @@ class UNIMFM(pl.LightningModule):
             "multi_text_embed": torch.zeros(B, 50, 50, 1024).to(device),
             "text_label_ids": torch.zeros(B, L).long().to(device),
             "has_humanoid_data": torch.tensor([True] * B).to(device),
+            "eval_text_only": batch["meta"][0].get("eval_text_only", False),
         }
+        if "text_embed" in batch:
+            inputs["encoded_text"] = batch["text_embed"].cuda()
         self.init_condition_exists(inputs)
 
         # Forward pass in test mode

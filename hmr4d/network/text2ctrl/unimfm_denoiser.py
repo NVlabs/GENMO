@@ -347,7 +347,7 @@ class NetworkEncoderRoPE(nn.Module):
 
         if "humanoid_obs" in inputs["f_condition"]:
             humanoid_obs = inputs["f_condition"]["humanoid_obs"][:, :L]
-            clean_action = self.clean_action_mlp(torch.cat([x, humanoid_obs], dim=-1))
+            clean_action = self.predict_action(x, humanoid_obs)
             if not self.separate_humanoid_action:
                 sample = torch.cat([sample, clean_action], dim=-1)
         else:
@@ -363,6 +363,10 @@ class NetworkEncoderRoPE(nn.Module):
         if clean_action is not None:
             output["humanoid_clean_action"] = clean_action
         return output
+
+    def predict_action(self, context, humanoid_obs):
+        clean_action = self.clean_action_mlp(torch.cat([context, humanoid_obs], dim=-1))
+        return clean_action
 
 
 # Add to MainStore
