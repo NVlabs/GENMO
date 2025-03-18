@@ -536,7 +536,9 @@ class UNIMFMDiffusion(nn.Module):
             self.test_text_only_diffusion if eval_text_only else self.test_diffusion
         )
         denoiser = self.denoiser
-        length = inputs["length"]  # (B,) effective length of each sample
+        length = (
+            torch.ones_like(inputs["length"]) * self.max_len
+        )  # use max length for test
         regression_only = self.args.get("regression_only", False) and not eval_text_only
         if self.args.get("force_regression_only", False):
             regression_only = True

@@ -730,6 +730,8 @@ class UNIMFM(pl.LightningModule):
             batch["cam_angvel"] = torch.zeros(
                 batch["obs"].shape[:2] + (6,), device=batch["obs"].device
             )
+        batch["B"] = B
+        batch["L"] = batch["obs"].shape[1]
         self.init_condition_exists(batch)
         # Forward and get loss
         if self.infer_mode == "regression":
