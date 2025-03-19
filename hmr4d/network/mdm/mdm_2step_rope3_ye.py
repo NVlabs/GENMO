@@ -640,7 +640,7 @@ class MDMBase(nn.Module):
                 # sample_fn = diffusion.p_sample_loop
                 # kwargs = {}
 
-            if inputs.get("eval_text_only", False):
+            if inputs.get("eval_gen_only", False):
                 noise = torch.randn_like(motion)
             else:
                 noise = torch.zeros_like(motion)

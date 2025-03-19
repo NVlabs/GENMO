@@ -95,7 +95,7 @@ pipeline:
       transl_w: 1.
       static_conf_bce: 1.
 
-      text_only_losses: ["simple"]
+      gen_only_losses: ["simple"]
 
     static_conf:
       vel_thr: 0.15

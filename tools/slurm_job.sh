@@ -4,6 +4,10 @@ env_var=${3}
 python_cmd=${@:4}
 
 
+if [ ! -v LOCAL_RANK ]; then
+    export LOCAL_RANK=$SLURM_LOCALID
+fi
+
 echo "slurm_job_id: $SLURM_JOB_ID"
 echo "slurm_job_name: $SLURM_JOB_NAME"
 echo "env_var: $env_var"
@@ -13,6 +17,7 @@ echo "branch: $branch"
 echo "SUBMIT_GPUS: $SUBMIT_GPUS"
 echo "MASTER_PORT: $MASTER_PORT"
 echo "MASTER_ADDR: $MASTER_ADDR"
+echo "RANK: $RANK"
 echo "NODE_RANK: $NODE_RANK"
 echo "LOCAL_RANK: $LOCAL_RANK"
 echo "SLURM_LOCALID: $SLURM_LOCALID"

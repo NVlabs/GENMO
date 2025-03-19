@@ -1,6 +1,27 @@
+import builtins
 import os
 import sys
 from datetime import datetime
+
+from omegaconf import OmegaConf
+
+OmegaConf.register_new_resolver("eval", builtins.eval)
+
+
+def _get_rank():
+    # SLURM_PROCID can be set even if SLURM is not managing the multiprocessing,
+    # therefore LOCAL_RANK needs to be checked first
+    rank_keys = ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK")
+    for key in rank_keys:
+        rank = os.environ.get(key)
+        if rank is not None:
+            return int(rank)
+    # None to differentiate whether an environment variable was set at all
+    return 0
+
+
+sys.path.append("third-party/PHC_Lab/")
+global_rank = _get_rank()
 
 import hydra
 import pytorch_lightning as pl
@@ -70,9 +91,7 @@ def train(cfg: DictConfig) -> None:
             cfg.pl_trainer.devices * num_nodes
         )
     pl.seed_everything(cfg.seed)
-    torch.cuda.set_device(
-        int(os.environ.get("LOCAL_RANK", "0"))
-    )  # for tinycudann default memory
+    torch.cuda.set_device(global_rank % 8)  # for tinycudann default memory
     wandb_run = None
     version = None
 
@@ -116,7 +135,7 @@ def train(cfg: DictConfig) -> None:
         )
     else:
         run_root_dir = cfg.output_dir
-        if version is None:
+        if version is None and cfg.resume_mode == "last":
             version = find_last_version(run_root_dir, cp="last")
 
     # preparation
@@ -153,9 +172,9 @@ def train(cfg: DictConfig) -> None:
                 "global_step": ckpt["global_step"],
                 "epoch": ckpt["epoch"],
             }
+            print("pretrained ckpt info:", wandb_cfg["pretrained_ckpt_info"])
 
     # PL callbacks and logger
-    global_rank = rank_zero_only.rank if rank_zero_only.rank is not None else 0
     if cfg.task == "fit":
         if global_rank == 0:
             tb_logger = TensorBoardLogger(run_root_dir, version=version, name="")
@@ -188,7 +207,7 @@ def train(cfg: DictConfig) -> None:
 
         if global_rank != 0:
             if version is None:
-                version = find_last_version(run_root_dir, cp="last")
+                version = find_last_version(run_root_dir, cp=None)
             cfg.output_dir = f"{run_root_dir}/version_{version}"
 
     callbacks = get_callbacks(cfg)
@@ -230,7 +249,7 @@ def train(cfg: DictConfig) -> None:
             print("save dir", save_dir)
             resume_path = get_resume_ckpt_path(cfg.resume_mode, ckpt_dir=save_dir)
             Log.info(f"Resume training from {resume_path}")
-        Log.info("Start Fitiing...")
+        Log.info("Start Fitting...")
         trainer.fit(
             model,
             datamodule.train_dataloader(),

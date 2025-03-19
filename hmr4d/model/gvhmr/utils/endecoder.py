@@ -34,20 +34,15 @@ from . import stats_compose
 
 
 class EnDecoder(nn.Module):
-    # Define feature dimensions as a class attribute
-    FEATURE_DIMS = {
-        "gvhmr": 151,
-        "humanml3d": 143,
-        "humanoid": 69,  # Assuming this is the dimension for humanoid
-    }
-
     def __init__(
         self,
         stats_name="DEFAULT_01",
         encode_type="gvhmr",
-        feature_arr=["gvhmr", "humanml3d"],
-        stats_arr=["MM_V1_AMASS_LOCAL_BEDLAM_CAM", "HUMANML3D_V1"],
+        feature_arr=None,
+        stats_arr=None,
         noise_pose_k=10,
+        humanoid_action_dim=69,
+        humanoid_z_action_dim=48,
         clip_std=False,
     ):
         super().__init__()
@@ -55,6 +50,14 @@ class EnDecoder(nn.Module):
         if encode_type in ["gvhmr", "humanml3d"]:
             feature_arr = [encode_type]
             stats_arr = [stats_name]
+
+        # Define feature dimensions as a class attribute
+        self.FEATURE_DIMS = {
+            "gvhmr": 151,
+            "humanml3d": 143,
+            "humanoid_action": humanoid_action_dim,  # Assuming this is the dimension for humanoid_action
+            "humanoid_z_action": humanoid_z_action_dim,
+        }
 
         # Store stats for each feature type
         self.stats_dict = {}
@@ -201,17 +204,22 @@ class EnDecoder(nn.Module):
                 encoded = self.encode_gvhmr(inputs)
             elif feature == "humanml3d":
                 encoded = self.encode_humanml3d(inputs)
-            elif feature == "humanoid":
-                encoded = self.encode_humanoid(inputs)
+            elif feature == "humanoid_action":
+                encoded = self.encode_humanoid_action(inputs)
+            elif feature == "humanoid_z_action":
+                encoded = self.encode_humanoid_z_action(inputs)
             encoded_features.append(encoded)
 
         # Concatenate all encoded features
         return torch.cat(encoded_features, dim=-1)
 
-    def encode_humanoid(self, inputs):
-        clean_action = inputs["clean_action"]
-        x = clean_action
-        return self.normalize(x, "humanoid")
+    def encode_humanoid_action(self, inputs):
+        x = inputs["humanoid_clean_action"]
+        return self.normalize(x, "humanoid_action")
+
+    def encode_humanoid_z_action(self, inputs):
+        x = inputs["humanoid_z_action"]
+        return self.normalize(x, "humanoid_z_action")
 
     def encode_humanml3d(self, inputs):
         """
@@ -382,8 +390,10 @@ class EnDecoder(nn.Module):
                 decoded = self.decode_gvhmr(feature_norm)
             elif feature == "humanml3d":
                 decoded = self.decode_humanml3d(feature_norm)
-            elif feature == "humanoid":
-                decoded = self.decode_humanoid(feature_norm)
+            elif feature == "humanoid_action":
+                decoded = self.decode_humanoid_action(feature_norm)
+            elif feature == "humanoid_z_action":
+                decoded = self.decode_humanoid_z_action(feature_norm)
 
             decoded_outputs.update(decoded)
             current_idx += feature_size
@@ -471,20 +481,25 @@ class EnDecoder(nn.Module):
 
         return output
 
-    def decode_humanoid(self, x_norm):
+    def decode_humanoid_action(self, x_norm):
         """
-        Decodes normalized humanoid features back to original action space
+        Decodes normalized humanoid_action features back to original action space
 
         Args:
-            x_norm: (B, L, C) Normalized humanoid features
+            x_norm: (B, L, C) Normalized humanoid_action features
 
         Returns:
             dict: Contains denormalized action data
         """
-        x = self.denormalize(x_norm, "humanoid")
+        x = self.denormalize(x_norm, "humanoid_action")
 
-        output = {"clean_action": x}
+        output = {"humanoid_clean_action": x}
 
+        return output
+
+    def decode_humanoid_z_action(self, x_norm):
+        x = self.denormalize(x_norm, "humanoid_z_action")
+        output = {"humanoid_z_action": x}
         return output
 
     def get_motion_dim(self):
@@ -527,8 +542,28 @@ MainStore.store(
     name="v1_amass_local_bedlam_cam_humanoid",
     node=cfg_base(
         encode_type="compose",
-        feature_arr=["gvhmr", "humanoid"],
+        feature_arr=["gvhmr", "humanoid_action"],
         stats_arr=["MM_V1_AMASS_LOCAL_BEDLAM_CAM", "DEFAULT_01"],
+    ),
+    group=group_name,
+)
+
+MainStore.store(
+    name="humanoid_only",
+    node=cfg_base(
+        encode_type="compose",
+        feature_arr=["humanoid_action"],
+        stats_arr=["DEFAULT_01"],
+    ),
+    group=group_name,
+)
+
+MainStore.store(
+    name="humanoid_z_action",
+    node=cfg_base(
+        encode_type="compose",
+        feature_arr=["humanoid_z_action"],
+        stats_arr=["DEFAULT_01"],
     ),
     group=group_name,
 )

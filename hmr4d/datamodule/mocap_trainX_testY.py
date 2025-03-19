@@ -1,4 +1,5 @@
 import resource
+from functools import partial
 
 import pytorch_lightning as pl
 import torch
@@ -14,94 +15,97 @@ rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (4096, rlimit[1]))
 
 
-def get_collate_fn(encoded_music_dim=35, **kwargs):
-    def collate_fn(batch):
-        """Handle meta and Add batch size to the return dict
-        Args:
-            batch: list of dict, each dict is a data point
-        """
-        # Assume all keys in the batch are the same
-        return_dict = {}
-        keys = set(batch[0].keys())
-        keys.add("caption")
-        keys.add("text_embed")
-        keys.add("use_det_kp")
-        keys.add("music_embed")
-        keys.add("audio_array")
-        keys.add("music_array")
-        keys.add("music_fps")
-        keys.add("music_beats")
-        for k in keys:
-            if k.startswith("meta"):  # data information, do not batch
-                return_dict[k] = [d[k] for d in batch]
-            elif k == "caption":
-                return_dict[k] = [d[k] if k in d else "" for d in batch]
-            elif k == "text_embed":
-                return_dict[k] = torch.stack(
-                    [d[k] if k in d else torch.zeros(50, 1024) for d in batch]
-                )
-            elif k == "music_embed":
-                return_dict["has_music"] = torch.tensor(
-                    [True if k in d else False for d in batch]
-                )
-                return_dict[k] = torch.stack(
-                    [
-                        d[k]
-                        if k in d
-                        else torch.zeros(d["K_fullimg"].shape[0], encoded_music_dim)
-                        for d in batch
-                    ]
-                )
-            elif k == "music_array":
-                has_music_array = False
-                for d in batch:
-                    if k in d:
-                        has_music_array = True
-                        music_length = d[k].shape[0]
-                        break
-                if has_music_array:
-                    length = music_length
-                else:
-                    length = batch[0]["K_fullimg"].shape[0]
-                return_dict[k] = torch.stack(
-                    [d[k] if k in d else torch.zeros(length, 1024) for d in batch]
-                )
-            elif k == "music_beats":
-                length = batch[0]["K_fullimg"].shape[0]
-                return_dict[k] = torch.stack(
-                    [d[k] if k in d else torch.zeros(length) for d in batch]
-                )
-            elif k == "music_fps":
-                return_dict[k] = default_collate(
-                    [d[k] if k in d else 30 for d in batch]
-                )
-            elif k == "audio_array":
-                T = batch[0]["K_fullimg"].shape[0]
-                return_dict["has_audio"] = torch.tensor(
-                    [True if k in d else False for d in batch]
-                )
-                return_dict[k] = torch.stack(
-                    [
-                        d[k] if k in d else torch.zeros(T * int(18000 / 30))
-                        for d in batch
-                    ]
-                )
-            elif k == "use_det_kp":
-                return_dict[k] = default_collate(
-                    [
-                        d[k] if k in d else torch.zeros(d["K_fullimg"].shape[0])
-                        for d in batch
-                    ]
-                )
-            else:
-                return_dict[k] = default_collate([d[k] for d in batch])
-        return_dict["B"] = len(batch)
-        return_dict["has_text"] = torch.tensor(
-            [text != "" for text in return_dict["caption"]]
-        )
-        return return_dict
+def collate_fn(batch, mode, collate_cfg=None):
+    """Handle meta and Add batch size to the return dict
+    Args:
+        batch: list of dict, each dict is a data point
+        collate_cfg: configuration for collation
+    """
+    # Assume all keys in the batch are the same
+    return_dict = {"B": len(batch)}
 
-    return collate_fn
+    length = collate_cfg.max_motion_frames
+    if mode in ["val", "test"] and "K_fullimg" in batch[0]:
+        length = batch[0]["K_fullimg"].shape[0]
+
+    # Get a superset of all keys from all batch items
+    mandatory_keys = [
+        "has_text",
+        "has_audio",
+        "has_music",
+        "caption",
+        "text_embed",
+        "music_embed",
+        "music_array",
+        "music_fps",
+        "music_beats",
+        "audio_array",
+        "audio_fps",
+        "use_det_kp",
+        "humanoid_obs",
+        "humanoid_clean_action",
+    ]
+    keys = set(mandatory_keys)
+    for item in batch:
+        keys.update(item.keys())
+    keys = sorted(keys)
+
+    for k in keys:
+        if k.startswith("meta"):  # data information, do not batch
+            return_dict[k] = [d[k] for d in batch]
+        elif k == "multi_text_embed":
+            # Get max length across batch
+            max_len = max(d[k].shape[0] for d in batch if k in d)
+            padded_tensors = []
+            for d in batch:
+                if k in d:
+                    padded = torch.cat(
+                        [
+                            d[k],
+                            torch.zeros(max_len - d[k].shape[0], *d[k].shape[1:]).to(
+                                d[k]
+                            ),
+                        ],
+                        dim=0,
+                    )
+                    padded_tensors.append(padded)
+                else:
+                    # Handle case where key is missing in this batch item
+                    continue
+            if padded_tensors:
+                return_dict[k] = default_collate(padded_tensors)
+        else:
+            vals = []
+            for d in batch:
+                if k not in d:
+                    if k in collate_cfg.default_feature_val:
+                        val = collate_cfg.default_feature_val[k]
+                    elif k in collate_cfg.default_frame_feature_dim:
+                        length_multiplier = (
+                            collate_cfg.default_seq_feature_length_multiplier.get(k, 1)
+                        )
+                        val = torch.zeros(
+                            length * length_multiplier,
+                            *collate_cfg.default_frame_feature_dim[k],
+                            dtype=eval(
+                                collate_cfg.default_feature_type.get(k, "torch.float32")
+                            ),
+                        )
+                    elif k in collate_cfg.default_seq_feature_dim:
+                        val = torch.zeros(
+                            *collate_cfg.default_seq_feature_dim[k],
+                            dtype=eval(
+                                collate_cfg.default_feature_type.get(k, "torch.float32")
+                            ),
+                        )
+                    else:
+                        raise ValueError(f"Key {k} not found in collate_cfg")
+                    vals.append(val)
+                else:
+                    vals.append(d[k])
+            return_dict[k] = default_collate(vals)
+
+    return return_dict
 
 
 class DataModule(pl.LightningDataModule):
@@ -112,6 +116,7 @@ class DataModule(pl.LightningDataModule):
         limit_each_trainset=None,
         train_subset_ratio=None,
         train_2d_only=False,
+        collate_cfg: DictConfig = None,
     ):
         """This is a general datamodule that can be used for any dataset.
         Train uses ConcatDataset
@@ -127,7 +132,7 @@ class DataModule(pl.LightningDataModule):
         self.limit_each_trainset = limit_each_trainset
         self.train_subset_ratio = train_subset_ratio
         self.train_2d_only = train_2d_only
-
+        self.collate_cfg = collate_cfg
         # Train uses concat dataset
         if "train" in dataset_opts:
             assert "train" in self.loader_opts, "train not in loader_opts"
@@ -189,8 +194,8 @@ class DataModule(pl.LightningDataModule):
                 persistent_workers=True and self.loader_opts.train.num_workers > 0,
                 batch_size=self.loader_opts.train.batch_size,
                 drop_last=True,
-                collate_fn=get_collate_fn(
-                    encoded_music_dim=self.loader_opts.encoded_music_dim,
+                collate_fn=partial(
+                    collate_fn, mode="train", collate_cfg=self.collate_cfg
                 ),
             )
         else:
@@ -208,8 +213,8 @@ class DataModule(pl.LightningDataModule):
                         persistent_workers=True
                         and self.loader_opts.val.num_workers > 0,
                         batch_size=self.loader_opts.val.batch_size,
-                        collate_fn=get_collate_fn(
-                            encoded_music_dim=self.loader_opts.encoded_music_dim,
+                        collate_fn=partial(
+                            collate_fn, mode="val", collate_cfg=self.collate_cfg
                         ),
                     )
                 )
@@ -228,8 +233,8 @@ class DataModule(pl.LightningDataModule):
                         num_workers=self.loader_opts.test.num_workers,
                         persistent_workers=False,
                         batch_size=self.loader_opts.test.batch_size,
-                        collate_fn=get_collate_fn(
-                            encoded_music_dim=self.loader_opts.encoded_music_dim,
+                        collate_fn=partial(
+                            collate_fn, mode="test", collate_cfg=self.collate_cfg
                         ),
                     )
                 )

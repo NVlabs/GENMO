@@ -71,25 +71,44 @@ class Pipeline(nn.Module):
                 persistent=False,
             )
 
+        # Load normalizer stats
+        self.normalizer_stats = {}
+        if "norm_attr_stats" in args:
+            for key, stats_path in args.norm_attr_stats.items():
+                self.normalizer_stats[key] = torch.load(
+                    stats_path, map_location="cpu", weights_only=False
+                )
+
         self.denoiser3d.endecoder = self.endecoder
 
         self.f_condition_dim = {
-            "obs": 3,
-            "f_cliffcam": 3,
-            "f_cam_angvel": 6,
-            "f_imgseq": 1024,
+            "obs": (17, 3),
+            "f_cliffcam": (3,),
+            "f_cam_angvel": (6,),
+            "f_imgseq": (1024,),
             # "encoded_music": 438,
             "encoded_music": self.args.encoded_music_dim,
             "encoded_audio": 128,
-            "observed_motion_3d": 151,
+            "observed_motion_3d": (151,),
+            "humanoid_obs": (self.args.get("humanoid_obs_dim", 358),),
+            "humanoid_rgb_obs": self.args.get("humanoid_rgb_obs_dim", (4, 100, 100)),
+            "humanoid_contact_force": (90,),
         }
+
+    def normalize_attr(self, x, key):
+        """Normalize input tensor using stored statistics"""
+        mean = self.normalizer_stats[key]["mean"].to(x)
+        std = self.normalizer_stats[key]["std"].to(x)
+        return (x - mean) / std
 
     # ========== Training ========== #
 
     def prepare_inputs(self, inputs, train):
-        B, L = inputs["obs"].shape[:2]
+        B, L = inputs["B"], inputs["L"]
 
-        if "use_cliffcam" not in inputs or inputs["use_cliffcam"].any():
+        if "bbx_xys" in inputs and (
+            "use_cliffcam" not in inputs or inputs["use_cliffcam"].any()
+        ):
             inputs["f_cliffcam"] = compute_bbox_info_bedlam(
                 inputs["bbx_xys"], inputs["K_fullimg"]
             )  # (B, L, 3)
@@ -104,12 +123,16 @@ class Pipeline(nn.Module):
             inputs["f_cam_angvel"] = f_cam_angvel
 
         f_condition = dict()
+        for k in self.normalizer_stats:
+            if k in inputs:
+                inputs[k] = self.normalize_attr(inputs[k], k)
+
         for k in self.args.in_attr:
             if k in inputs:
                 f_condition[k] = inputs[k]
             else:
-                f_condition[k] = torch.zeros(B, L, self.f_condition_dim[k]).to(
-                    inputs["obs"]
+                f_condition[k] = torch.zeros(B, L, *self.f_condition_dim[k]).to(
+                    inputs["device"]
                 )
         for k in self.args.mask_out_attr:
             f_condition[k] = torch.zeros_like(f_condition[k])
@@ -130,8 +153,11 @@ class Pipeline(nn.Module):
                 1 - inputs["text_mask"][:, None, None].float()
             )
 
-        if train:
-            f_condition = randomly_set_null_condition(f_condition, 0.1)
+        if train and not self.args.get("disable_random_null_condition", False):
+            skip_keys = self.args.get("skip_keys_for_null_condition", ["humanoid_obs"])
+            f_condition = randomly_set_null_condition(
+                f_condition, 0.1, skip_keys=skip_keys
+            )
 
         eval_gen_only = inputs.get("eval_gen_only", False)
         if eval_gen_only:
@@ -170,13 +196,20 @@ class Pipeline(nn.Module):
         static_cam=False,
         global_step=0,
         mode=None,
+        test_mode=None,
     ):
         outputs = dict()
         inputs = self.prepare_inputs(inputs, train)
 
         # Forward & output
         model_output = self.denoiser3d(
-            inputs, train=train, postproc=postproc, static_cam=static_cam, mode=mode
+            inputs,
+            train=train,
+            postproc=postproc,
+            static_cam=static_cam,
+            mode=mode,
+            test_mode=test_mode,
+            normalizer_stats=self.normalizer_stats,
         )  # pred_x, pred_cam, static_conf_logits
         decode_dict = self.endecoder.decode(model_output["pred_x"])  # (B, L, C) -> dict
         outputs.update({"model_output": model_output, "decode_dict": decode_dict})
@@ -187,8 +220,10 @@ class Pipeline(nn.Module):
             ]
             outputs["intermediate_decode_dict"] = int_decode_dict
 
-        # Post-processing
-        if self.endecoder.encode_type == "gvhmr":
+        # Post-processing``
+        if "gvhmr" in self.endecoder.feature_arr and not (
+            type(test_mode) == str and "humanoid" in test_mode
+        ):
             outputs["pred_smpl_params_incam"] = {
                 "body_pose": decode_dict["body_pose"],  # (B, L, 63)
                 "betas": decode_dict["betas"],  # (B, L, 10)
@@ -215,7 +250,7 @@ class Pipeline(nn.Module):
         if not train:
             # if eval_gen_only:
             #     inputs["cam_angvel"] = torch.zeros(decode_dict["global_orient_gv"].shape[:2] + (6,), device=decode_dict["global_orient_gv"].device)
-            if self.endecoder.encode_type == "gvhmr":
+            if "gvhmr" in self.endecoder.feature_arr:
                 if self.args.get("infer_version", 2) == 2:
                     pred_smpl_params_global = (
                         get_smpl_params_w_Rt_v2(  # This function has for-loop
@@ -314,18 +349,19 @@ class Pipeline(nn.Module):
                     outputs["pred_smpl_params_incam"]["body_pose"] = (
                         pred_smpl_params_body_pose
                     )
-            else:
+            elif "body_pose" in decode_dict:
                 outputs["pred_smpl_params_global"] = {
                     "body_pose": decode_dict["body_pose"],
                     "betas": decode_dict["betas"],
                     "global_orient": decode_dict["global_orient_w"],
                     "transl": decode_dict["transl_w"],
                 }
-            outputs["static_conf_logits"] = model_output["static_conf_logits"]
+            if "static_conf_logits" in model_output:
+                outputs["static_conf_logits"] = model_output["static_conf_logits"]
 
             if (
                 postproc
-                and self.endecoder.encode_type == "gvhmr"
+                and "gvhmr" in self.endecoder.feature_arr
                 and self.args.get("infer_version", 2) != 3
             ):  # apply post-processing
                 if static_cam:  # extra post-processing to utilize static camera prior
@@ -350,7 +386,8 @@ class Pipeline(nn.Module):
                 body_pose = process_ik(outputs, self.endecoder)
                 decode_dict["body_pose"] = body_pose
                 outputs["pred_smpl_params_global"]["body_pose"] = body_pose
-                outputs["pred_smpl_params_incam"]["body_pose"] = body_pose
+                if "pred_smpl_params_incam" in outputs:
+                    outputs["pred_smpl_params_incam"]["body_pose"] = body_pose
 
             return outputs
 
@@ -360,30 +397,31 @@ class Pipeline(nn.Module):
         gen_only = inputs.get("gen_only", None)
 
         # 1. Simple loss: MSE
-        pred_x = model_output["pred_x"]  # (B, L, C)
-        target_x = inputs["target_x"]  # (B, L, C)
-        simple_loss = F.mse_loss(pred_x, target_x, reduction="none")
-        if (
-            gen_only is not None
-            and self.weights.get("gen_only_no_reg_loss", False)
-            and mode == "regression"
-        ):
-            simple_loss[gen_only] = 0
-        mask_simple = (
-            mask[:, :, None].expand(-1, -1, pred_x.size(2)).clone()
-        )  # (B, L, C)
-        if self.endecoder.encode_type == "gvhmr":
-            mask_simple[inputs["mask"]["spv_incam_only"], :, 142:] = (
-                False  # 3dpw training
-            )
-        if self.weights.get("simple_loss_local_only", False):
-            mask_simple[..., 142:] = False
-        simple_loss = (simple_loss * mask_simple).mean()
-        total_loss += simple_loss * self.weights.get("simple", 1.0)
-        outputs["simple_loss"] = simple_loss
+        if self.weights.get("simple", 1.0) > 0.0:
+            pred_x = model_output["pred_x"][..., :151]  # (B, L, C)
+            target_x = inputs["target_x"][..., :151]  # (B, L, C)
+            simple_loss = F.mse_loss(pred_x, target_x, reduction="none")
+            if (
+                gen_only is not None
+                and self.weights.get("gen_only_no_reg_loss", False)
+                and mode == "regression"
+            ):
+                simple_loss[gen_only] = 0
+            mask_simple = (
+                mask[:, :, None].expand(-1, -1, pred_x.size(2)).clone()
+            )  # (B, L, C)
+            if "gvhmr" in self.endecoder.feature_arr:
+                mask_simple[inputs["mask"]["spv_incam_only"], :, 142:] = (
+                    False  # 3dpw training
+                )
+            if self.weights.get("simple_loss_local_only", False):
+                mask_simple[..., 142:] = False
+            simple_loss = (simple_loss * mask_simple).mean()
+            total_loss += simple_loss * self.weights.get("simple", 1.0)
+            outputs["simple_loss"] = simple_loss
 
         # 2. Extra loss
-        if self.endecoder.encode_type == "gvhmr":
+        if "gvhmr" in self.endecoder.feature_arr:
             extra_funcs = [
                 compute_extra_incam_loss,
                 compute_extra_global_loss,
@@ -392,6 +430,12 @@ class Pipeline(nn.Module):
                 extra_loss, extra_loss_dict = extra_func(inputs, outputs, self, mode)
                 total_loss += extra_loss
                 outputs.update(extra_loss_dict)
+
+        humanoid_loss, humanoid_loss_dict = compute_humanoid_loss(
+            inputs, outputs, self, mode
+        )
+        total_loss += humanoid_loss
+        outputs.update(humanoid_loss_dict)
 
         outputs["loss"] = total_loss
         return outputs
@@ -426,7 +470,7 @@ class Pipeline(nn.Module):
         outputs.update({"2d_model_output": model_output, "2d_decode_dict": decode_dict})
 
         # Post-processing
-        if self.endecoder.encode_type == "gvhmr":
+        if "gvhmr" in self.endecoder.feature_arr:
             outputs["2d_pred_smpl_params_incam"] = {
                 "body_pose": decode_dict["body_pose"],  # (B, L, 63)
                 "betas": decode_dict["betas"],  # (B, L, 10)
@@ -437,7 +481,7 @@ class Pipeline(nn.Module):
             }
 
         if not train:
-            if self.endecoder.encode_type == "gvhmr":
+            if "gvhmr" in self.endecoder.feature_arr:
                 pred_smpl_params_global = (
                     get_smpl_params_w_Rt_v2(  # This function has for-loop
                         global_orient_gv=decode_dict["global_orient_gv"],
@@ -461,7 +505,7 @@ class Pipeline(nn.Module):
             outputs["static_conf_logits"] = model_output["static_conf_logits"]
 
             if (
-                postproc and self.endecoder.encode_type == "gvhmr"
+                postproc and "gvhmr" in self.endecoder.feature_arr
             ):  # apply post-processing
                 if static_cam:  # extra post-processing to utilize static camera prior
                     outputs["2d_pred_smpl_params_global"]["transl"] = (
@@ -509,7 +553,7 @@ class Pipeline(nn.Module):
         endecoder = self.endecoder
         # mask_reproj = ~inputs["mask"]["spv_incam_only"]  # do not supervise reproj for 3DPW
 
-        if self.endecoder.encode_type == "gvhmr":
+        if "gvhmr" in self.endecoder.feature_arr:
             if self.weights.get("j2d_train2d", 0.0) > 0.0 and not (
                 mode == "regression" and self.weights.train2d_skip_regression
             ):
@@ -586,16 +630,87 @@ class Pipeline(nn.Module):
         return outputs
 
 
-def randomly_set_null_condition(f_condition, uncond_prob=0.1):
+def randomly_set_null_condition(f_condition, uncond_prob=0.1, skip_keys=[]):
     """Conditions are in shape (B, L, *)"""
     keys = list(f_condition.keys())
     for k in keys:
+        if k in skip_keys:
+            continue
         if f_condition[k] is None or type(f_condition[k]) == bool:
             continue
         f_condition[k] = f_condition[k].clone()
         mask = torch.rand(f_condition[k].shape[:2]) < uncond_prob
         f_condition[k][mask] = 0.0
     return f_condition
+
+
+def compute_humanoid_loss(inputs, outputs, ppl, mode):
+    """Compute humanoid-specific losses
+
+    Args:
+        inputs (dict): Input data dictionary containing:
+            - mask: Masking information
+            - gen_only: Optional flag for text-only inputs
+        outputs (dict): Model outputs dictionary containing:
+            - model_output: Raw model outputs
+            - decode_dict: Decoded model outputs
+        ppl (Pipeline): Pipeline object containing:
+            - weights: Loss weights configuration
+            - endecoder: Encoder/decoder object
+            - args: Pipeline arguments
+        mode (str): Current training mode
+
+    Returns:
+        dict: Dictionary containing computed losses
+    """
+    weights = ppl.weights
+    # gen_only_losses = weights.get("gen_only_losses", "all")
+    # gen_only = inputs.get("gen_only", None)
+
+    # if weights.get("gen_only_no_reg_loss", False) and mode == "regression":
+    #     gen_only_losses = []
+
+    humanoid_loss_dict = {}
+    humanoid_loss = 0
+    mask = inputs["mask"]["humanoid"]  # (B, L)
+
+    # Add humanoid-specific loss computations here
+    # Example:
+    # if weights.humanoid_loss > 0:
+    #     humanoid_loss = compute_specific_loss()
+    #     if gen_only is not None and gen_only_losses != "all" and "humanoid_loss" not in gen_only_losses:
+    #         humanoid_loss[gen_only] = 0
+    #     humanoid_loss = (humanoid_loss * mask).mean()
+    #     extra_loss += humanoid_loss * weights.humanoid_loss
+    #     extra_loss_dict["humanoid_loss"] = humanoid_loss
+
+    # add clean action loss
+    if weights.get("humanoid_clean_action", 0.0) > 0.0:
+        gt_humanoid_clean_action = inputs["humanoid_clean_action"]
+        if "humanoid_clean_action" in outputs["model_output"]:
+            humanoid_clean_action = outputs["model_output"]["humanoid_clean_action"]
+        else:
+            humanoid_clean_action = outputs["decode_dict"]["humanoid_clean_action"]
+        humanoid_clean_action_loss = F.mse_loss(
+            humanoid_clean_action, gt_humanoid_clean_action, reduction="none"
+        )
+        humanoid_clean_action_loss = (
+            humanoid_clean_action_loss * mask[..., None]
+        ).mean()
+        humanoid_loss += humanoid_clean_action_loss * weights.humanoid_clean_action
+        humanoid_loss_dict["humanoid_clean_action_loss"] = humanoid_clean_action_loss
+
+    if weights.get("humanoid_z_action", 0.0) > 0.0:
+        gt_humanoid_z_action = inputs["humanoid_z_action"]
+        humanoid_z_action = outputs["decode_dict"]["humanoid_z_action"]
+        humanoid_z_action_loss = F.mse_loss(
+            humanoid_z_action, gt_humanoid_z_action, reduction="none"
+        )
+        humanoid_z_action_loss = (humanoid_z_action_loss * mask[..., None]).mean()
+        humanoid_loss += humanoid_z_action_loss * weights.humanoid_z_action
+        humanoid_loss_dict["humanoid_z_action_loss"] = humanoid_z_action_loss
+
+    return humanoid_loss, humanoid_loss_dict
 
 
 def compute_extra_incam_loss(inputs, outputs, ppl, mode):

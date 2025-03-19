@@ -4,7 +4,7 @@ import torch
 
 split = "train"
 fname = f"inputs/HumanML3D_SMPL/hmr4d_support/humanml3d_smplhpose_{split}.pth"
-motion_data = torch.load(fname)
+motion_data = torch.load(fname, map_location="cpu")
 
 for vid, data in motion_data.items():
     print(vid)

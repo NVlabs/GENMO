@@ -354,10 +354,10 @@ class UNIMFM_demo(pl.LightningModule):
         )
         outputs["batch_size"] = batch["B"]
         outputs["f_condition_mask"] = batch["f_condition_mask"]
-        outputs["text_only"] = batch.get("text_only", None)
+        outputs["gen_only"] = batch.get("gen_only", None)
         outputs[f"{mode}_condition"] = {
             "f_condition_mask": batch["f_condition_mask"],
-            "text_only": batch.get("text_only", None),
+            "gen_only": batch.get("gen_only", None),
         }
         return outputs
 
@@ -541,7 +541,7 @@ class UNIMFM_demo(pl.LightningModule):
         obs = normalize_kp2d(obs_kp2d, batch["bbx_xys"])  # (B, L, J, 3)
         obs[~batch["mask"]] = 0
         batch["obs"] = obs
-        batch["eval_text_only"] = batch["meta"][0].get("eval_text_only", False)
+        batch["eval_gen_only"] = batch["meta"][0].get("eval_gen_only", False)
         if "text_embed" in batch:
             batch["encoded_text"] = batch["text_embed"].cuda()
         elif self.use_text_encoder:
@@ -570,7 +570,7 @@ class UNIMFM_demo(pl.LightningModule):
             outputs["2d_pred_smpl_params_incam"] = {
                 k: v[0] for k, v in outputs["2d_pred_smpl_params_incam"].items()
             }
-        outputs["eval_text_only"] = batch["eval_text_only"]
+        outputs["eval_gen_only"] = batch["eval_gen_only"]
         outputs["batch"] = batch
         outputs["vis_2d"] = self.model_cfg.get("vis_2d", False)
         return outputs
@@ -726,7 +726,7 @@ class UNIMFM_demo(pl.LightningModule):
                 mask = mask["valid"]
             obs[0, ~mask[0]] = 0
 
-        eval_text_only = batch["meta"][0].get("eval_text_only", False)
+        eval_gen_only = batch["meta"][0].get("eval_gen_only", False)
         batch_ = {
             "length": batch["length"],
             "obs": obs,
@@ -734,7 +734,7 @@ class UNIMFM_demo(pl.LightningModule):
             "K_fullimg": batch["K_fullimg"],
             "cam_angvel": batch["cam_angvel"],
             "f_imgseq": batch["f_imgseq"],
-            "eval_text_only": eval_text_only,
+            "eval_gen_only": eval_gen_only,
             "meta": batch["meta"],
         }
         if infer_version == 3:
@@ -768,7 +768,7 @@ class UNIMFM_demo(pl.LightningModule):
             outputs["pred_smpl_params_incam"] = {
                 k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()
             }
-        outputs["eval_text_only"] = eval_text_only
+        outputs["eval_gen_only"] = eval_gen_only
 
         if do_flip_test:
             flip_test = batch["flip_test"]

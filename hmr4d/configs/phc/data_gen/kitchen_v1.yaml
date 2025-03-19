@@ -1,0 +1,15 @@
+# @package phc
+
+test: True
+# Checkpoint settings
+checkpoint: phc/output/HumanoidIm/dais_kitchen_rightonly_nolook_2_cf_0220/Humanoid.pth
+epoch: -1
+collect_dataset: True
+add_action_noise: False
+action_noise_std: 0.0
+
+# Environment settings
+env:
+  num_envs: 256
+  tile_env: True
+  pos_reset: False

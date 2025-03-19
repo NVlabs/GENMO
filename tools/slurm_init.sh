@@ -41,15 +41,9 @@ else
     fi
 
     results_dir="/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/$user/gvhmr"
-    if [ ! -d "$results_dir" ]; then
-        mkdir -p $results_dir
-    fi
-    if [ ! -d "outputs" ]; then
-        ln -s $results_dir outputs
-    fi
-    if [ ! -d "./inputs" ]; then
-        ln -s /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR ./inputs
-    fi
+    mkdir -p $results_dir
+    ln -s $results_dir outputs
+    ln -s /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR ./inputs
 
     pip install transformers==4.41.2 moviepy imageio einops dnspython numpy==1.23.5 scenepic dill librosa
     # pip install -e third-party/DPVO

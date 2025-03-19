@@ -85,6 +85,9 @@ class AutoResumeCallback(Callback):
             else:
                 print(f"[Auto Resume] Rank {trainer.global_rank} exiting.", flush=True)
 
+            if hasattr(pl_module, "cleanup_for_autoresume"):
+                pl_module.cleanup_for_autoresume()
+
     def on_train_epoch_end(
         self,
         trainer: Trainer,

@@ -62,6 +62,7 @@ class NetworkEncoderRoPE(nn.Module):
         text_mask_prob=0.0,
         input_remove_global=False,
         input_remove_condition=False,
+        allow_autoregressive=True,
         **kwargs,
     ):
         super().__init__()
@@ -87,6 +88,7 @@ class NetworkEncoderRoPE(nn.Module):
         self.use_text_pos_enc = use_text_pos_enc
         self.input_remove_global = input_remove_global
         self.input_remove_condition = input_remove_condition
+        self.allow_autoregressive = allow_autoregressive
 
         # ===== build model ===== #
         # Input (Kp2d)
@@ -129,6 +131,8 @@ class NetworkEncoderRoPE(nn.Module):
             self.text_encode_layer_idx = list(
                 range(0, num_layers, int(text_encode_mode.split("_")[1]))
             )
+        elif text_encode_mode == "none":
+            self.text_encode_layer_idx = []
         else:
             raise ValueError(f"Invalid text_encode_mode {text_encode_mode}")
         use_self_attn = text_encoder_cfg.get("use_self_attn", False)
@@ -202,6 +206,7 @@ class NetworkEncoderRoPE(nn.Module):
         xt,
         timesteps,
         y=None,
+        inputs=None,
         observed_motion_3d=None,
         motion_mask_3d=None,
         rm_text_flag=None,
@@ -237,15 +242,16 @@ class NetworkEncoderRoPE(nn.Module):
 
         x = self.add_cond_linear(torch.cat([x, xt], dim=-1))
 
-        enc_text = y["encoded_text"].clone()
-        if self.training and self.text_mask_prob > 0:
-            mask = torch.rand((B,), device=x.device) < self.text_mask_prob
-            enc_text = enc_text * (1 - mask[:, None, None].float())
-        if rm_text_flag is not None:
-            enc_text = enc_text * (1 - rm_text_flag[:, None, None].float())
-        emb_text = self.embed_text(enc_text)
-        if self.use_text_pos_enc:
-            emb_text = self.sequence_pos_encoder(emb_text, batch_first=True)
+        if "encoded_text" in y and len(self.text_encode_layer_idx) > 0:
+            enc_text = y["encoded_text"].clone()
+            if self.training and self.text_mask_prob > 0:
+                mask = torch.rand((B,), device=x.device) < self.text_mask_prob
+                enc_text = enc_text * (1 - mask[:, None, None].float())
+            if rm_text_flag is not None:
+                enc_text = enc_text * (1 - rm_text_flag[:, None, None].float())
+            emb_text = self.embed_text(enc_text)
+            if self.use_text_pos_enc:
+                emb_text = self.sequence_pos_encoder(emb_text, batch_first=True)
 
         if multi_text_data is not None:
             multi_text_data["text_embed_feats"] = self.embed_text(
@@ -260,16 +266,41 @@ class NetworkEncoderRoPE(nn.Module):
         assert B == length.size(0)
         pmask = ~length_to_mask(length, L)  # (B, L)
 
-        if L > self.max_len:
-            attnmask = torch.ones((L, L), device=x.device, dtype=torch.bool)
+        autoregressive_mask = inputs.get("has_humanoid_data", None)
+        use_autoregressive = (
+            self.allow_autoregressive
+            and autoregressive_mask is not None
+            and autoregressive_mask.any()
+        )
+        if L > self.max_len or use_autoregressive:
+            attnmask = torch.ones((B, L, L), device=x.device, dtype=torch.bool)
+            attnmask_noar = torch.ones((L, L), device=x.device, dtype=torch.bool)
+            attnmask_ar = torch.ones((L, L), device=x.device, dtype=torch.bool)
             for i in range(L):
                 min_ind = max(0, i - self.max_len // 2)
                 max_ind = min(L, i + self.max_len // 2)
-                max_ind = max(self.max_len, max_ind)
-                min_ind = min(L - self.max_len, min_ind)
-                attnmask[i, min_ind:max_ind] = False
+                eff_max_len = min(self.max_len, L)
+                max_ind_exp = max(eff_max_len, max_ind)
+                min_ind_exp = min(L - eff_max_len, min_ind)
+                attnmask_ar[i, min_ind:max_ind] = False
+                attnmask_noar[i, min_ind_exp:max_ind_exp] = False
+            if use_autoregressive:
+                attnmask[autoregressive_mask] = attnmask_ar
+                attnmask[~autoregressive_mask] = attnmask_noar
+            else:
+                attnmask[:] = attnmask_noar.unsqueeze(0)
         else:
             attnmask = None
+
+        if use_autoregressive:
+            # Create causal mask (upper triangular = True)
+            causal_mask = torch.triu(
+                torch.ones((L, L), device=x.device, dtype=torch.bool), diagonal=1
+            )
+
+            # Apply causal mask using logical OR where autoregressive_mask is True
+            autoregressive_mask = autoregressive_mask.view(B, 1, 1)
+            attnmask = attnmask | (causal_mask.unsqueeze(0) & autoregressive_mask)
 
         # Transformer
         for i, block in enumerate(self.blocks):
@@ -287,7 +318,7 @@ class NetworkEncoderRoPE(nn.Module):
 
         # Output
         sample = self.final_layer(x)  # (B, L, C)
-        if self.avgbeta:
+        if self.avgbeta:  # TODO: fix based on beta dims
             betas = (sample[..., 126:136] * (~pmask[..., None])).sum(1) / length[
                 :, None
             ]  # (B, C)

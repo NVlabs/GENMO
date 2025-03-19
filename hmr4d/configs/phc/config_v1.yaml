@@ -1,0 +1,21 @@
+defaults:
+  - config
+  - override /env@env: env_im
+  - override /robot@robot: smpl_upright_humanoid
+  - override /learning@learning: ppo_im_big
+  - _self_
+
+exp_name: "1108_phc_multi_silu"
+
+# Environment settings
+env:
+  num_envs: 2048
+  motion:
+    motion_file: phc/data/amass/pkls/humanml3d_smplhpose_train_upright.pkl
+
+# Learning parameters
+learning:
+  params:
+    network:
+      mlp:
+        activation: swish

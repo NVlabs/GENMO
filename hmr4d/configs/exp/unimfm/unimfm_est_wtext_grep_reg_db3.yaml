@@ -80,7 +80,7 @@ pipeline:
     endecoder_opt: ${endecoder}
     normalize_cam_angvel: true
     use_regression_outputs_prob: 1.
-    use_gt_for_text_only: False
+    use_gt_for_gen_only: False
     use_cfg_sampler_for_text: true
     weights:
       cr_j3d: 500.

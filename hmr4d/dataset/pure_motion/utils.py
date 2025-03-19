@@ -58,14 +58,14 @@ def interpolate_smpl_params(smpl_params, tgt_len):
     }
 
 
-def pad_smpl_params(smpl_params, tgt_len):
+def pad_data(smpl_params, tgt_len):
     for key in smpl_params.keys():
         smpl_params[key] = torch.cat(
             [
                 smpl_params[key],
                 torch.zeros(
                     tgt_len - smpl_params[key].shape[0], *smpl_params[key].shape[1:]
-                ),
+                ).to(smpl_params[key]),
             ],
             dim=0,
         )

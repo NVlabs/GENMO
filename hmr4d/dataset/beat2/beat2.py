@@ -290,8 +290,10 @@ class BEAT2SmplDataset(data.Dataset):
             "T_w2c": normed_T_w2c,
             "audio_array": data["audio_array"],
             "audio_fps": audio_fps,
+            "has_audio": True,
             "mask": {
                 "valid": get_valid_mask(length, length),
+                "humanoid": get_valid_mask(length, 0),
                 "vitpose": False,
                 "bbx_xys": False,
                 "f_imgseq": False,

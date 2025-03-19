@@ -31,8 +31,9 @@
 			"**/assets/**": true,
 			"**/data/**": true,
 			"**/dataset/**": true,
-			"**/out/**": true
-		}
-
+			"**/out/**": true,
+			"**/output*/**": true,
+			"**/inputs/**": true,
+		},
 	}
 }

@@ -1,0 +1,31 @@
+defaults:
+  - config
+  - override /env@env: env_omnivisgrasp_lift_z
+  - override /robot@robot: smplx_humanoid
+  - override /learning@learning: ppo_omnigrasp_z_rnn_vis
+  - override /sim@sim: inter_sim
+  - override /control@control: inter_control
+  - _self_
+
+exp_name: "dais_rgbd_0223"
+
+# Environment settings
+env:
+  num_envs: 512
+  motion:
+    motion_file: phc/data/amass_x/grab/grab_train_bps.pkl
+
+  z_config:
+    models:
+      - phc/output/HumanoidIm/1207_pulsex_devdex_noauto/Humanoid_00035000.pth
+
+  vision_config:
+    rgb_res: [100, 100]
+
+  task_obs_config:
+    obs_names:
+      - rgbd
+      - contact_forces
+      - contact_hand_and_time_info
+
+  pregrasp_reward_type: pregrasp_usehand_reward

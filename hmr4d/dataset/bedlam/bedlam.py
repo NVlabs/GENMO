@@ -223,6 +223,7 @@ class BedlamDatasetV2(ImgfeatMotionDatasetBase):
             "T_w2c": normed_T_w2c,  # (F, 4, 4)
             "mask": {
                 "valid": get_valid_mask(max_len, length),
+                "humanoid": get_valid_mask(max_len, 0),
                 "vitpose": False,
                 "bbx_xys": True,
                 "f_imgseq": True,

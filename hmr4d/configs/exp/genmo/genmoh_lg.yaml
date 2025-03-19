@@ -2,7 +2,7 @@
 # based on unimfm_est_wtext_grep_reg_new3_j2d2_st_norm
 defaults:
   - /diffusion@model_cfg.diffusion: ddim
-  - /phc: config
+  - /phc: config_v1
   - override /data: mocap/trainX_testY
   - override /model: gvhmr/unimfm
   - override /endecoder: gvhmr/v1_amass_local_bedlam_cam
@@ -104,8 +104,8 @@ pipeline:
       transl_w: 1.
       static_conf_bce: 1.
 
-      text_only_losses: ["simple", "static_conf_bce"]
-      text_only_no_reg_loss: true
+      gen_only_losses: ["simple", "static_conf_bce"]
+      gen_only_no_reg_loss: true
 
     static_conf:
       vel_thr: 0.15

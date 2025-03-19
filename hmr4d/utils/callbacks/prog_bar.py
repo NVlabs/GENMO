@@ -115,6 +115,7 @@ class ProgressReporter(ProgressBar, pl.Callback):
         self.finish_prompt = "✅"
         # 2. Utils for evaluation
         self.n_finished = 0
+        self.time_train_epoch_start = time()
 
     def disable(self):
         self.enable = False

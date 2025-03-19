@@ -1,9 +1,13 @@
+defaults:
+  - collate_cfg: default
+
 # definition of lightning datamodule (dataset + dataloader)
 _target_: hmr4d.datamodule.mocap_trainX_testY.DataModule
 
 dataset_opts:
   train: ${train_datasets}
   val: ${test_datasets}
+  max_motion_frames: 120
 
 loader_opts:
   train:
