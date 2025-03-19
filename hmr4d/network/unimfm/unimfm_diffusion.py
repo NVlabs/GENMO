@@ -184,6 +184,8 @@ class UNIMFMDiffusion(nn.Module):
             "humanoid_obs",
             "humanoid_rgb_obs",
             "multi_text_embed",
+            "encoded_music",
+            "encoded_audio",
         ]
         self.add_feature_embedders = nn.ModuleDict()
         for k in self.args.in_attr:
@@ -674,9 +676,7 @@ class UNIMFMDiffusion(nn.Module):
             self.test_gen_only_diffusion if eval_gen_only else self.test_diffusion
         )
         denoiser = self.denoiser
-        length = (
-            torch.ones_like(inputs["length"]) * self.max_len
-        )  # use max length for test
+        length = inputs["length"]
         regression_only = self.args.get("regression_only", False) and not eval_gen_only
         if self.args.get("force_regression_only", False):
             regression_only = True

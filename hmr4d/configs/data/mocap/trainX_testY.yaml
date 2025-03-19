@@ -1,3 +1,6 @@
+defaults:
+  - collate_cfg: default
+
 # definition of lightning datamodule (dataset + dataloader)
 _target_: hmr4d.datamodule.mocap_trainX_testY.DataModule
 
@@ -15,13 +18,3 @@ loader_opts:
     num_workers: 1
 
 limit_each_trainset: null
-
-collate_cfg:
-  default_feature_dim:
-    humanoid_obs:
-      - ${....dataset_opts.max_motion_frames}
-      - 358
-    humanoid_clean_action:
-      - ${....dataset_opts.max_motion_frames}
-      - 69
-    text_embed: [50, 1024]

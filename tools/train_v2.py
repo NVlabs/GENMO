@@ -1,6 +1,11 @@
+import builtins
 import os
 import sys
 from datetime import datetime
+
+from omegaconf import OmegaConf
+
+OmegaConf.register_new_resolver("eval", builtins.eval)
 
 
 def _get_rank():

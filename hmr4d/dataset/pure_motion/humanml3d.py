@@ -481,6 +481,9 @@ class Humanml3dDataset(BaseDataset):
         # Returns: do not forget to make it batchable! (last lines)
         # NOTE: bbx_xys and f_imgseq will be added later
         max_len = length
+        if self.eval_text_only:
+            valid_length = length
+
         return_data = {
             "meta": {
                 "data_name": data_name,
@@ -508,6 +511,7 @@ class Humanml3dDataset(BaseDataset):
             "noisy_cam_tvel": noisy_cam_tvel,  # (F, 3),
             "T_w2c": normed_T_w2c,
             "caption": caption,
+            "has_text": caption != "",
             "text_embed": text_embed,
             "mask": {
                 "valid": get_valid_mask(length, valid_length),

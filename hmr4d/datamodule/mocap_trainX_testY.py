@@ -15,62 +15,96 @@ rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (4096, rlimit[1]))
 
 
-def collate_fn(batch, collate_cfg=None):
+def collate_fn(batch, mode, collate_cfg=None):
     """Handle meta and Add batch size to the return dict
     Args:
         batch: list of dict, each dict is a data point
         collate_cfg: configuration for collation
     """
     # Assume all keys in the batch are the same
-    return_dict = {}
-    keys = set(batch[0].keys())
-    keys.update(
-        {"caption", "text_embed", "use_det_kp", "humanoid_obs", "humanoid_clean_action"}
-    )
-    keys_using_default_feature_dim = set(collate_cfg.default_feature_dim.keys())
+    return_dict = {"B": len(batch)}
+
+    length = collate_cfg.max_motion_frames
+    if mode in ["val", "test"] and "K_fullimg" in batch[0]:
+        length = batch[0]["K_fullimg"].shape[0]
+
+    # Get a superset of all keys from all batch items
+    mandatory_keys = [
+        "has_text",
+        "has_audio",
+        "has_music",
+        "caption",
+        "text_embed",
+        "music_embed",
+        "music_array",
+        "music_fps",
+        "music_beats",
+        "audio_array",
+        "use_det_kp",
+        "humanoid_obs",
+        "humanoid_clean_action",
+    ]
+    keys = set(mandatory_keys)
+    for item in batch:
+        keys.update(item.keys())
+    keys = sorted(keys)
+
     for k in keys:
         if k.startswith("meta"):  # data information, do not batch
             return_dict[k] = [d[k] for d in batch]
-        elif k == "caption":
-            return_dict[k] = [d[k] if k in d else "" for d in batch]
-        elif k == "use_det_kp":
-            if "K_fullimg" in batch[0]:
-                return_dict[k] = default_collate(
-                    [
-                        d[k] if k in d else torch.zeros(d["K_fullimg"].shape[0])
-                        for d in batch
-                    ]
-                )
-        elif k in keys_using_default_feature_dim:
-            return_dict[k] = default_collate(
-                [
-                    d.get(k, torch.zeros(*collate_cfg.default_feature_dim[k]))
-                    for d in batch
-                ]
-            )
         elif k == "multi_text_embed":
             # Get max length across batch
-            max_len = max(d[k].shape[0] for d in batch)
+            max_len = max(d[k].shape[0] for d in batch if k in d)
             padded_tensors = []
             for d in batch:
-                padded = torch.cat(
-                    [
-                        d[k],
-                        torch.zeros(max_len - d[k].shape[0], *d[k].shape[1:]).to(d[k]),
-                    ],
-                    dim=0,
-                )
-                padded_tensors.append(padded)
-            return_dict[k] = default_collate(padded_tensors)
+                if k in d:
+                    padded = torch.cat(
+                        [
+                            d[k],
+                            torch.zeros(max_len - d[k].shape[0], *d[k].shape[1:]).to(
+                                d[k]
+                            ),
+                        ],
+                        dim=0,
+                    )
+                    padded_tensors.append(padded)
+                else:
+                    # Handle case where key is missing in this batch item
+                    continue
+            if padded_tensors:
+                return_dict[k] = default_collate(padded_tensors)
         else:
-            return_dict[k] = default_collate([d[k] for d in batch])
-    return_dict["B"] = len(batch)
-    return_dict["has_text"] = torch.tensor(
-        [text != "" for text in return_dict["caption"]]
-    )
-    return return_dict
+            vals = []
+            for d in batch:
+                if k not in d:
+                    if k in collate_cfg.default_feature_val:
+                        val = collate_cfg.default_feature_val[k]
+                    elif k in collate_cfg.default_frame_feature_dim:
+                        length_multiplier = (
+                            collate_cfg.default_seq_feature_length_multiplier.get(k, 1)
+                        )
+                        val = torch.zeros(
+                            length * length_multiplier,
+                            *collate_cfg.default_frame_feature_dim[k],
+                            dtype=eval(
+                                collate_cfg.default_feature_type.get(k, "torch.float32")
+                            ),
+                        )
+                    elif k in collate_cfg.default_seq_feature_dim:
+                        val = torch.zeros(
+                            *collate_cfg.default_seq_feature_dim[k],
+                            dtype=eval(
+                                collate_cfg.default_feature_type.get(k, "torch.float32")
+                            ),
+                        )
+                    else:
+                        raise ValueError(f"Key {k} not found in collate_cfg")
+                    vals.append(val)
+                else:
+                    vals.append(d[k])
+            return_dict[k] = default_collate(vals)
 
-    return collate_fn
+    return return_dict
 
 
 class DataModule(pl.LightningDataModule):
@@ -159,7 +193,9 @@ class DataModule(pl.LightningDataModule):
                 persistent_workers=True and self.loader_opts.train.num_workers > 0,
                 batch_size=self.loader_opts.train.batch_size,
                 drop_last=True,
-                collate_fn=partial(collate_fn, collate_cfg=self.collate_cfg),
+                collate_fn=partial(
+                    collate_fn, mode="train", collate_cfg=self.collate_cfg
+                ),
             )
         else:
             return super().train_dataloader()
@@ -176,7 +212,9 @@ class DataModule(pl.LightningDataModule):
                         persistent_workers=True
                         and self.loader_opts.val.num_workers > 0,
                         batch_size=self.loader_opts.val.batch_size,
-                        collate_fn=partial(collate_fn, collate_cfg=self.collate_cfg),
+                        collate_fn=partial(
+                            collate_fn, mode="val", collate_cfg=self.collate_cfg
+                        ),
                     )
                 )
             return CombinedLoader(loaders, mode="sequential")
@@ -194,7 +232,9 @@ class DataModule(pl.LightningDataModule):
                         num_workers=self.loader_opts.test.num_workers,
                         persistent_workers=False,
                         batch_size=self.loader_opts.test.batch_size,
-                        collate_fn=partial(collate_fn, collate_cfg=self.collate_cfg),
+                        collate_fn=partial(
+                            collate_fn, mode="test", collate_cfg=self.collate_cfg
+                        ),
                     )
                 )
             return CombinedLoader(loaders, mode="sequential")

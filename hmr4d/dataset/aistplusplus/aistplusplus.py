@@ -294,8 +294,10 @@ class AISTPlusPlusSmplDataset(data.Dataset):
             "music_array": data["music_array"],  # (F / 30 * audio_fps, C)
             "music_fps": music_fps,
             "music_beats": data["music_beats"],  # (F,)
+            "has_music": True,
             "mask": {
                 "valid": get_valid_mask(length, length),
+                "humanoid": get_valid_mask(length, 0),
                 "vitpose": False,
                 "bbx_xys": False,
                 "f_imgseq": False,
