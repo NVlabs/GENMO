@@ -17,6 +17,7 @@ default_seq_feature_length_multiplier:
 default_feature_val:
   caption: ""
   music_fps: 30
+  audio_fps: 30
   has_text: False
   has_audio: False
   has_music: False

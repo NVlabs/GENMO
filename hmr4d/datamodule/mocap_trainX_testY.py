@@ -40,6 +40,7 @@ def collate_fn(batch, mode, collate_cfg=None):
         "music_fps",
         "music_beats",
         "audio_array",
+        "audio_fps",
         "use_det_kp",
         "humanoid_obs",
         "humanoid_clean_action",
