@@ -53,7 +53,7 @@ class Humanml3dDataset(BaseDataset):
         max_text_len=50,
         part_ind=-1,
         num_parts=-1,
-        eval_text_only=False,
+        eval_gen_only=False,
         use_random_subset=False,
         random_subset_size=32,
         random_subset_seed=7,
@@ -99,7 +99,7 @@ class Humanml3dDataset(BaseDataset):
         self.no_subsample = no_subsample
         self.num_parts = num_parts
         self.part_ind = part_ind
-        self.eval_text_only = eval_text_only
+        self.eval_gen_only = eval_gen_only
         self.use_random_subset = use_random_subset
         self.random_subset_seed = random_subset_seed
         self.random_subset_size = random_subset_size
@@ -291,7 +291,7 @@ class Humanml3dDataset(BaseDataset):
             valid_length = raw_subset_len
 
         # text_data = self.rng.choice(raw_data["text_data"])
-        if self.use_random_subset or self.eval_text_only:
+        if self.use_random_subset or self.eval_gen_only:
             text_ind = 0
         else:
             text_ind = self.rng.randint(0, len(raw_data["text_data"]))
@@ -481,7 +481,7 @@ class Humanml3dDataset(BaseDataset):
         # Returns: do not forget to make it batchable! (last lines)
         # NOTE: bbx_xys and f_imgseq will be added later
         max_len = length
-        if self.eval_text_only:
+        if self.eval_gen_only:
             valid_length = length
 
         return_data = {
@@ -490,7 +490,7 @@ class Humanml3dDataset(BaseDataset):
                 "dataset_id": "humanml3d",
                 "idx": idx,
                 "T_w2c": T_w2c,
-                "eval_gen_only": self.eval_text_only,
+                "eval_gen_only": self.eval_gen_only,
                 "mid": mid,
                 "text_ind": text_ind,
                 "mode": self.mode,
@@ -624,7 +624,7 @@ MainStore.store(
         Humanml3dDataset,
         cam_augmentation="v11",
         split="test",
-        eval_text_only=True,
+        eval_gen_only=True,
         no_subsample=True,
     ),
     group=test_group_name,
@@ -635,7 +635,7 @@ MainStore.store(
         Humanml3dDataset,
         cam_augmentation="static",
         split="test",
-        eval_text_only=True,
+        eval_gen_only=True,
         no_subsample=True,
     ),
     group=test_group_name,

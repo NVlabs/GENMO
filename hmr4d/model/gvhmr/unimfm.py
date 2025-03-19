@@ -235,11 +235,11 @@ class UNIMFM(pl.LightningModule):
             elif batch_key in batch:
                 if self.model_cfg.get("perframe_condition_exists", False):
                     f_condition_exists[k] = (
-                        batch[batch_key].view(B, L, -1) > 1e-5
+                        batch[batch_key].view(B, L, -1).abs() > 1e-5
                     ).any(dim=-1)
                 else:
                     f_condition_exists[k] = (
-                        (batch[batch_key].view(B, -1) > 1e-5)
+                        (batch[batch_key].view(B, -1).abs() > 1e-5)
                         .any(dim=-1)
                         .unsqueeze(-1)
                         .repeat(1, L)
@@ -1133,7 +1133,7 @@ class UNIMFM(pl.LightningModule):
             "cam_angvel": torch.zeros(B, L, 6).to(device),
             "text_label_ids": torch.zeros(B, L).long().to(device),
             "has_humanoid_data": torch.tensor([True] * B).to(device),
-            "eval_text_only": batch["meta"][0].get("eval_text_only", False),
+            "eval_gen_only": batch["meta"][0].get("eval_gen_only", False),
         }
         if "text_embed" in batch:
             inputs["encoded_text"] = batch["text_embed"].cuda()

@@ -650,7 +650,7 @@ def compute_humanoid_loss(inputs, outputs, ppl, mode):
     Args:
         inputs (dict): Input data dictionary containing:
             - mask: Masking information
-            - text_only: Optional flag for text-only inputs
+            - gen_only: Optional flag for text-only inputs
         outputs (dict): Model outputs dictionary containing:
             - model_output: Raw model outputs
             - decode_dict: Decoded model outputs
@@ -664,11 +664,11 @@ def compute_humanoid_loss(inputs, outputs, ppl, mode):
         dict: Dictionary containing computed losses
     """
     weights = ppl.weights
-    # text_only_losses = weights.get("text_only_losses", "all")
-    # text_only = inputs.get("text_only", None)
+    # gen_only_losses = weights.get("gen_only_losses", "all")
+    # gen_only = inputs.get("gen_only", None)
 
-    # if weights.get("text_only_no_reg_loss", False) and mode == "regression":
-    #     text_only_losses = []
+    # if weights.get("gen_only_no_reg_loss", False) and mode == "regression":
+    #     gen_only_losses = []
 
     humanoid_loss_dict = {}
     humanoid_loss = 0
@@ -678,8 +678,8 @@ def compute_humanoid_loss(inputs, outputs, ppl, mode):
     # Example:
     # if weights.humanoid_loss > 0:
     #     humanoid_loss = compute_specific_loss()
-    #     if text_only is not None and text_only_losses != "all" and "humanoid_loss" not in text_only_losses:
-    #         humanoid_loss[text_only] = 0
+    #     if gen_only is not None and gen_only_losses != "all" and "humanoid_loss" not in gen_only_losses:
+    #         humanoid_loss[gen_only] = 0
     #     humanoid_loss = (humanoid_loss * mask).mean()
     #     extra_loss += humanoid_loss * weights.humanoid_loss
     #     extra_loss_dict["humanoid_loss"] = humanoid_loss

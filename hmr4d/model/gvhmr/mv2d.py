@@ -863,7 +863,7 @@ class MV2D(pl.LightningModule):
             else:
                 outputs_2d = self.validation_2d(batch_2d, batch_idx, dataloader_idx)
 
-        eval_text_only = batch["meta"][0].get("eval_text_only", False)
+        eval_gen_only = batch["meta"][0].get("eval_gen_only", False)
         batch_ = {
             "length": batch["length"],
             "obs": obs,
@@ -871,7 +871,7 @@ class MV2D(pl.LightningModule):
             "K_fullimg": batch["K_fullimg"],
             "cam_angvel": batch["cam_angvel"],
             "f_imgseq": batch["f_imgseq"],
-            "eval_text_only": eval_text_only,
+            "eval_gen_only": eval_gen_only,
         }
 
         batch_["gt"] = self.pipeline.endecoder.encode(batch)
@@ -913,7 +913,7 @@ class MV2D(pl.LightningModule):
             outputs["pred_smpl_params_incam"] = {
                 k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()
             }
-        outputs["eval_text_only"] = eval_text_only
+        outputs["eval_gen_only"] = eval_gen_only
 
         if do_flip_test:
             flip_test = batch["flip_test"]

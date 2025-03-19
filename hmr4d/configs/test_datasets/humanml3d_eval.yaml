@@ -1,7 +1,7 @@
 humanml3d_eval:
   _target_: hmr4d.dataset.pure_motion.humanml3d.Humanml3dDataset
-  eval_text_only: true
+  eval_gen_only: true
   cam_augmentation: v11
   use_random_subset: true
-  random_subset_size: ${num_test_data}
+  random_subset_size: 2
   random_subset_seed: 7

@@ -12,7 +12,7 @@ python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=1 num_
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=0 num_parts=2 trial_ind=4 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=1 num_parts=2 trial_ind=4 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"
 
-ts_cmd="++model_cfg.diffusion.text_only_test_timestep_respacing=2"
+ts_cmd="++model_cfg.diffusion.gen_only_test_timestep_respacing=2"
 text_feats_dir="text_feats_ts2"
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=0 num_parts=2 trial_ind=0 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=1 num_parts=2 trial_ind=0 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"
@@ -25,7 +25,7 @@ python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=1 num_
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=0 num_parts=2 trial_ind=4 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=1 num_parts=2 trial_ind=4 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"
 
-ts_cmd="++model_cfg.diffusion.text_only_test_timestep_respacing=5"
+ts_cmd="++model_cfg.diffusion.gen_only_test_timestep_respacing=5"
 text_feats_dir="text_feats_ts5"
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=0 num_parts=2 trial_ind=0 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=1 num_parts=2 trial_ind=0 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"
@@ -38,7 +38,7 @@ python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=1 num_
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=0 num_parts=2 trial_ind=4 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=1 num_parts=2 trial_ind=4 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"
 
-ts_cmd="++model_cfg.diffusion.text_only_test_timestep_respacing=10"
+ts_cmd="++model_cfg.diffusion.gen_only_test_timestep_respacing=10"
 text_feats_dir="text_feats_ts10"
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=0 num_parts=2 trial_ind=0 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=1 num_parts=2 trial_ind=0 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"
@@ -51,7 +51,7 @@ python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=1 num_
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=0 num_parts=2 trial_ind=4 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=1 num_parts=2 trial_ind=4 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"
 
-ts_cmd="++model_cfg.diffusion.text_only_test_timestep_respacing=50"
+ts_cmd="++model_cfg.diffusion.gen_only_test_timestep_respacing=50"
 text_feats_dir="text_feats_ts50"
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=0 num_parts=2 trial_ind=0 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"
 python tools/test_slurm.py -u yey -cmd "python tools/train_v2.py part_ind=1 num_parts=2 trial_ind=0 global/task=mv2d/save_text2motion_feats exp=unimfm/unimfm_est_st_norm_di_lg  exp_name_var=g8 +test_checkpoint=s050000 ++pipeline.args.test_motion_len=196 ${ts_cmd} text_feats_dir=${text_feats_dir}"

@@ -156,8 +156,8 @@ class Pipeline(nn.Module):
                         > -1
                     )
 
-        eval_text_only = inputs.get("eval_text_only", False)
-        if eval_text_only:
+        eval_gen_only = inputs.get("eval_gen_only", False)
+        if eval_gen_only:
             for k in f_condition.keys():
                 f_condition[k] = torch.zeros_like(f_condition[k])
 
@@ -184,7 +184,7 @@ class Pipeline(nn.Module):
             }
 
         if not train:
-            # if eval_text_only:
+            # if eval_gen_only:
             #     inputs["cam_angvel"] = torch.zeros(decode_dict["global_orient_gv"].shape[:2] + (6,), device=decode_dict["global_orient_gv"].device)
             if self.endecoder.encode_type == "gvhmr":
                 pred_smpl_params_global = (

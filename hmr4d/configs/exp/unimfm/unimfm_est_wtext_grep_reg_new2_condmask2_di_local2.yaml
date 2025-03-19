@@ -86,7 +86,7 @@ pipeline:
     endecoder_opt: ${endecoder}
     normalize_cam_angvel: true
     use_regression_outputs_prob: 1.
-    use_gt_for_text_only: false
+    use_gt_for_gen_only: false
     use_cfg_sampler_for_text: true
     weights:
       cr_j3d: 500.
@@ -102,8 +102,8 @@ pipeline:
       transl_w: 1.
       static_conf_bce: 1.
 
-      text_only_losses: ["simple", "static_conf_bce"]
-      text_only_no_reg_loss: false
+      gen_only_losses: ["simple", "static_conf_bce"]
+      gen_only_no_reg_loss: false
 
     static_conf:
       vel_thr: 0.15

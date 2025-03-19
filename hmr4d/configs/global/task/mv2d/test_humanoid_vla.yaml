@@ -10,7 +10,7 @@ defaults:
 test_datasets:
   humanml3d_eval:
     mode: humanoid_vla
-    eval_text_only: false
+    eval_gen_only: false
 
 task: test
 num_test_data: 32

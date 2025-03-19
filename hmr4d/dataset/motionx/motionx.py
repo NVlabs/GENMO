@@ -48,7 +48,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         max_motion_frames=120,
         wo_img_feat=False,
         subset=None,
-        eval_text_only=False,
+        eval_gen_only=False,
     ):
         self.hmr4d_support_dir = Path("inputs/MotionXpp/hmr4d_support")
         self.root = Path("inputs/MotionXpp/hmr4d_support")
@@ -67,7 +67,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
         self.random_seed = random_seed
         self.wo_img_feat = wo_img_feat
         self.subset = subset
-        self.eval_text_only = eval_text_only
+        self.eval_gen_only = eval_gen_only
         super().__init__()
 
     def _load_dataset(self):
@@ -255,7 +255,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
                 "use_cliffcam": True,
                 "meta": {
                     "dataset_id": "motion-x++2d",
-                    "eval_text_only": True,
+                    "eval_gen_only": True,
                 },
                 "caption": data["text"],
                 "dataset_name": self.dataset_name,
@@ -279,7 +279,7 @@ class MotionXDataset(ImgfeatMotionDatasetBase):
                 "meta": {
                     "data_name": "bedlam",
                     "idx": idx,
-                    "eval_text_only": self.eval_text_only,
+                    "eval_gen_only": self.eval_gen_only,
                 },
                 "length": length,
                 "smpl_params_c": smpl_params_c,

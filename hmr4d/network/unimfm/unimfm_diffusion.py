@@ -822,18 +822,18 @@ class UNIMFMDiffusion(nn.Module):
         normalizer_stats=None,
     ):
         assert not self.training, "forward_test should only be called during inference"
-        eval_text_only = inputs.get("eval_text_only", False)
+        eval_gen_only = inputs.get("eval_gen_only", False)
         diffusion = (
-            self.test_text_only_diffusion if eval_text_only else self.test_diffusion
+            self.test_gen_only_diffusion if eval_gen_only else self.test_diffusion
         )
         denoiser = self.denoiser
         length = inputs["length"]  # (B,) effective length of each sample
-        regression_only = self.args.get("regression_only", False) and not eval_text_only
+        regression_only = self.args.get("regression_only", False) and not eval_gen_only
         if self.args.get("force_regression_only", False):
             regression_only = True
         if (
             self.args.get("use_cfg_sampler_for_text", False)
-            and eval_text_only
+            and eval_gen_only
             and not regression_only
         ):
             denoiser = ClassifierFreeSampleModel(denoiser)
@@ -1032,7 +1032,7 @@ class UNIMFMDiffusion(nn.Module):
                     **denoiser_kwargs,
                 )
             else:
-                if self.args.get("use_cfg_sampler_for_text", False) and eval_text_only:
+                if self.args.get("use_cfg_sampler_for_text", False) and eval_gen_only:
                     denoiser_kwargs["y"]["scale"] = (
                         self.model_cfg.diffusion.guidance_param
                     )
@@ -1046,7 +1046,7 @@ class UNIMFMDiffusion(nn.Module):
                 if self.args.get("force_zero_noise", False):
                     noise = torch.zeros_like(motion)
                 else:
-                    if eval_text_only:
+                    if eval_gen_only:
                         noise = torch.randn_like(motion)
                     else:
                         noise = torch.zeros_like(motion)
@@ -1112,13 +1112,13 @@ class UNIMFMDiffusion(nn.Module):
         assert not self.training, (
             "forward_test_humanoid_batch should only be called during inference"
         )
-        eval_text_only = inputs.get("eval_text_only", False)
+        eval_gen_only = inputs.get("eval_gen_only", False)
         diffusion = (
-            self.test_text_only_diffusion if eval_text_only else self.test_diffusion
+            self.test_gen_only_diffusion if eval_gen_only else self.test_diffusion
         )
         denoiser = self.denoiser
         length = inputs["length"]  # (B,) effective length of each sample
-        regression_only = self.args.get("regression_only", False) and not eval_text_only
+        regression_only = self.args.get("regression_only", False) and not eval_gen_only
         if self.args.get("force_regression_only", False):
             regression_only = True
 
@@ -1166,7 +1166,7 @@ class UNIMFMDiffusion(nn.Module):
                 **denoiser_kwargs,
             )
         else:
-            if self.args.get("use_cfg_sampler_for_text", False) and eval_text_only:
+            if self.args.get("use_cfg_sampler_for_text", False) and eval_gen_only:
                 denoiser = ClassifierFreeSampleModel(denoiser)
                 denoiser_kwargs["y"]["scale"] = self.model_cfg.diffusion.guidance_param
             diff_sampler = self.model_cfg.diffusion.get("sampler", "ddim")
@@ -1179,7 +1179,7 @@ class UNIMFMDiffusion(nn.Module):
             if self.args.get("force_zero_noise", False):
                 noise = torch.zeros_like(motion)
             else:
-                if eval_text_only:
+                if eval_gen_only:
                     noise = torch.randn_like(motion)
                 else:
                     noise = torch.zeros_like(motion)
