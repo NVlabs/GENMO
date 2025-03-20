@@ -297,6 +297,7 @@ def load_data_dict(cfg):
         # "meta": {
         #     "vid":
         # }
+        "meta": [{"vid": Path(cfg.video_path).stem}],
         "length": torch.tensor(length),
         "bbx_xys": torch.load(paths.bbx)["bbx_xys"],
         "kp2d": vitpose,
@@ -341,14 +342,17 @@ def render_incam(cfg, orig_fps):
     reader = get_video_reader(video_path)  # (F, H, W, 3), uint8, numpy
     bbx_xys_render = torch.load(cfg.paths.bbx)["bbx_xys"]
 
+    color = torch.tensor([0.69019608, 0.39215686, 0.95686275]).cuda()
+
     # -- render mesh -- #
     verts_incam = pred_c_verts
     writer = get_writer(incam_video_path, fps=orig_fps, crf=CRF)
     for i, img_raw in tqdm(
         enumerate(reader), total=get_video_lwh(video_path)[0], desc=f"Rendering Incam"
     ):
-        img = renderer.render_mesh(verts_incam[i].cuda(), img_raw, [0.8, 0.8, 0.8])
-
+        img = renderer.render_mesh(
+            verts_incam[i].cuda(), img_raw, [color[0], color[1], color[2]]
+        )
         # # bbx
         # bbx_xys_ = bbx_xys_render[i].cpu().numpy()
         # lu_point = (bbx_xys_[:2] - bbx_xys_[2:] / 2).astype(int)

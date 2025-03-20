@@ -579,17 +579,22 @@ class UNIMFM_demo(pl.LightningModule):
     def predict(self, data, static_cam=False):
         # ROPE inference
         eval_gen_only = data["meta"][0].get("eval_gen_only", False)
+        test_mode = data["meta"][0].get("mode", "default")
         batch = {
-            "length": data["length"][None],
-            "obs": normalize_kp2d(data["kp2d"], data["bbx_xys"])[None],
-            "bbx_xys": data["bbx_xys"][None],
-            "K_fullimg": data["K_fullimg"][None],
-            "cam_angvel": data["cam_angvel"][None],
-            "cam_tvel": data["cam_tvel"][None],
-            "R_w2c": data["R_w2c"][None],
-            "f_imgseq": data["f_imgseq"][None],
+            "length": data["length"][None].cuda(),
+            "obs": normalize_kp2d(data["kp2d"], data["bbx_xys"])[None].cuda(),
+            "bbx_xys": data["bbx_xys"][None].cuda(),
+            "K_fullimg": data["K_fullimg"][None].cuda(),
+            "cam_angvel": data["cam_angvel"][None].cuda(),
+            "cam_tvel": data["cam_tvel"][None].cuda(),
+            "R_w2c": data["R_w2c"][None].cuda(),
+            "f_imgseq": data["f_imgseq"][None].cuda(),
+            "B": 1,
+            "L": data["f_imgseq"].shape[0],
+            "mode": test_mode,
         }
-        batch = {k: v.cuda() for k, v in batch.items()}
+        batch["device"] = batch["f_imgseq"].device
+
         if "meta" in data:
             batch["meta"] = data["meta"]
         else:
@@ -639,7 +644,11 @@ class UNIMFM_demo(pl.LightningModule):
         else:
             postproc = True
         outputs = self.pipeline.forward(
-            batch, train=False, postproc=postproc, static_cam=static_cam
+            batch,
+            train=False,
+            postproc=postproc,
+            static_cam=static_cam,
+            test_mode=test_mode,
         )
 
         pred = {

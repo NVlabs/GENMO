@@ -7,9 +7,9 @@ import time
 import numpy as np
 import scenepic as sp
 import torch
+import wandb
 from matplotlib import cm
 
-import wandb
 from motiondiff.models.common.smpl import SMPL
 from motiondiff.utils.torch_transform import (
     angle_axis_to_quaternion,

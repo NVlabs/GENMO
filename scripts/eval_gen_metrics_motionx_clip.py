@@ -12,10 +12,13 @@ parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
+import argparse
 import pickle
+import random
 from os.path import join as pjoin
 
-import clip
+import clip  # pip install openai-clip
+import numpy as np
 from transformers import AutoTokenizer, CLIPTextModelWithProjection
 
 from motiondiff.utils.mdm_modules import (
@@ -28,11 +31,6 @@ from motiondiff.utils.motionx_modules import (
     MotionEncoderBiGRUCoWithDropout,
     MovementConvEncoderWithDropout,
 )
-
-import random
-import clip # pip install openai-clip
-import numpy as np
-import argparse
 
 device = "cuda"
 # clip_model = CLIPTextModelWithProjection.from_pretrained("sentence-transformers/all-MiniLM-L6-v2", do_sample=False).to(device).eval()
@@ -83,7 +81,6 @@ opt = {
     "checkpoints_dir": ".",
     "unit_length": 4,
 }
-
 
 
 class TextEncoderMLP(nn.Module):
@@ -356,13 +353,17 @@ DEMO_FEAT_PATH = os.path.join(save_parent_dir, exp_path, ckpt_name)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="A simple argument parser example")
-    parser.add_argument("--pred_feat", type=str, 
-                    default=DEMO_FEAT_PATH, help="path to the generated features")
-    parser.add_argument("--dataset", type=str, default='humanml3d', help='dataset name')
+    parser.add_argument(
+        "--pred_feat",
+        type=str,
+        default=DEMO_FEAT_PATH,
+        help="path to the generated features",
+    )
+    parser.add_argument("--dataset", type=str, default="humanml3d", help="dataset name")
 
     args = parser.parse_args()
 
-    device = 'cuda'
+    device = "cuda"
 
     gt_features = pickle.load(open("inputs/motionx_test_gt_feats.pkl", "rb"))
     gt_motions = gt_features["motions"]
@@ -393,11 +394,9 @@ if __name__ == "__main__":
 
     total_num = len(gt_texts)
 
-
     batch_size = 64
     batch_num = total_num // batch_size
     # batch_num = math.ceil(total_num / batch_size)  # Use ceiling for all items
-
 
     def get_co_embeds(motions, texts, movement_encoder, motion_encoder, text_enc, opt):
         m_lens = (
@@ -438,7 +437,6 @@ if __name__ == "__main__":
 
         return motion_embedding, text_embeds_ours
 
-
     all_text_embeds = []
     all_motion_embeds = []
     print("Generating embeddings for GTs...")
@@ -474,7 +472,6 @@ if __name__ == "__main__":
 
     all_text_embeds_test = torch.cat(all_text_embeds_test, dim=0)
     all_motion_embeds_test = torch.cat(all_motion_embeds_test, dim=0).detach()
-
 
     matching_score, R_precision, all_motion_embeddings = evaluate_matching_score(
         all_text_embeds, all_motion_embeds
