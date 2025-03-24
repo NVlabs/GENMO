@@ -66,7 +66,7 @@ for i, (mid, data) in enumerate(dataset.motion_files.items()):
     has_text = [x != "" for x in text]
     text_embed = encode_text(text, has_text).cpu()
     # torch.save(text_embed, os.path.join(output_dir, f"{mid}.pth"))
-    text_embed_dict[mid] = text_embed
+    text_embed_dict[mid] = text_embed.half()
     print(f"{i}/{len(dataset)} {mid}")
 
 torch.save(text_embed_dict, os.path.join(output_dir, f"test_text_embed.pth"))

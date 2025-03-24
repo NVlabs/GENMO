@@ -66,7 +66,7 @@ for i, (vid, data) in enumerate(dataset.train_labels.items()):
     has_text = [x != "" for x in text]
     text_embed = encode_text(text, has_text).cpu()
     # torch.save(text_embed, os.path.join(output_dir, f"{mid}.pth"))
-    text_embed_dict[vid] = text_embed
+    text_embed_dict[vid] = text_embed.half()
     print(f"{i}/{len(dataset)} {vid} {text[0]}")
 
 torch.save(text_embed_dict, os.path.join(output_dir, f"all_text_embed.pth"))
