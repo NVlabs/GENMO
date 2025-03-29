@@ -10,10 +10,10 @@ defaults:
   - override /train_datasets:
       - pure_motion_amass/v11
       - pure_motion_humanml3d/static_train
-      # - imgfeat_bedlam/v2
-      # - imgfeat_h36m/v1
-      # - imgfeat_3dpw/v1
-      # - imgfeat_3dpw_occ/v1
+      - imgfeat_bedlam/v2
+      - imgfeat_h36m/v1
+      - imgfeat_3dpw/v1
+      - imgfeat_3dpw_occ/v1
       - aistpp_train
       - beat2_static_train
   - override /train_2d_datasets:
@@ -182,7 +182,7 @@ pl_trainer:
   gradient_clip_val: 0.5
   max_epochs: null
   check_val_every_n_epoch: null
-  val_check_interval: 1
+  val_check_interval: 3000
   max_steps: 200000
   devices: 1
   strategy: ddp_find_unused_parameters_true
