@@ -87,7 +87,7 @@ class Pipeline(nn.Module):
             "f_cam_angvel": (6,),
             "f_imgseq": (1024,),
             # "encoded_music": 438,
-            "encoded_music": (self.args.encoded_music_dim,),
+            "encoded_music": (self.args.get("encoded_music_dim", 35),),
             "encoded_audio": (128,),
             "observed_motion_3d": (151,),
             "humanoid_obs": (self.args.get("humanoid_obs_dim", 358),),

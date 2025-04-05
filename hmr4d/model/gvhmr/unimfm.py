@@ -322,13 +322,6 @@ class UNIMFM(pl.LightningModule):
             )
         if "music_embed" in batch:
             batch["encoded_music"] = batch["music_embed"].cuda()
-        else:
-            batch["encoded_music"] = torch.zeros(
-                B,
-                L,
-                self.pipeline.args.encoded_music_dim,
-                device="cuda",
-            )
         if "audio_array" in batch:
             encoded_audio = (
                 self.audio_encoder(batch["audio_array"].cuda().unsqueeze(1))
@@ -471,13 +464,6 @@ class UNIMFM(pl.LightningModule):
             )
         if "music_embed" in batch:
             batch["encoded_music"] = batch["music_embed"].cuda()
-        else:
-            batch["encoded_music"] = torch.zeros(
-                B,
-                L,
-                self.pipeline.args.encoded_music_dim,
-                device="cuda",
-            )
         if "audio_array" in batch:
             encoded_audio = (
                 self.audio_encoder(batch["audio_array"].cuda().unsqueeze(1))
@@ -784,13 +770,6 @@ class UNIMFM(pl.LightningModule):
             )
         if "music_embed" in batch:
             batch["encoded_music"] = batch["music_embed"].cuda()
-        else:
-            batch["encoded_music"] = torch.zeros(
-                B,
-                L,
-                self.pipeline.args.encoded_music_dim,
-                device="cuda",
-            )
         if "audio_array" in batch:
             encoded_audio = (
                 self.audio_encoder(batch["audio_array"].cuda().unsqueeze(1))
@@ -914,13 +893,6 @@ class UNIMFM(pl.LightningModule):
             )
         if "music_embed" in batch:
             batch_["encoded_music"] = batch["music_embed"].cuda()
-        else:
-            batch_["encoded_music"] = torch.zeros(
-                B,
-                L,
-                self.pipeline.args.encoded_music_dim,
-                device="cuda",
-            )
         if "audio_array" in batch:
             encoded_audio = (
                 self.audio_encoder(batch["audio_array"].cuda().unsqueeze(1))
@@ -1045,14 +1017,6 @@ class UNIMFM(pl.LightningModule):
 
             if "music_embed" in batch:
                 batch_["encoded_music"] = batch["music_embed"].cuda()
-            else:
-                batch_["encoded_music"] = torch.zeros(
-                    B,
-                    L,
-                    self.pipeline.args.encoded_music_dim,
-                    device="cuda",
-                )
-
             if "audio_array" in batch:
                 encoded_audio = (
                     self.audio_encoder(batch["audio_array"].cuda().unsqueeze(1))
@@ -1129,6 +1093,7 @@ class UNIMFM(pl.LightningModule):
             "L": L,
             "length": torch.tensor([L] * B).to(device),
             "device": device,
+            "humanoid_obs": torch.zeros(B, L, 358).to(device),
             "multi_text_embed": torch.zeros(B, 50, 50, 1024).to(device),
             "cam_angvel": torch.zeros(B, L, 6).to(device),
             "text_label_ids": torch.zeros(B, L).long().to(device),

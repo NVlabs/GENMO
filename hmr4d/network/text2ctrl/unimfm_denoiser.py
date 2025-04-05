@@ -362,9 +362,12 @@ class NetworkEncoderRoPE(nn.Module):
             if self.action_pred_source == "context":
                 clean_action = self.predict_action(x, humanoid_obs)
             elif self.action_pred_source == "task_obs":
-                clean_action = self.predict_action(
-                    inputs["humanoid_task_obs"][:, :L], humanoid_obs
-                )
+                if "humanoid_task_obs" in inputs:
+                    clean_action = self.predict_action(
+                        inputs["humanoid_task_obs"][:, :L], humanoid_obs
+                    )
+                else:
+                    clean_action = None
             elif self.action_pred_source == "sample":
                 clean_action = self.predict_action(sample, humanoid_obs)
             elif self.action_pred_source == "target_x":

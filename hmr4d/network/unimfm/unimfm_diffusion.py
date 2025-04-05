@@ -322,8 +322,6 @@ class UNIMFMDiffusion(nn.Module):
             f_uncond_exists["encoded_music"] = torch.zeros_like(
                 f_condition_exists["encoded_music"]
             )
-        else:
-            assert False, "encoded_music must be in f_condition"
 
         if "encoded_audio" in f_condition:
             f_encoded_audio = f_condition["encoded_audio"]  # (B, L, C)
@@ -333,8 +331,7 @@ class UNIMFMDiffusion(nn.Module):
             f_uncond_exists["encoded_audio"] = torch.zeros_like(
                 f_condition_exists["encoded_audio"]
             )
-        else:
-            assert False, "encoded_audio must be in f_condition"
+
         if "observed_motion_3d" in f_condition:
             motion_mask_3d = inputs.get(
                 "motion_mask_3d", torch.zeros_like(f_condition["observed_motion_3d"])
@@ -1124,19 +1121,20 @@ class UNIMFMDiffusion(nn.Module):
 
         f_condition = inputs["f_condition"]
         f_condition_exists = inputs["f_condition_exists"]
-        humanoid_obs = f_condition["humanoid_obs"]
+        humanoid_obs = inputs["humanoid_obs"]
         B, L = humanoid_obs.shape[:2]
         mdim = self.endecoder.get_motion_dim()
         target_x = torch.zeros(B, L, mdim).to(humanoid_obs.device)
 
         # Generate motion representation
-        f_cond, motion = self.generate_motion_rep(inputs, target_x)
+        f_cond, f_uncond, motion = self.generate_motion_rep(inputs, target_x)
         vis_mask = length_to_mask(length, L)  # (B, L)
 
         denoiser_kwargs = {
             "y": {
                 "text": inputs.get("caption", [""] * B),
                 "f_cond": f_cond,
+                "f_uncond": f_uncond,
                 "mask": vis_mask,
                 "length": length,
             },
@@ -1205,11 +1203,12 @@ class UNIMFMDiffusion(nn.Module):
 
         # Now map the generated motion to humanoid actions autoregressively
         humanoid = inputs["humanoid"]
-        obs_keys = [
-            x
-            for x in self.args.in_attr
-            if x in ["humanoid_obs", "humanoid_rgb_obs", "humanoid_contact_force"]
-        ]
+        # obs_keys = [
+        #     x
+        #     for x in self.args.in_attr
+        #     if x in ["humanoid_obs", "humanoid_rgb_obs", "humanoid_contact_force"]
+        # ]
+        obs_keys = ["humanoid_obs", "humanoid_task_obs"]
         cur_obs = {k: None for k in obs_keys}
 
         def policy(obs_dict, extras):
@@ -1238,6 +1237,8 @@ class UNIMFMDiffusion(nn.Module):
                     )
                 elif k == "humanoid_contact_force":
                     obs_k = obs_dict["task_obs"]["contact_forces"]
+                elif k == "humanoid_task_obs":
+                    obs_k = obs_dict["task_obs"]["policy"]
 
                 if k in normalizer_stats:
                     obs_k = (
@@ -1250,8 +1251,20 @@ class UNIMFMDiffusion(nn.Module):
                     cur_obs[k] = torch.cat([cur_obs[k], obs_k], dim=1)
 
             num_fr = cur_obs["humanoid_obs"].shape[1]
+            if self.denoiser.action_pred_source == "context":
+                context = output["pred_context"][:, :num_fr]
+            elif self.denoiser.action_pred_source == "task_obs":
+                context = cur_obs["humanoid_task_obs"][:, :num_fr]
+            elif self.denoiser.action_pred_source == "sample":
+                context = output["pred_x"][:, :num_fr]
+            elif self.denoiser.action_pred_source == "target_x":
+                context = inputs["target_x"][:, :num_fr]
+            else:
+                raise ValueError(
+                    f"Invalid action_pred_source {self.denoiser.action_pred_source}"
+                )
             action = self.denoiser.predict_action(
-                output["pred_context"][:, :num_fr], cur_obs["humanoid_obs"][:, :num_fr]
+                context, cur_obs["humanoid_obs"][:, :num_fr]
             )
             return action[:, -1, :]
 
