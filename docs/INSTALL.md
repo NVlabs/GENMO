@@ -9,6 +9,9 @@ cd genmo
 conda create -y -n genmo python=3.10
 conda activate genmo
 pip install -r requirements.txt
+pip install open3d scenepic moviepy imageio einops dnspython dill librosa gdown colorama numpy==1.23.5
+pip install git+https://github.com/google/aistplusplus_api.git
+pip install git+https://github.com/facebookresearch/detectron2.git@a59f05630a8f205756064244bf5beb8661f96180
 pip install -e .
 
 # DROID-SLAM

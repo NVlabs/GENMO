@@ -2,8 +2,8 @@
 --extra-index-url https://download.pytorch.org/whl/cu121
 torch==2.3.0+cu121
 torchvision==0.18.0+cu121
-# timm==0.9.12  # For HMR2.0a feature extraction
 timm==0.6.7
+# timm==0.9.12  # For HMR2.0a feature extraction
 
 # Lightning + Hydra
 lightning==2.3.0
@@ -52,17 +52,3 @@ transformers==4.30.2
 wandb==0.17.0
 sentencepiece==0.2.0
 pre-commit
-
-open3d
-scenepic
-# transformers==4.41.2
-moviepy
-imageio
-einops
-dnspython
-dill
-librosa
-gdown
-colorama
-git+https://github.com/google/aistplusplus_api.git
-git+https://github.com/facebookresearch/detectron2.git@a59f05630a8f205756064244bf5beb8661f96180
