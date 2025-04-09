@@ -4,6 +4,7 @@ defaults:
   - endecoder: gvhmr/v1_amass_local_bedlam_cam
   - _self_
 multicond_args: null
+remote_results_path: /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jiefengl/gvhmr
 
 model_cfg:
   train_3d_modes: ["regression", "diffusion"]
@@ -120,7 +121,7 @@ network:
       num_heads: 8
       mlp_ratio: 4
 
-ckpt_path: outputs/mocap_mixed_v1/genmo/genmo_lg_music/version_0/checkpoints/last.ckpt
+ckpt_path: outputs/mocap_mixed_v1/genmo/genmo_lg_merged/version_3/checkpoints/last.ckpt
 
 # ================================ #
 #          global setting          #

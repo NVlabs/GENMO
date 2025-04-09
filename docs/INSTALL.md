@@ -12,15 +12,11 @@ pip install -r requirements.txt
 pip install -e .
 # to install gvhmr in other repo as editable, try adding "python.analysis.extraPaths": ["path/to/your/package"] to settings.json
 
-# DPVO
-cd third-party/DPVO
-wget https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.zip
-unzip eigen-3.4.0.zip -d thirdparty && rm -rf eigen-3.4.0.zip
-pip install torch-scatter -f "https://data.pyg.org/whl/torch-2.3.0+cu121.html"
-pip install numba pypose
+# DROID-SLAM
+cd third-party/DROID-SLAM
 export CUDA_HOME=/usr/local/cuda-12.1/
 export PATH=$PATH:/usr/local/cuda-12.1/bin/
-pip install -e .
+python setup.py install
 ```
 
 Setup pre-commit for code formatting:

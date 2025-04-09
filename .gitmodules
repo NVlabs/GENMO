@@ -4,3 +4,6 @@
 [submodule "third-party/DROID-SLAM/thirdparty/eigen"]
 	path = third-party/DROID-SLAM/thirdparty/eigen
 	url = https://gitlab.com/libeigen/eigen.git
+[submodule "third-party/Tracking-Anything-with-DEVA"]
+	path = third-party/Tracking-Anything-with-DEVA
+	url = https://github.com/hkchengrex/Tracking-Anything-with-DEVA

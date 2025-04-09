@@ -62,6 +62,7 @@ from hmr4d.utils.vis.renderer import (
     get_ground_params_from_points,
 )
 from motiondiff.models.mdm.rotation_conversions import quaternion_to_matrix
+from motiondiff.utils.tools import subprocess_run, rsync_file_from_remote
 
 CRF = 23  # 17 is lossless, every +6 halves the mp4 size
 
@@ -592,6 +593,16 @@ if __name__ == "__main__":
     if not Path(paths.hmr4d_results).exists():
         Log.info("[HMR4D] Predicting")
         model: DemoPL = hydra.utils.instantiate(cfg.model, _recursive_=False)
+        if not os.path.exists(cfg.ckpt_path):
+            remote_run_dir = cfg.remote_results_path
+            print(f"rsyncing from remote: {remote_run_dir}")
+            os.makedirs(os.path.dirname(cfg.ckpt_path), exist_ok=True)
+            rsync_file_from_remote(
+                cfg.ckpt_path,
+                cfg.remote_results_path,
+                "outputs",
+                hostname="cs-oci-ord-dc-03",
+            )
         model.load_pretrained_model(cfg.ckpt_path)
         model = model.eval().cuda()
         tic = Log.sync_time()
