@@ -3,14 +3,13 @@
 ## Environment
 Setup python env:
 ```bash
-git clone https://github.com/zju3dv/GVHMR --recursive
-cd GVHMR
+git clone ssh://git@gitlab-master.nvidia.com:12051/dair/projects/genmo.git --recursive
+cd genmo
 
-conda create -y -n gvhmr python=3.10
-conda activate gvhmr
+conda create -y -n genmo python=3.10
+conda activate genmo
 pip install -r requirements.txt
 pip install -e .
-# to install gvhmr in other repo as editable, try adding "python.analysis.extraPaths": ["path/to/your/package"] to settings.json
 
 # DROID-SLAM
 cd third-party/DROID-SLAM
@@ -27,29 +26,18 @@ pre-commit install
 
 ## Inputs & Outputs
 
+**Prepare pretrained models**
+
 ```bash
 mkdir inputs
-mkdir outputs
+rsync -avzP -m cs-oci-ord-dc-03:/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR/smpl_data ./inputs/
+rsync -avzP -m cs-oci-ord-dc-03:/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR/checkpoints ./inputs/
 ```
-
+<!-- 
 **Weights**
 
 ```bash
-mkdir -p inputs/checkpoints
-
-# 1. You need to sign up for downloading [SMPL](https://smpl.is.tue.mpg.de/) and [SMPLX](https://smpl-x.is.tue.mpg.de/). And the checkpoints should be placed in the following structure:
-
 inputs/checkpoints/
-├── body_models/smplx/
-│   └── SMPLX_{GENDER}.npz # SMPLX (We predict SMPLX params + evaluation)
-└── body_models/smpl/
-    └── SMPL_{GENDER}.pkl  # SMPL (rendering and evaluation)
-
-# 2. Download other pretrained models from Google-Drive (By downloading, you agree to the corresponding licences): https://drive.google.com/drive/folders/1eebJ13FUEXrKBawHpJroW0sNSxLjh9xD?usp=drive_link
-
-inputs/checkpoints/
-├── dpvo/
-│   └── dpvo.pth
 ├── gvhmr/
 │   └── gvhmr_siga24_release.ckpt
 ├── hmr2/
@@ -58,9 +46,9 @@ inputs/checkpoints/
 │   └── vitpose-h-multi-coco.pth
 └── yolo/
     └── yolov8x.pt
-```
+``` -->
 
-**Data**
+**Training Data**
 
 We provide preprocessed data for training and evaluation.
 Note that we do not intend to distribute the original datasets, and you need to download them (annotation, videos, etc.) from the original websites.
