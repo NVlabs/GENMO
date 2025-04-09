@@ -1,42 +1,44 @@
 import sys
-sys.path.append('droid_slam')
 
-from tqdm import tqdm
+sys.path.append("droid_slam")
+
+import argparse
+import glob
+import os
+import time
+
+import cv2
+import lietorch
 import numpy as np
 import torch
-import lietorch
-import cv2
-import os
-import glob 
-import time
-import argparse
-
 import torch.nn.functional as F
 from droid import Droid
+from tqdm import tqdm
 
 
 def show_image(image):
     image = image.permute(1, 2, 0).cpu().numpy()
-    cv2.imshow('image', image / 255.0)
+    cv2.imshow("image", image / 255.0)
     cv2.waitKey(1)
 
+
 def image_stream(datapath, image_size=[320, 512]):
-    """ image generator """
+    """image generator"""
 
     fx, fy, cx, cy = 517.3, 516.5, 318.6, 255.3
 
-    K_l = np.array([fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0]).reshape(3,3)
+    K_l = np.array([fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0]).reshape(3, 3)
     d_l = np.array([0.2624, -0.9531, -0.0054, 0.0026, 1.1633])
 
     # read all png images in folder
-    images_list = sorted(glob.glob(os.path.join(datapath, 'rgb', '*.png')))[::2]
-    
+    images_list = sorted(glob.glob(os.path.join(datapath, "rgb", "*.png")))[::2]
+
     for t, imfile in enumerate(images_list):
         image = cv2.imread(imfile)
         ht0, wd0, _ = image.shape
         image = cv2.undistort(image, K_l, d_l)
-        image = cv2.resize(image, (320+32, 240+16))
-        image = torch.from_numpy(image).permute(2,0,1)
+        image = cv2.resize(image, (320 + 32, 240 + 16))
+        image = torch.from_numpy(image).permute(2, 0, 1)
 
         intrinsics = torch.as_tensor([fx, fy, cx, cy]).cuda()
         intrinsics[0] *= image.shape[2] / 640.0
@@ -51,7 +53,8 @@ def image_stream(datapath, image_size=[320, 512]):
 
         yield t, image[None], intrinsics
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--datapath")
     parser.add_argument("--weights", default="droid.pth")
@@ -74,7 +77,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     args.stereo = False
-    torch.multiprocessing.set_start_method('spawn')
+    torch.multiprocessing.set_start_method("spawn")
 
     print("Running evaluation on {}".format(args.datapath))
     print(args)
@@ -83,41 +86,45 @@ if __name__ == '__main__':
     time.sleep(5)
 
     tstamps = []
-    for (t, image, intrinsics) in tqdm(image_stream(args.datapath)):
+    for t, image, intrinsics in tqdm(image_stream(args.datapath)):
         if not args.disable_vis:
             show_image(image)
         droid.track(t, image, intrinsics=intrinsics)
-
 
     traj_est = droid.terminate(image_stream(args.datapath))
 
     ### run evaluation ###
 
-    print("#"*20 + " Results...")
+    print("#" * 20 + " Results...")
 
     import evo
+    import evo.main_ape as main_ape
+    from evo.core import sync
+    from evo.core.metrics import PoseRelation
     from evo.core.trajectory import PoseTrajectory3D
     from evo.tools import file_interface
-    from evo.core import sync
-    import evo.main_ape as main_ape
-    from evo.core.metrics import PoseRelation
 
-    image_path = os.path.join(args.datapath, 'rgb')
-    images_list = sorted(glob.glob(os.path.join(image_path, '*.png')))[::2]
-    tstamps = [float(x.split('/')[-1][:-4]) for x in images_list]
+    image_path = os.path.join(args.datapath, "rgb")
+    images_list = sorted(glob.glob(os.path.join(image_path, "*.png")))[::2]
+    tstamps = [float(x.split("/")[-1][:-4]) for x in images_list]
 
     traj_est = PoseTrajectory3D(
-        positions_xyz=traj_est[:,:3],
-        orientations_quat_wxyz=traj_est[:,3:],
-        timestamps=np.array(tstamps))
+        positions_xyz=traj_est[:, :3],
+        orientations_quat_wxyz=traj_est[:, 3:],
+        timestamps=np.array(tstamps),
+    )
 
-    gt_file = os.path.join(args.datapath, 'groundtruth.txt')
+    gt_file = os.path.join(args.datapath, "groundtruth.txt")
     traj_ref = file_interface.read_tum_trajectory_file(gt_file)
 
     traj_ref, traj_est = sync.associate_trajectories(traj_ref, traj_est)
-    result = main_ape.ape(traj_ref, traj_est, est_name='traj', 
-        pose_relation=PoseRelation.translation_part, align=True, correct_scale=True)
-
+    result = main_ape.ape(
+        traj_ref,
+        traj_est,
+        est_name="traj",
+        pose_relation=PoseRelation.translation_part,
+        align=True,
+        correct_scale=True,
+    )
 
     print(result)
-

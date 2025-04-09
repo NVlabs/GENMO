@@ -71,7 +71,3 @@ evalset=(
 for seq in ${evalset[@]}; do
     python evaluation_scripts/test_eth3d.py --datapath=$ETH_PATH/$seq --weights=droid.pth --disable_vis $@
 done
-
-
-
-

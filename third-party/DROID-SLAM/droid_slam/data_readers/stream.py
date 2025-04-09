@@ -1,28 +1,30 @@
+import csv
+import json
+import math
+import os
+import os.path as osp
+import pickle
+import random
 
+import cv2
 import numpy as np
 import torch
-import torch.utils.data as data
 import torch.nn.functional as F
-
-import csv
-import os
-import cv2
-import math
-import random
-import json
-import pickle
-import os.path as osp
+import torch.utils.data as data
 
 from .rgbd_utils import *
 
+
 class RGBDStream(data.Dataset):
-    def __init__(self, datapath, frame_rate=-1, image_size=[384,512], crop_size=[0,0]):
+    def __init__(
+        self, datapath, frame_rate=-1, image_size=[384, 512], crop_size=[0, 0]
+    ):
         self.datapath = datapath
         self.frame_rate = frame_rate
         self.image_size = image_size
         self.crop_size = crop_size
         self._build_dataset_index()
-    
+
     @staticmethod
     def image_read(image_file):
         return cv2.imread(image_file)
@@ -35,7 +37,7 @@ class RGBDStream(data.Dataset):
         return len(self.images)
 
     def __getitem__(self, index):
-        """ return training video """
+        """return training video"""
         image = self.__class__.image_read(self.images[index])
         image = torch.from_numpy(image).float()
         image = image.permute(2, 0, 1)
@@ -52,20 +54,22 @@ class RGBDStream(data.Dataset):
         sx = self.image_size[1] / image.shape[2]
         sy = self.image_size[0] / image.shape[1]
 
-        image = F.interpolate(image[None], self.image_size, mode='bilinear', align_corners=False)[0]
+        image = F.interpolate(
+            image[None], self.image_size, mode="bilinear", align_corners=False
+        )[0]
 
         fx, fy, cx, cy = intrinsic.unbind(dim=0)
         fx, cx = sx * fx, sx * cx
         fy, cy = sy * fy, sy * cy
-        
+
         # crop image
         if self.crop_size[0] > 0:
             cy = cy - self.crop_size[0]
-            image = image[:,self.crop_size[0]:-self.crop_size[0],:]
+            image = image[:, self.crop_size[0] : -self.crop_size[0], :]
 
         if self.crop_size[1] > 0:
             cx = cx - self.crop_size[1]
-            image = image[:,:,self.crop_size[1]:-self.crop_size[1]]
+            image = image[:, :, self.crop_size[1] : -self.crop_size[1]]
 
         intrinsic = torch.stack([fx, fy, cx, cy])
 
@@ -73,18 +77,21 @@ class RGBDStream(data.Dataset):
 
 
 class ImageStream(data.Dataset):
-    def __init__(self, datapath, intrinsics, rate=1, image_size=[384,512]):
-        rgb_list = osp.join(datapath, 'rgb.txt')
+    def __init__(self, datapath, intrinsics, rate=1, image_size=[384, 512]):
+        rgb_list = osp.join(datapath, "rgb.txt")
         if os.path.isfile(rgb_list):
-            rgb_list = np.loadtxt(rgb_list, delimiter=' ', dtype=np.unicode_)
-            self.timestamps = rgb_list[:,0].astype(np.float)
-            self.images = [os.path.join(datapath, x) for x in rgb_list[:,1]]
+            rgb_list = np.loadtxt(rgb_list, delimiter=" ", dtype=np.unicode_)
+            self.timestamps = rgb_list[:, 0].astype(np.float)
+            self.images = [os.path.join(datapath, x) for x in rgb_list[:, 1]]
             self.images = self.images[::rate]
             self.timestamps = self.timestamps[::rate]
 
         else:
             import glob
-            self.images = sorted(glob.glob(osp.join(datapath, '*.jpg'))) +  sorted(glob.glob(osp.join(datapath, '*.png')))
+
+            self.images = sorted(glob.glob(osp.join(datapath, "*.jpg"))) + sorted(
+                glob.glob(osp.join(datapath, "*.png"))
+            )
             self.images = self.images[::rate]
 
         self.intrinsics = intrinsics
@@ -98,7 +105,7 @@ class ImageStream(data.Dataset):
         return cv2.imread(imfile)
 
     def __getitem__(self, index):
-        """ return training video """
+        """return training video"""
         image = self.__class__.image_read(self.images[index])
 
         try:
@@ -116,22 +123,31 @@ class ImageStream(data.Dataset):
         intrinsics[3] *= ht1 / ht0
 
         # resize image
-        ikwargs = {'mode': 'bilinear', 'align_corners': True}
+        ikwargs = {"mode": "bilinear", "align_corners": True}
         image = torch.from_numpy(image).float().permute(2, 0, 1)
         image = F.interpolate(image[None], self.image_size, **ikwargs)[0]
 
         return tstamp, image, intrinsics
 
 
-
 class StereoStream(data.Dataset):
-    def __init__(self, datapath, intrinsics, rate=1, image_size=[384,512], 
-            map_left=None, map_right=None, left_root='image_left', right_root='image_right'):
+    def __init__(
+        self,
+        datapath,
+        intrinsics,
+        rate=1,
+        image_size=[384, 512],
+        map_left=None,
+        map_right=None,
+        left_root="image_left",
+        right_root="image_right",
+    ):
         import glob
+
         self.intrinsics = intrinsics
         self.image_size = image_size
-        
-        imgs = sorted(glob.glob(osp.join(datapath, left_root, '*.png')))[::rate]
+
+        imgs = sorted(glob.glob(osp.join(datapath, left_root, "*.png")))[::rate]
         self.images_l = []
         self.images_r = []
         self.tstamps = []
@@ -139,10 +155,10 @@ class StereoStream(data.Dataset):
         for img_l in imgs:
             img_r = img_l.replace(left_root, right_root)
             if os.path.isfile(img_r):
-                t = np.float(img_l.split('/')[-1].replace('.png', ''))
+                t = np.float(img_l.split("/")[-1].replace(".png", ""))
                 self.tstamps.append(t)
-                self.images_l += [ img_l ]
-                self.images_r += [ img_r ]
+                self.images_l += [img_l]
+                self.images_r += [img_r]
 
         self.map_left = map_left
         self.map_right = map_right
@@ -158,7 +174,7 @@ class StereoStream(data.Dataset):
         return image
 
     def __getitem__(self, index):
-        """ return training video """
+        """return training video"""
         tstamp = self.tstamps[index]
         image_l = self.__class__.image_read(self.images_l[index], self.map_left)
         image_r = self.__class__.image_read(self.images_r[index], self.map_right)
@@ -176,22 +192,21 @@ class StereoStream(data.Dataset):
         image_r = torch.from_numpy(image_r).float().permute(2, 0, 1)
 
         # resize image
-        ikwargs = {'mode': 'bilinear', 'align_corners': True}
+        ikwargs = {"mode": "bilinear", "align_corners": True}
         image_l = F.interpolate(image_l[None], self.image_size, **ikwargs)[0]
         image_r = F.interpolate(image_r[None], self.image_size, **ikwargs)[0]
 
         return tstamp, image_l, image_r, intrinsics
 
 
-
 # class RGBDStream(data.Dataset):
 #     def __init__(self, datapath, intrinsics=None, rate=1, image_size=[384,512]):
 #         assoc_file = osp.join(datapath, 'associated.txt')
 #         assoc_list = np.loadtxt(assoc_file, delimiter=' ', dtype=np.unicode_)
-        
+
 #         self.intrinsics = intrinsics
 #         self.image_size = image_size
-        
+
 #         self.timestamps = assoc_list[:,0].astype(np.float)[::rate]
 #         self.images = [os.path.join(datapath, x) for x in assoc_list[:,1]][::rate]
 #         self.depths = [os.path.join(datapath, x) for x in assoc_list[:,3]][::rate]

@@ -1,33 +1,34 @@
 import sys
-sys.path.append('droid_slam')
 
-from tqdm import tqdm
+sys.path.append("droid_slam")
+
+import argparse
+import glob
+import os
+import time
+
+import cv2
+import lietorch
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import lietorch
-import cv2
-import os
-import glob 
-import time
-import argparse
-
 import torch.nn.functional as F
 from droid import Droid
-
-import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 
 def show_image(image):
     image = image.permute(1, 2, 0).cpu().numpy()
-    cv2.imshow('image', image / 255.0)
+    cv2.imshow("image", image / 255.0)
     cv2.waitKey(1)
 
-def image_stream(datapath, use_depth=False, stride=1):
-    """ image generator """
 
-    fx, fy, cx, cy = np.loadtxt(os.path.join(datapath, 'calibration.txt')).tolist()
-    image_list = sorted(glob.glob(os.path.join(datapath, 'rgb', '*.png')))[::stride]
-    depth_list = sorted(glob.glob(os.path.join(datapath, 'depth', '*.png')))[::stride]
+def image_stream(datapath, use_depth=False, stride=1):
+    """image generator"""
+
+    fx, fy, cx, cy = np.loadtxt(os.path.join(datapath, "calibration.txt")).tolist()
+    image_list = sorted(glob.glob(os.path.join(datapath, "rgb", "*.png")))[::stride]
+    depth_list = sorted(glob.glob(os.path.join(datapath, "depth", "*.png")))[::stride]
 
     for t, (image_file, depth_file) in enumerate(zip(image_list, depth_list)):
         image = cv2.imread(image_file)
@@ -38,16 +39,16 @@ def image_stream(datapath, use_depth=False, stride=1):
         w1 = int(w0 * np.sqrt((384 * 512) / (h0 * w0)))
 
         image = cv2.resize(image, (w1, h1))
-        image = image[:h1-h1%8, :w1-w1%8]
+        image = image[: h1 - h1 % 8, : w1 - w1 % 8]
         image = torch.as_tensor(image).permute(2, 0, 1)
-        
+
         depth = torch.as_tensor(depth)
-        depth = F.interpolate(depth[None,None], (h1, w1)).squeeze()
-        depth = depth[:h1-h1%8, :w1-w1%8]
+        depth = F.interpolate(depth[None, None], (h1, w1)).squeeze()
+        depth = depth[: h1 - h1 % 8, : w1 - w1 % 8]
 
         intrinsics = torch.as_tensor([fx, fy, cx, cy])
-        intrinsics[0::2] *= (w1 / w0)
-        intrinsics[1::2] *= (h1 / h0)
+        intrinsics[0::2] *= w1 / w0
+        intrinsics[1::2] *= h1 / h0
 
         if use_depth:
             yield t, image[None], depth, intrinsics
@@ -55,7 +56,8 @@ def image_stream(datapath, use_depth=False, stride=1):
         else:
             yield t, image[None], intrinsics
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--datapath")
     parser.add_argument("--weights", default="droid.pth")
@@ -80,7 +82,7 @@ if __name__ == '__main__':
     parser.add_argument("--backend_nms", type=int, default=3)
     args = parser.parse_args()
 
-    torch.multiprocessing.set_start_method('spawn')
+    torch.multiprocessing.set_start_method("spawn")
 
     print("Running evaluation on {}".format(args.datapath))
     print(args)
@@ -90,45 +92,55 @@ if __name__ == '__main__':
     stride = 1
 
     tstamps = []
-    for (t, image, depth, intrinsics) in tqdm(image_stream(args.datapath, use_depth=True, stride=stride)):
+    for t, image, depth, intrinsics in tqdm(
+        image_stream(args.datapath, use_depth=True, stride=stride)
+    ):
         if not args.disable_vis:
             show_image(image[0])
 
         if t == 0:
             args.image_size = [image.shape[2], image.shape[3]]
             droid = Droid(args)
-        
+
         droid.track(t, image, depth, intrinsics=intrinsics)
-    
-    traj_est = droid.terminate(image_stream(args.datapath, use_depth=False, stride=stride))
+
+    traj_est = droid.terminate(
+        image_stream(args.datapath, use_depth=False, stride=stride)
+    )
 
     ### run evaluation ###
 
-    print("#"*20 + " Results...")
+    print("#" * 20 + " Results...")
 
     import evo
+    import evo.main_ape as main_ape
+    from evo.core import sync
+    from evo.core.metrics import PoseRelation
     from evo.core.trajectory import PoseTrajectory3D
     from evo.tools import file_interface
-    from evo.core import sync
-    import evo.main_ape as main_ape
-    from evo.core.metrics import PoseRelation
 
-    image_path = os.path.join(args.datapath, 'rgb')
-    images_list = sorted(glob.glob(os.path.join(image_path, '*.png')))[::stride]
-    tstamps = [float(x.split('/')[-1][:-4]) for x in images_list]
+    image_path = os.path.join(args.datapath, "rgb")
+    images_list = sorted(glob.glob(os.path.join(image_path, "*.png")))[::stride]
+    tstamps = [float(x.split("/")[-1][:-4]) for x in images_list]
 
     traj_est = PoseTrajectory3D(
-        positions_xyz=traj_est[:,:3],
-        orientations_quat_wxyz=traj_est[:,3:],
-        timestamps=np.array(tstamps))
+        positions_xyz=traj_est[:, :3],
+        orientations_quat_wxyz=traj_est[:, 3:],
+        timestamps=np.array(tstamps),
+    )
 
-    gt_file = os.path.join(args.datapath, 'groundtruth.txt')
+    gt_file = os.path.join(args.datapath, "groundtruth.txt")
     traj_ref = file_interface.read_tum_trajectory_file(gt_file)
 
     traj_ref, traj_est = sync.associate_trajectories(traj_ref, traj_est)
 
-    result = main_ape.ape(traj_ref, traj_est, est_name='traj', 
-        pose_relation=PoseRelation.translation_part, align=True, correct_scale=False)
+    result = main_ape.ape(
+        traj_ref,
+        traj_est,
+        est_name="traj",
+        pose_relation=PoseRelation.translation_part,
+        align=True,
+        correct_scale=False,
+    )
 
     print(result.stats)
-

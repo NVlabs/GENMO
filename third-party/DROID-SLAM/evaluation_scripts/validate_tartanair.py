@@ -1,48 +1,59 @@
 import sys
-sys.path.append('droid_slam')
-sys.path.append('thirdparty/tartanair_tools')
 
-from tqdm import tqdm
+sys.path.append("droid_slam")
+sys.path.append("thirdparty/tartanair_tools")
+
+import argparse
+import glob
+import os
+import time
+
+import cv2
+import lietorch
 import numpy as np
 import torch
-import lietorch
-import cv2
-import os
-import glob
-import time
 import yaml
-import argparse
-
 from droid import Droid
+from tqdm import tqdm
 
-def image_stream(datapath, image_size=[384, 512], intrinsics_vec=[320.0, 320.0, 320.0, 240.0], stereo=False):
-    """ image generator """
+
+def image_stream(
+    datapath,
+    image_size=[384, 512],
+    intrinsics_vec=[320.0, 320.0, 320.0, 240.0],
+    stereo=False,
+):
+    """image generator"""
 
     # read all png images in folder
     ht0, wd0 = [480, 640]
-    images_left = sorted(glob.glob(os.path.join(datapath, 'image_left/*.png')))
-    images_right = sorted(glob.glob(os.path.join(datapath, 'image_right/*.png')))
+    images_left = sorted(glob.glob(os.path.join(datapath, "image_left/*.png")))
+    images_right = sorted(glob.glob(os.path.join(datapath, "image_right/*.png")))
 
     data = []
     for t in range(len(images_left)):
-        images = [ cv2.resize(cv2.imread(images_left[t]), (image_size[1], image_size[0])) ]
+        images = [
+            cv2.resize(cv2.imread(images_left[t]), (image_size[1], image_size[0]))
+        ]
         if stereo:
-            images += [ cv2.resize(cv2.imread(images_right[t]), (image_size[1], image_size[0])) ]
+            images += [
+                cv2.resize(cv2.imread(images_right[t]), (image_size[1], image_size[0]))
+            ]
 
-        images = torch.from_numpy(np.stack(images, 0)).permute(0,3,1,2)
-        intrinsics = .8 * torch.as_tensor(intrinsics_vec)
+        images = torch.from_numpy(np.stack(images, 0)).permute(0, 3, 1, 2)
+        intrinsics = 0.8 * torch.as_tensor(intrinsics_vec)
 
         data.append((t, images, intrinsics))
 
     return data
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--datapath", default="datasets/TartanAir")
     parser.add_argument("--weights", default="droid.pth")
     parser.add_argument("--buffer", type=int, default=1000)
-    parser.add_argument("--image_size", default=[384,512])
+    parser.add_argument("--image_size", default=[384, 512])
     parser.add_argument("--stereo", action="store_true")
     parser.add_argument("--disable_vis", action="store_true")
     parser.add_argument("--plot_curve", action="store_true")
@@ -62,7 +73,7 @@ if __name__ == '__main__':
     parser.add_argument("--backend_nms", type=int, default=3)
 
     args = parser.parse_args()
-    torch.multiprocessing.set_start_method('spawn')
+    torch.multiprocessing.set_start_method("spawn")
 
     from data_readers.tartan import test_split
     from evaluation.tartanair_evaluator import TartanAirEvaluator
@@ -71,7 +82,7 @@ if __name__ == '__main__':
         os.mkdir("figures")
 
     if args.id >= 0:
-        test_split = [ test_split[args.id] ]
+        test_split = [test_split[args.id]]
 
     ate_list = []
     for scene in test_split:
@@ -80,8 +91,10 @@ if __name__ == '__main__':
         droid = Droid(args)
 
         scenedir = os.path.join(args.datapath, scene)
-        
-        for (tstamp, image, intrinsics) in tqdm(image_stream(scenedir, stereo=args.stereo)):
+
+        for tstamp, image, intrinsics in tqdm(
+            image_stream(scenedir, stereo=args.stereo)
+        ):
             droid.track(tstamp, image, intrinsics=intrinsics)
 
         # fill in non-keyframe poses + global BA
@@ -90,12 +103,15 @@ if __name__ == '__main__':
         ### do evaluation ###
         evaluator = TartanAirEvaluator()
         gt_file = os.path.join(scenedir, "pose_left.txt")
-        traj_ref = np.loadtxt(gt_file, delimiter=' ')[:, [1, 2, 0, 4, 5, 3, 6]] # ned -> xyz
+        traj_ref = np.loadtxt(gt_file, delimiter=" ")[
+            :, [1, 2, 0, 4, 5, 3, 6]
+        ]  # ned -> xyz
 
         # usually stereo should not be scale corrected, but we are comparing monocular and stereo here
         results = evaluator.evaluate_one_trajectory(
-            traj_ref, traj_est, scale=True, title=scenedir[-20:].replace('/', '_'))
-        
+            traj_ref, traj_est, scale=True, title=scenedir[-20:].replace("/", "_")
+        )
+
         print(results)
         ate_list.append(results["ate_score"])
 
@@ -104,6 +120,7 @@ if __name__ == '__main__':
 
     if args.plot_curve:
         import matplotlib.pyplot as plt
+
         ate = np.array(ate_list)
         xs = np.linspace(0.0, 1.0, 512)
         ys = [np.count_nonzero(ate < t) / ate.shape[0] for t in xs]
@@ -112,4 +129,3 @@ if __name__ == '__main__':
         plt.xlabel("ATE [m]")
         plt.ylabel("% runs")
         plt.show()
-

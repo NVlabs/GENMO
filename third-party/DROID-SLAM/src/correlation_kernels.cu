@@ -132,10 +132,10 @@ std::vector<torch::Tensor> corr_index_cuda_forward(
   const auto ht = volume.size(1);
   const auto wd = volume.size(2);
 
-  const dim3 blocks((wd + BLOCK - 1) / BLOCK, 
-                    (ht + BLOCK - 1) / BLOCK, 
+  const dim3 blocks((wd + BLOCK - 1) / BLOCK,
+                    (ht + BLOCK - 1) / BLOCK,
                     batch_size);
-  
+
   const dim3 threads(BLOCK, BLOCK);
 
   auto opts = volume.options();
@@ -166,8 +166,8 @@ std::vector<torch::Tensor> corr_index_cuda_backward(
 
   auto volume_grad = torch::zeros_like(volume);
 
-  const dim3 blocks((wd + BLOCK - 1) / BLOCK, 
-                    (ht + BLOCK - 1) / BLOCK, 
+  const dim3 blocks((wd + BLOCK - 1) / BLOCK,
+                    (ht + BLOCK - 1) / BLOCK,
                     batch_size);
 
   const dim3 threads(BLOCK, BLOCK);

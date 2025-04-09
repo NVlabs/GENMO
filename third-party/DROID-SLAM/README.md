@@ -8,7 +8,7 @@
 
 
 
-[DROID-SLAM: Deep Visual SLAM for Monocular, Stereo, and RGB-D Cameras](https://arxiv.org/abs/2108.10869)  
+[DROID-SLAM: Deep Visual SLAM for Monocular, Stereo, and RGB-D Cameras](https://arxiv.org/abs/2108.10869)
 Zachary Teed and Jia Deng
 
 ```
@@ -20,13 +20,13 @@ Zachary Teed and Jia Deng
 }
 ```
 
-**Initial Code Release:** This repo currently provides a single GPU implementation of our monocular, stereo, and RGB-D SLAM systems. It currently contains demos, training, and evaluation scripts. 
+**Initial Code Release:** This repo currently provides a single GPU implementation of our monocular, stereo, and RGB-D SLAM systems. It currently contains demos, training, and evaluation scripts.
 
 
 ## Requirements
 
 To run the code you will need ...
-* **Inference:** Running the demos will require a GPU with at least 11G of memory. 
+* **Inference:** Running the demos will require a GPU with at least 11G of memory.
 
 * **Training:** Training requires a GPU with at least 24G of memory. We train on 4 x RTX-3090 GPUs.
 
@@ -82,7 +82,7 @@ python demo.py --imagedir=data/rgbd_dataset_freiburg3_cabinet/rgb --calib=calib/
 ```
 
 
-**Running on your own data:** All you need is a calibration file. Calibration files are in the form 
+**Running on your own data:** All you need is a calibration file. Calibration files are in the form
 ```
 fx fy cx cy [k1 k2 p1 p2 [ k3 [ k4 k5 k6 ]]]
 ```
@@ -127,7 +127,7 @@ python download_training.py --rgb --depth
 
 You can then run the training script. We use 4x3090 RTX GPUs for training which takes approximatly 1 week. If you use a different number of GPUs, adjust the learning rate accordingly.
 
-**Note:** On the first training run, covisibility is computed between all pairs of frames. This can take several hours, but the results are cached so that future training runs will start immediately. 
+**Note:** On the first training run, covisibility is computed between all pairs of frames. This can take several hours, but the results are cached so that future training runs will start immediately.
 
 
 ```

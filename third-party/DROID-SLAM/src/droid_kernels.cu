@@ -93,7 +93,7 @@ adjSE3(const float *t, const float *q, const float *X, float *Y) {
   Y[5] += v[2];
 }
 
-__device__ void 
+__device__ void
 relSE3(const float *ti, const float *qi, const float *tj, const float *qj, float *tij, float *qij) {
   qij[0] = -qj[3] * qi[0] + qj[0] * qi[3] - qj[1] * qi[2] + qj[2] * qi[1],
   qij[1] = -qj[3] * qi[1] + qj[1] * qi[3] - qj[2] * qi[0] + qj[0] * qi[2],
@@ -106,7 +106,7 @@ relSE3(const float *ti, const float *qi, const float *tj, const float *qj, float
   tij[2] = tj[2] - tij[2];
 }
 
-  
+
 __device__ void
 expSO3(const float *phi, float* q) {
   // SO3 exponential map
@@ -136,7 +136,7 @@ crossInplace(const float* a, float *b) {
   float x[3] = {
     a[1]*b[2] - a[2]*b[1],
     a[2]*b[0] - a[0]*b[2],
-    a[0]*b[1] - a[1]*b[0], 
+    a[0]*b[1] - a[1]*b[0],
   };
 
   b[0] = x[0];
@@ -155,8 +155,8 @@ expSE3(const float *xi, float* t, float* q) {
   float theta_sq = phi[0]*phi[0] + phi[1]*phi[1] + phi[2]*phi[2];
   float theta = sqrtf(theta_sq);
 
-  t[0] = tau[0]; 
-  t[1] = tau[1]; 
+  t[0] = tau[0];
+  t[1] = tau[1];
   t[2] = tau[2];
 
   if (theta > 1e-4) {
@@ -250,7 +250,7 @@ __global__ void projective_transform_kernel(
 
   __syncthreads();
 
-  //points 
+  //points
   float Xi[4];
   float Xj[4];
 
@@ -285,7 +285,7 @@ __global__ void projective_transform_kernel(
 
     const float u = static_cast<float>(j);
     const float v = static_cast<float>(i);
-    
+
     // homogenous coordinates
     Xi[0] = (u - cx) / fx;
     Xi[1] = (v - cy) / fy;
@@ -480,7 +480,7 @@ __global__ void projmap_kernel(
     relSE3(ti, qi, tj, qj, tij, qij);
   }
 
-  //points 
+  //points
   float Xi[4];
   float Xj[4];
 
@@ -492,7 +492,7 @@ __global__ void projmap_kernel(
 
     const float u = static_cast<float>(j);
     const float v = static_cast<float>(i);
-    
+
     // homogenous coordinates
     Xi[0] = (u - cx) / fx;
     Xi[1] = (v - cy) / fy;
@@ -554,7 +554,7 @@ __global__ void frame_distance_kernel(
   __syncthreads();
 
 
-  //points 
+  //points
   float Xi[4];
   float Xj[4];
 
@@ -594,7 +594,7 @@ __global__ void frame_distance_kernel(
       // if (disps[ix][i][j] < 0.01) {
       //   continue;
       // }
-      
+
       // homogenous coordinates
       Xi[0] = (u - cx) / fx;
       Xi[1] = (v - cy) / fy;
@@ -609,7 +609,7 @@ __global__ void frame_distance_kernel(
       d = sqrtf(du*du + dv*dv);
 
       total[threadIdx.x] += beta;
-      
+
       if (Xj[2] > MIN_DEPTH) {
         accum[threadIdx.x] += beta * d;
         valid[threadIdx.x] += beta;
@@ -629,7 +629,7 @@ __global__ void frame_distance_kernel(
       d = sqrtf(du*du + dv*dv);
 
       total[threadIdx.x] += (1 - beta);
-      
+
       if (Xj[2] > MIN_DEPTH) {
         accum[threadIdx.x] += (1 - beta) * d;
         valid[threadIdx.x] += (1 - beta);
@@ -724,7 +724,7 @@ __global__ void depth_filter_kernel(
     relSE3(ti, qi, tj, qj, tij, qij);
   }
 
-  //points 
+  //points
   float Xi[4];
   float Xj[4];
 
@@ -737,7 +737,7 @@ __global__ void depth_filter_kernel(
     const float ui = static_cast<float>(j);
     const float vi = static_cast<float>(i);
     const float di = disps[ix][i][j];
-    
+
     // homogenous coordinates
     Xi[0] = (ui - cx) / fx;
     Xi[1] = (vi - cy) / fy;
@@ -821,7 +821,7 @@ __global__ void iproj_kernel(
 
   __syncthreads();
 
-  //points 
+  //points
   float Xi[4];
   float Xj[4];
 
@@ -832,7 +832,7 @@ __global__ void iproj_kernel(
     const float ui = static_cast<float>(j);
     const float vi = static_cast<float>(i);
     const float di = disps[block_id][i][j];
-    
+
     // homogenous coordinates
     Xi[0] = (ui - cx) / fx;
     Xi[1] = (vi - cy) / fy;
@@ -857,7 +857,7 @@ __global__ void accum_kernel(
     const torch::PackedTensorAccessor32<long,1,torch::RestrictPtrTraits> idxs,
     torch::PackedTensorAccessor32<float,2,torch::RestrictPtrTraits> outs)
 {
-  
+
   const int block_id = blockIdx.x;
   const int D = inps.size(2);
 
@@ -870,7 +870,7 @@ __global__ void accum_kernel(
       x += inps[idxs[i]][k];
     }
     outs[block_id][k] = x;
-  }  
+  }
 }
 
 
@@ -880,7 +880,7 @@ retrSE3(const float *xi, const float* t, const float* q, float* t1, float* q1) {
 
   float dt[3] = {0, 0, 0};
   float dq[4] = {0, 0, 0, 1};
-  
+
   expSE3(xi, dt, dq);
 
   q1[0] = dq[3] * q[0] + dq[0] * q[3] + dq[1] * q[2] - dq[2] * q[1];
@@ -898,7 +898,7 @@ retrSE3(const float *xi, const float* t, const float* q, float* t1, float* q1) {
 __global__ void pose_retr_kernel(
     torch::PackedTensorAccessor32<float,2,torch::RestrictPtrTraits> poses,
     const torch::PackedTensorAccessor32<float,2,torch::RestrictPtrTraits> dx,
-    const int t0, const int t1) 
+    const int t0, const int t1)
 {
 
   for (int k=t0+threadIdx.x; k<t1; k+=blockDim.x) {
@@ -912,7 +912,7 @@ __global__ void pose_retr_kernel(
     q[1] = poses[k][4];
     q[2] = poses[k][5];
     q[3] = poses[k][6];
-    
+
     for (int n=0; n<6; n++) {
       xi[n] = dx[k-t0][n];
     }
@@ -933,7 +933,7 @@ __global__ void pose_retr_kernel(
 __global__ void disp_retr_kernel(
     torch::PackedTensorAccessor32<float,3,torch::RestrictPtrTraits> disps,
     const torch::PackedTensorAccessor32<float,2,torch::RestrictPtrTraits> dz,
-    const torch::PackedTensorAccessor32<long,1,torch::RestrictPtrTraits> inds) 
+    const torch::PackedTensorAccessor32<long,1,torch::RestrictPtrTraits> inds)
 {
   const int i = inds[blockIdx.x];
   const int ht = disps.size(1);
@@ -957,9 +957,9 @@ torch::Tensor accum_cuda(torch::Tensor data, torch::Tensor ix, torch::Tensor jx)
   int count = jx.size(0);
   std::vector<int> cols;
 
-  torch::Tensor ptrs_cpu = torch::zeros({count+1}, 
+  torch::Tensor ptrs_cpu = torch::zeros({count+1},
     torch::TensorOptions().dtype(torch::kInt64));
-  
+
   long* ptrs_data = ptrs_cpu.data_ptr<long>();
   ptrs_data[0] = 0;
 
@@ -973,7 +973,7 @@ torch::Tensor accum_cuda(torch::Tensor data, torch::Tensor ix, torch::Tensor jx)
     ptrs_data[j+1] = cols.size();
   }
 
-  torch::Tensor idxs_cpu = torch::zeros({long(cols.size())}, 
+  torch::Tensor idxs_cpu = torch::zeros({long(cols.size())},
     torch::TensorOptions().dtype(torch::kInt64));
 
   long* idxs_data = idxs_cpu.data_ptr<long>();
@@ -1024,7 +1024,7 @@ __global__ void EEt6x6_kernel(
 
   for (int k=threadIdx.x; k<D; k+=blockDim.x) {
     const float q = Q[kx][k];
-      
+
     // coalesced memory read
     for (int n=0; n<6; n++) {
       ei[n] = E[ix][n][k] * q;
@@ -1125,7 +1125,7 @@ class SparseBlock {
       b = Eigen::VectorXd::Zero(N*M);
     }
 
-    SparseBlock(Eigen::SparseMatrix<double> const& A, Eigen::VectorX<double> const& b, 
+    SparseBlock(Eigen::SparseMatrix<double> const& A, Eigen::VectorX<double> const& b,
         int N, int M) : A(A), b(b), N(N), M(M) {}
 
     void update_lhs(torch::Tensor As, torch::Tensor ii, torch::Tensor jj) {
@@ -1208,7 +1208,7 @@ class SparseBlock {
         dx = torch::zeros({N, M}, torch::TensorOptions()
           .device(torch::kCUDA).dtype(torch::kFloat32));
       }
-      
+
       return dx;
     }
 
@@ -1271,19 +1271,19 @@ SparseBlock schur_block(torch::Tensor E,
     }
   }
 
-  torch::Tensor ix_cuda = torch::from_blob(idx.data(), {long(idx.size())}, 
+  torch::Tensor ix_cuda = torch::from_blob(idx.data(), {long(idx.size())},
     torch::TensorOptions().dtype(torch::kInt64)).to(torch::kCUDA).view({-1, 3});
 
   torch::Tensor jx_cuda = torch::stack({kk_cpu}, -1)
     .to(torch::kCUDA).to(torch::kInt64);
 
-  torch::Tensor ii2_cpu = torch::from_blob(ii_list.data(), {long(ii_list.size())}, 
+  torch::Tensor ii2_cpu = torch::from_blob(ii_list.data(), {long(ii_list.size())},
     torch::TensorOptions().dtype(torch::kInt64)).view({-1});
 
-  torch::Tensor jj2_cpu = torch::from_blob(jj_list.data(), {long(jj_list.size())}, 
+  torch::Tensor jj2_cpu = torch::from_blob(jj_list.data(), {long(jj_list.size())},
     torch::TensorOptions().dtype(torch::kInt64)).view({-1});
 
-  torch::Tensor S = torch::zeros({ix_cuda.size(0), 6, 6}, 
+  torch::Tensor S = torch::zeros({ix_cuda.size(0), 6, 6},
     torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
 
   torch::Tensor v = torch::zeros({jx_cuda.size(0), 6},
@@ -1337,12 +1337,12 @@ std::vector<torch::Tensor> ba_cuda(
   torch::Tensor ii_exp = torch::cat({ts, ii}, 0);
   torch::Tensor jj_exp = torch::cat({ts, jj}, 0);
 
-  std::tuple<torch::Tensor, torch::Tensor> kuniq = 
+  std::tuple<torch::Tensor, torch::Tensor> kuniq =
     torch::_unique(ii_exp, true, true);
 
   torch::Tensor kx = std::get<0>(kuniq);
   torch::Tensor kk_exp = std::get<1>(kuniq);
-    
+
   torch::Tensor dx;
   torch::Tensor dz;
 
@@ -1375,11 +1375,11 @@ std::vector<torch::Tensor> ba_cuda(
     // pose x pose block
     SparseBlock A(t1 - t0, 6);
 
-    A.update_lhs(Hs.reshape({-1, 6, 6}), 
-        torch::cat({ii, ii, jj, jj}) - t0, 
+    A.update_lhs(Hs.reshape({-1, 6, 6}),
+        torch::cat({ii, ii, jj, jj}) - t0,
         torch::cat({ii, jj, ii, jj}) - t0);
 
-    A.update_rhs(vs.reshape({-1, 6}), 
+    A.update_rhs(vs.reshape({-1, 6}),
         torch::cat({ii, jj}) - t0);
 
     if (motion_only) {
@@ -1390,7 +1390,7 @@ std::vector<torch::Tensor> ba_cuda(
         poses.packed_accessor32<float,2,torch::RestrictPtrTraits>(),
         dx.packed_accessor32<float,2,torch::RestrictPtrTraits>(), t0, t1);
     }
-    
+
     else {
       // add depth residual if there are depth sensor measurements
       const float alpha = 0.05;

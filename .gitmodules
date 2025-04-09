@@ -1,7 +1,6 @@
-[submodule "third-party/DPVO"]
-	path = third-party/DPVO
-	url = https://github.com/princeton-vl/DPVO.git
-[submodule "third-party/PHC_Lab"]
-	path = third-party/PHC_Lab
-	url = git@github.com:ZhengyiLuo/PHC_Lab.git
-	branch = ye
+[submodule "third-party/DROID-SLAM/thirdparty/lietorch"]
+	path = third-party/DROID-SLAM/thirdparty/lietorch
+	url = https://github.com/princeton-vl/lietorch
+[submodule "third-party/DROID-SLAM/thirdparty/eigen"]
+	path = third-party/DROID-SLAM/thirdparty/eigen
+	url = https://gitlab.com/libeigen/eigen.git

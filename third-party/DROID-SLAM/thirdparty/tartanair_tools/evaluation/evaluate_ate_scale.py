@@ -36,7 +36,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 #
-# Requirements: 
+# Requirements:
 # sudo apt-get install python-argparse
 
 """
@@ -46,63 +46,69 @@ trajectory and the estimated trajectory.
 
 import numpy
 
-def align(model,data,calc_scale=False):
+
+def align(model, data, calc_scale=False):
     """Align two trajectories using the method of Horn (closed-form).
-    
+
     Input:
     model -- first trajectory (3xn)
     data -- second trajectory (3xn)
-    
+
     Output:
     rot -- rotation matrix (3x3)
     trans -- translation vector (3x1)
     trans_error -- translational error per point (1xn)
-    
+
     """
-    numpy.set_printoptions(precision=3,suppress=True)
+    numpy.set_printoptions(precision=3, suppress=True)
     model_zerocentered = model - model.mean(1)
     data_zerocentered = data - data.mean(1)
-    
-    W = numpy.zeros( (3,3) )
+
+    W = numpy.zeros((3, 3))
     for column in range(model.shape[1]):
-        W += numpy.outer(model_zerocentered[:,column],data_zerocentered[:,column])
-    U,d,Vh = numpy.linalg.linalg.svd(W.transpose())
-    S = numpy.matrix(numpy.identity( 3 ))
-    if(numpy.linalg.det(U) * numpy.linalg.det(Vh)<0):
-        S[2,2] = -1
-    rot = U*S*Vh
+        W += numpy.outer(model_zerocentered[:, column], data_zerocentered[:, column])
+    U, d, Vh = numpy.linalg.linalg.svd(W.transpose())
+    S = numpy.matrix(numpy.identity(3))
+    if numpy.linalg.det(U) * numpy.linalg.det(Vh) < 0:
+        S[2, 2] = -1
+    rot = U * S * Vh
 
     if calc_scale:
-        rotmodel = rot*model_zerocentered
+        rotmodel = rot * model_zerocentered
         dots = 0.0
         norms = 0.0
         for column in range(data_zerocentered.shape[1]):
-            dots += numpy.dot(data_zerocentered[:,column].transpose(),rotmodel[:,column])
-            normi = numpy.linalg.norm(model_zerocentered[:,column])
-            norms += normi*normi
-        # s = float(dots/norms)  
-        s = float(norms/dots)
+            dots += numpy.dot(
+                data_zerocentered[:, column].transpose(), rotmodel[:, column]
+            )
+            normi = numpy.linalg.norm(model_zerocentered[:, column])
+            norms += normi * normi
+        # s = float(dots/norms)
+        s = float(norms / dots)
     else:
-        s = 1.0  
+        s = 1.0
 
     # trans = data.mean(1) - s*rot * model.mean(1)
     # model_aligned = s*rot * model + trans
     # alignment_error = model_aligned - data
 
     # scale the est to the gt, otherwise the ATE could be very small if the est scale is small
-    trans = s*data.mean(1) - rot * model.mean(1)
+    trans = s * data.mean(1) - rot * model.mean(1)
     model_aligned = rot * model + trans
     data_alingned = s * data
     alignment_error = model_aligned - data_alingned
-    
-    trans_error = numpy.sqrt(numpy.sum(numpy.multiply(alignment_error,alignment_error),0)).A[0]
-        
-    return rot,trans,trans_error, s
 
-def plot_traj(ax,stamps,traj,style,color,label):
+    trans_error = numpy.sqrt(
+        numpy.sum(numpy.multiply(alignment_error, alignment_error), 0)
+    ).A[0]
+
+    return rot, trans, trans_error, s
+
+
+def plot_traj(ax, stamps, traj, style, color, label):
     """
-    Plot a trajectory using matplotlib. 
-    
+    Plot a trajectory using matplotlib.
+
     Input:
     ax -- the plot
     stamps -- time stamps (1xn)
@@ -110,24 +116,22 @@ def plot_traj(ax,stamps,traj,style,color,label):
     style -- line style
     color -- line color
     label -- plot legend
-    
+
     """
     stamps.sort()
-    interval = numpy.median([s-t for s,t in zip(stamps[1:],stamps[:-1])])
+    interval = numpy.median([s - t for s, t in zip(stamps[1:], stamps[:-1])])
     x = []
     y = []
     last = stamps[0]
     for i in range(len(stamps)):
-        if stamps[i]-last < 2*interval:
+        if stamps[i] - last < 2 * interval:
             x.append(traj[i][0])
             y.append(traj[i][1])
-        elif len(x)>0:
-            ax.plot(x,y,style,color=color,label=label)
-            label=""
-            x=[]
-            y=[]
-        last= stamps[i]
-    if len(x)>0:
-        ax.plot(x,y,style,color=color,label=label)
-            
-
+        elif len(x) > 0:
+            ax.plot(x, y, style, color=color, label=label)
+            label = ""
+            x = []
+            y = []
+        last = stamps[i]
+    if len(x) > 0:
+        ax.plot(x, y, style, color=color, label=label)

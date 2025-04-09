@@ -2,7 +2,7 @@
 
 The color images are stored as 640x480 8-bit RGB images in PNG format.
 
-* Load the image using OpenCV: 
+* Load the image using OpenCV:
 ```
 import cv2
 img = cv2.imread(FILENAME)
@@ -17,7 +17,7 @@ img = Image.open(FILENAME)
 img.show()
 ```
 
-### Camera intrinsics 
+### Camera intrinsics
 ```
 fx = 320.0  # focal length x
 fy = 320.0  # focal length y
@@ -32,9 +32,9 @@ height = 480
 
 ### Depth image
 
-The depth maps are stored as 640x480 16-bit numpy array in NPY format. In the Unreal Engine, the environment usually has a sky sphere at a large distance. So the infinite distant object such as the sky has a large depth value (e.g. 10000) instead of an infinite number. 
+The depth maps are stored as 640x480 16-bit numpy array in NPY format. In the Unreal Engine, the environment usually has a sky sphere at a large distance. So the infinite distant object such as the sky has a large depth value (e.g. 10000) instead of an infinite number.
 
-The unit of the depth value is meter. The baseline between the left and right cameras is 0.25m. 
+The unit of the depth value is meter. The baseline between the left and right cameras is 0.25m.
 
 * Load the depth image:
 ```
@@ -47,7 +47,7 @@ disparity = 80.0 / depth
 
 ### Segmentation image
 
-The segmentation images are saved as a uint8 numpy array. AirSim assigns value 0 to 255 to each mesh available in the environment. 
+The segmentation images are saved as a uint8 numpy array. AirSim assigns value 0 to 255 to each mesh available in the environment.
 
 [More details](https://github.com/microsoft/AirSim/blob/master/docs/image_apis.md#segmentation)
 
@@ -59,7 +59,7 @@ depth = np.load(FILENAME)
 
 ### Optical flow
 
-The optical flow maps are saved as a float32 numpy array, which is calculated based on the ground truth depth and ground truth camera motion, using [this](https://github.com/huyaoyu/ImageFlow) code. Dynamic objects and occlusions are masked by the mask file, which is a uint8 numpy array. We currently provide the optical flow for the left camera. 
+The optical flow maps are saved as a float32 numpy array, which is calculated based on the ground truth depth and ground truth camera motion, using [this](https://github.com/huyaoyu/ImageFlow) code. Dynamic objects and occlusions are masked by the mask file, which is a uint8 numpy array. We currently provide the optical flow for the left camera.
 
 * Load the optical flow
 ```
@@ -84,7 +84,7 @@ The camera pose file is a text file containing the translation and orientation 
 
 * **qx qy qz qw** (4 floats) give the orientation of the optical center of the color camera in the form of a unit quaternion with respect to the world frame. 
 
-* The camera motion is defined in the NED frame. That is to say, the x-axis is pointing to the camera's forward, the y-axis is pointing to the camera's right, the z-axis is pointing to the camera's downward. 
+* The camera motion is defined in the NED frame. That is to say, the x-axis is pointing to the camera's forward, the y-axis is pointing to the camera's right, the z-axis is pointing to the camera's downward.
 
 * Load the pose file:
 ```

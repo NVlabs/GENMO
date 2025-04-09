@@ -1,16 +1,15 @@
-import torch
+from collections import OrderedDict
+
 import lietorch
 import numpy as np
-
-from droid_net import DroidNet
+import torch
 from depth_video import DepthVideo
-from motion_filter import MotionFilter
-from droid_frontend import DroidFrontend
 from droid_backend import DroidBackend
-from trajectory_filler import PoseTrajectoryFiller
-
-from collections import OrderedDict
+from droid_frontend import DroidFrontend
+from droid_net import DroidNet
+from motion_filter import MotionFilter
 from torch.multiprocessing import Process
+from trajectory_filler import PoseTrajectoryFiller
 
 
 class Droid:
@@ -28,7 +27,7 @@ class Droid:
 
         # frontend process
         self.frontend = DroidFrontend(self.net, self.video, self.args)
-        
+
         # backend process
         self.backend = DroidBackend(self.net, self.video, self.args)
 
@@ -36,20 +35,23 @@ class Droid:
         if not self.disable_vis:
             # from visualization import droid_visualization
             from vis_headless import droid_visualization
-            print('Using headless ...')
-            self.visualizer = Process(target=droid_visualization, args=(self.video, '.'))
+
+            print("Using headless ...")
+            self.visualizer = Process(
+                target=droid_visualization, args=(self.video, ".")
+            )
             self.visualizer.start()
 
         # post processor - fill in poses for non-keyframes
         self.traj_filler = PoseTrajectoryFiller(self.net, self.video)
 
-
     def load_weights(self, weights):
-        """ load trained model weights """
+        """load trained model weights"""
 
         self.net = DroidNet()
-        state_dict = OrderedDict([
-            (k.replace("module.", ""), v) for (k, v) in torch.load(weights).items()])
+        state_dict = OrderedDict(
+            [(k.replace("module.", ""), v) for (k, v) in torch.load(weights).items()]
+        )
 
         state_dict["update.weight.2.weight"] = state_dict["update.weight.2.weight"][:2]
         state_dict["update.weight.2.bias"] = state_dict["update.weight.2.bias"][:2]
@@ -60,7 +62,7 @@ class Droid:
         self.net.to("cuda:0").eval()
 
     def track(self, tstamp, image, depth=None, intrinsics=None, mask=None):
-        """ main thread - update map """
+        """main thread - update map"""
 
         with torch.no_grad():
             # check there is enough motion
@@ -73,7 +75,7 @@ class Droid:
             # self.backend()
 
     def terminate(self, stream=None, backend=True):
-        """ terminate the visualization process, return poses [t, q] """
+        """terminate the visualization process, return poses [t, q]"""
 
         del self.frontend
 
@@ -88,9 +90,9 @@ class Droid:
 
         camera_trajectory = self.traj_filler(stream)
         return camera_trajectory.inv().data.cpu().numpy()
-    
+
     def compute_error(self):
-        """ compute slam reprojection error """
+        """compute slam reprojection error"""
 
         del self.frontend
 
@@ -98,5 +100,3 @@ class Droid:
         self.backend(12)
 
         return self.backend.errors[-1]
-        
-
