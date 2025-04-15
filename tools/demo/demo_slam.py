@@ -16,6 +16,7 @@ from hydra import compose, initialize_config_module
 from tqdm import tqdm
 
 from hmr4d.configs import register_store_gvhmr
+from hmr4d.model.genmo.genmo_demo import GENMO_demo
 from hmr4d.model.gvhmr.gvhmr_pl_demo import DemoPL
 from hmr4d.model.gvhmr.unimfm_demo import UNIMFM_demo
 from hmr4d.utils.geo.hmr_cam import (
@@ -131,7 +132,7 @@ def parse_args_to_cfg():
             overrides.append(f"output_root={args.output_root}")
         register_store_gvhmr()
         # cfg = compose(config_name="demo", overrides=overrides)
-        cfg = compose(config_name="demo_unimfm", overrides=overrides)
+        cfg = compose(config_name="demo_genmo", overrides=overrides)
 
     # Output
     Log.info(f"[Output Dir]: {cfg.output_dir}")
@@ -312,6 +313,13 @@ def load_data_dict(cfg):
         "scales": scales,
         "mean_scale": mean_scale,
         "T_w2c": T_w2c,
+        "mask": {
+            "has_img_mask": torch.ones(length).bool(),
+            "has_2d_mask": torch.ones(length).bool(),
+            "has_cam_mask": torch.ones(length).bool(),
+            "has_audio_mask": torch.zeros(length).bool(),
+            "has_music_mask": torch.zeros(length).bool(),
+        },
     }
     return data
 

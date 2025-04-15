@@ -172,7 +172,6 @@ class VisMusic(pl.Callback):
                 "music_fps": music_fps,
             }
             torch.save(pred_res, f"out/music_pred/{batch_idx}-{vid}.pt")
-            return
             # Visualize
             if trainer.global_rank == 0 and self.num_val % self.vis_every_n_val == 0:
                 wandb_dict = visualize_smpl_scene_mp4(

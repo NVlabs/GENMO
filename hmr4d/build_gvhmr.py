@@ -2,6 +2,7 @@ from hydra.utils import instantiate
 from omegaconf import OmegaConf
 
 from hmr4d import PROJ_ROOT
+from hmr4d.model.genmo.genmo_demo import GENMO_demo
 from hmr4d.model.gvhmr.gvhmr_pl_demo import DemoPL
 from hmr4d.model.gvhmr.unimfm_demo import UNIMFM_demo
 

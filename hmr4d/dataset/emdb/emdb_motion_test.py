@@ -11,6 +11,7 @@ from hmr4d.utils.geo_transform import (
     compute_cam_tvel,
     normalize_T_w2c,
 )
+from hmr4d.utils.net_utils import get_valid_mask
 from hmr4d.utils.pylogger import Log
 from hmr4d.utils.wis3d_utils import add_motion_as_lines, make_wis3d
 from motiondiff.models.mdm.rotation_conversions import (
@@ -98,7 +99,16 @@ class EmdbSmplFullSeqDataset(data.Dataset):
         gender = label["gender"]
         smpl_params = label["smpl_params"]
         mask = label["mask"]
-        data.update({"smpl_params": smpl_params, "gender": gender, "mask": mask})
+        mask_dict = {
+            "valid": mask,
+            "has_img_mask": get_valid_mask(length, length),
+            "has_2d_mask": get_valid_mask(length, length),
+            "has_cam_mask": get_valid_mask(length, length),
+            "has_audio_mask": get_valid_mask(length, 0),
+            "has_music_mask": get_valid_mask(length, 0),
+            # "2d_only": False,
+        }
+        data.update({"smpl_params": smpl_params, "gender": gender, "mask": mask_dict})
         vimo_smpl_params = {
             "pred_cam": vimo_label["vimo_params"]["pred_cam"],
             "pred_pose": vimo_label["vimo_params"]["pred_pose"],

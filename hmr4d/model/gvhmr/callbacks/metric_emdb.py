@@ -115,7 +115,7 @@ class MetricMocap(pl.Callback):
         seq_length = batch["length"][0].item()
         gender = batch["gender"][0]
         T_w2c = batch["gt_T_w2c"][0]
-        mask = batch["mask"][0]
+        mask = batch["mask"]["valid"][0]
 
         # Groundtruth (world, cam)
         target_w_params = {k: v[0] for k, v in batch["smpl_params"].items()}

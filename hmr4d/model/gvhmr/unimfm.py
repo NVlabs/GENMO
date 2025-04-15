@@ -276,8 +276,8 @@ class UNIMFM(pl.LightningModule):
         else:
             f_condition_mask = dict()
             has_text = batch["has_text"]
-            has_audio = batch["has_audio"]
-            has_music = batch["has_music"]
+            has_audio = batch["mask"]["has_audio_mask"][:, 0]
+            has_music = batch["mask"]["has_music_mask"][:, 0]
             if regression_no_img_mask and mode == "regression":
                 mask_img_prob = 0
                 mask_f_imgseq_prob = 0
@@ -328,7 +328,7 @@ class UNIMFM(pl.LightningModule):
                 .transpose(1, 2)
                 .contiguous()
             )
-            has_audio = batch["has_audio"]
+            has_audio = batch["mask"]["has_audio_mask"]
             encoded_audio[~has_audio] = 0
             batch["encoded_audio"] = encoded_audio
         else:

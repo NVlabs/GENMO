@@ -11,6 +11,7 @@ from hmr4d.utils.geo_transform import (
     compute_cam_tvel,
     normalize_T_w2c,
 )
+from hmr4d.utils.net_utils import get_valid_mask
 from hmr4d.utils.pylogger import Log
 from hmr4d.utils.wis3d_utils import add_motion_as_lines, make_wis3d
 
@@ -75,9 +76,18 @@ class ThreedpwOccSmplFullSeqDataset(data.Dataset):
                 "smpl_params": label["smpl_params"],  # world
                 "gender": label["gender"],  # str
                 # "T_w2c": label["T_w2c"],  # (F, 4, 4)
-                "mask": mask,  # (F)
+                "mask": {
+                    "valid": mask,  # (F)
+                    "has_img_mask": get_valid_mask(length, length),
+                    "has_2d_mask": get_valid_mask(length, length),
+                    "has_cam_mask": get_valid_mask(length, length),
+                    "has_audio_mask": get_valid_mask(length, 0),
+                    "has_music_mask": get_valid_mask(length, 0),
+                    "2d_only": False,
+                },
             }
         )
+
         gt_T_w2c = label["T_w2c"]
         data.update({"vimo_smpl_params": vimo_smpl_params})
 

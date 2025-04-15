@@ -13,6 +13,7 @@ from hmr4d.utils.geo_transform import (
     normalize_T_w2c,
     transform_mat,
 )
+from hmr4d.utils.net_utils import get_valid_mask
 from hmr4d.utils.pylogger import Log
 from hmr4d.utils.smplx_utils import make_smplx
 from hmr4d.utils.wis3d_utils import add_motion_as_lines, make_wis3d
@@ -208,6 +209,14 @@ class RichSmplFullSeqDataset(data.Dataset):
             "scales": scales,
             "mean_scale": mean_scale,
             "vimo_smpl_params": data["vimo_smpl_params"],
+            "mask": {
+                "valid": get_valid_mask(length, length),
+                "has_img_mask": get_valid_mask(length, length),
+                "has_2d_mask": get_valid_mask(length, length),
+                "has_cam_mask": get_valid_mask(length, length),
+                "has_audio_mask": get_valid_mask(length, 0),
+                "has_music_mask": get_valid_mask(length, 0),
+            },
         }
 
         if "vimo_params_flip" in vimo_label:

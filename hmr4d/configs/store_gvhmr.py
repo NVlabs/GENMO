@@ -14,6 +14,7 @@ import hmr4d.dataset.threedpw.threedpw_occ_motion_test
 import hmr4d.dataset.threedpw.threedpw_occ_motion_train
 import hmr4d.model.common_utils.optimizer
 import hmr4d.model.common_utils.scheduler_cfg
+import hmr4d.model.genmo.genmo
 import hmr4d.model.gvhmr.callbacks.metric_3dpw
 import hmr4d.model.gvhmr.callbacks.metric_3dpw_occ
 import hmr4d.model.gvhmr.callbacks.metric_aistpp

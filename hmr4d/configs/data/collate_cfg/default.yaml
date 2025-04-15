@@ -19,7 +19,7 @@ default_feature_val:
   music_fps: 30
   audio_fps: 30
   has_text: False
-  has_audio: False
-  has_music: False
+  # has_audio: False
+  # has_music: False
 
 default_feature_type: {}
