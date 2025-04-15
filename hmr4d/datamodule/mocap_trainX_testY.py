@@ -31,8 +31,8 @@ def collate_fn(batch, mode, collate_cfg=None):
     # Get a superset of all keys from all batch items
     mandatory_keys = [
         "has_text",
-        "has_audio",
-        "has_music",
+        # "has_audio",
+        # "has_music",
         "caption",
         "text_embed",
         "music_embed",

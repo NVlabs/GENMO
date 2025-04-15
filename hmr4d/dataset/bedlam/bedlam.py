@@ -224,6 +224,12 @@ class BedlamDatasetV2(ImgfeatMotionDatasetBase):
             "mask": {
                 "valid": get_valid_mask(max_len, length),
                 "humanoid": get_valid_mask(max_len, 0),
+                "has_img_mask": get_valid_mask(max_len, length),
+                "has_2d_mask": get_valid_mask(max_len, length),
+                "has_cam_mask": get_valid_mask(max_len, length),
+                "has_audio_mask": get_valid_mask(max_len, 0),
+                "has_music_mask": get_valid_mask(max_len, 0),
+                "2d_only": False,
                 "vitpose": False,
                 "bbx_xys": True,
                 "f_imgseq": True,

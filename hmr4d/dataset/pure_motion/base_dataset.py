@@ -232,6 +232,12 @@ class BaseDataset(Dataset):
             "mask": {
                 "valid": get_valid_mask(length, length),
                 "humanoid": get_valid_mask(max_len, 0),
+                "has_img_mask": get_valid_mask(length, 0),
+                "has_2d_mask": get_valid_mask(length, length),
+                "has_cam_mask": get_valid_mask(length, length),
+                "has_audio_mask": get_valid_mask(length, 0),
+                "has_music_mask": get_valid_mask(length, 0),
+                "2d_only": False,
                 "vitpose": False,
                 "bbx_xys": False,
                 "f_imgseq": False,

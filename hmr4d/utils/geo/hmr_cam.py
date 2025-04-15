@@ -233,13 +233,51 @@ def unnormalize_kp2d(kp2d, bbx_xys, K_fullimg):
     return torch.cat([unnormalized_kp2d_xy, kp2d[..., 2:]], dim=-1)
 
 
-def get_bbx_xys(i_j2d, bbx_ratio=[192, 256], do_augment=False, base_enlarge=1.2):
-    """Args: (B, L, J, 3) [x,y,c] -> Returns: (B, L, 3)"""
-    # Center
-    min_x = i_j2d[..., 0].min(-1)[0]
-    max_x = i_j2d[..., 0].max(-1)[0]
-    min_y = i_j2d[..., 1].min(-1)[0]
-    max_y = i_j2d[..., 1].max(-1)[0]
+def get_bbx_xys(
+    i_j2d, i_j2d_mask=None, bbx_ratio=[192, 256], do_augment=False, base_enlarge=1.2
+):
+    """
+    Args:
+        i_j2d: (B, L, J, 3) [x,y,c] or (B, L, J, 2) [x,y]
+        i_j2d_mask: (B, L, J) boolean mask indicating valid joints, if None use all joints
+        bbx_ratio: [width, height] ratio for the bounding box
+        do_augment: whether to apply random augmentation
+        base_enlarge: factor to enlarge the bounding box
+    Returns:
+        bbx_xys: (B, L, 3) [center_x, center_y, size]
+    """
+    # Apply mask if provided
+    if i_j2d_mask is not None:
+        # Create a masked version of i_j2d for min/max calculations
+        # For min calculation, set masked-out joints to large positive values
+        # For max calculation, set masked-out joints to large negative values
+        mask_expanded = i_j2d_mask.unsqueeze(-1)  # (B, L, J, 1)
+
+        # Create copies for min and max calculations
+        i_j2d_for_min = i_j2d.clone()
+        i_j2d_for_max = i_j2d.clone()
+
+        # Set coordinates of masked joints appropriately
+        invalid_mask = ~mask_expanded.expand_as(i_j2d[..., :2])
+        i_j2d_for_min[..., :2][invalid_mask] = float(
+            "inf"
+        )  # For min, set to large positive
+        i_j2d_for_max[..., :2][invalid_mask] = float(
+            "-inf"
+        )  # For max, set to large negative
+
+        # Calculate min/max using the filtered joints
+        min_x = i_j2d_for_min[..., 0].min(-1)[0]
+        max_x = i_j2d_for_max[..., 0].max(-1)[0]
+        min_y = i_j2d_for_min[..., 1].min(-1)[0]
+        max_y = i_j2d_for_max[..., 1].max(-1)[0]
+    else:
+        # Use all joints
+        min_x = i_j2d[..., 0].min(-1)[0]
+        max_x = i_j2d[..., 0].max(-1)[0]
+        min_y = i_j2d[..., 1].min(-1)[0]
+        max_y = i_j2d[..., 1].max(-1)[0]
+
     center_x = (min_x + max_x) / 2
     center_y = (min_y + max_y) / 2
 
