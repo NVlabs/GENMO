@@ -9,16 +9,22 @@ cd genmo
 conda create -y -n genmo python=3.10
 conda activate genmo
 pip install -r requirements.txt
-pip install open3d scenepic moviepy imageio einops dnspython dill librosa gdown colorama numpy==1.23.5
+pip install open3d scenepic moviepy imageio einops dnspython dill librosa gdown colorama numpy==1.23.5 av==12.1.0
 pip install git+https://github.com/google/aistplusplus_api.git
 pip install git+https://github.com/facebookresearch/detectron2.git@a59f05630a8f205756064244bf5beb8661f96180
 pip install -e .
+pip install torch-scatter -f "https://data.pyg.org/whl/torch-2.3.0+cu121.html"
 
 # DROID-SLAM
 cd third-party/DROID-SLAM
 export CUDA_HOME=/usr/local/cuda-12.1/
 export PATH=$PATH:/usr/local/cuda-12.1/bin/
 python setup.py install
+```
+
+You may need to install ffmpeg in your machine.
+```bash
+sudo apt-get install ffmpeg
 ```
 
 Setup pre-commit for code formatting:
