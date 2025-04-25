@@ -157,7 +157,7 @@ def parse_args_to_cfg():
 
 
 @torch.no_grad()
-def run_preprocess(cfg):
+def run_preprocess(cfg, orig_fps):
     Log.info(f"[Preprocess] Start!")
     tic = Log.time()
     video_path = cfg.video_path
@@ -181,7 +181,7 @@ def run_preprocess(cfg):
         video = read_video_np(video_path)
         bbx_xyxy = torch.load(paths.bbx)["bbx_xyxy"]
         video_overlay = draw_bbx_xyxy_on_image_batch(bbx_xyxy, video)
-        save_video(video_overlay, cfg.paths.bbx_xyxy_video_overlay)
+        save_video(video_overlay, cfg.paths.bbx_xyxy_video_overlay, fps=orig_fps)
 
     # Get VitPose
     if not Path(paths.vitpose).exists():
@@ -194,8 +194,8 @@ def run_preprocess(cfg):
         Log.info(f"[Preprocess] vitpose from {paths.vitpose}")
     if verbose:
         video = read_video_np(video_path)
-        video_overlay = draw_coco17_skeleton_batch(video, vitpose, 0.5)
-        save_video(video_overlay, paths.vitpose_video_overlay)
+        video_overlay = draw_coco17_skeleton_batch(video, vitpose[0], 0.5)
+        save_video(video_overlay, paths.vitpose_video_overlay, fps=orig_fps)
 
     if isinstance(vitpose, tuple):
         vitpose = vitpose[0]
@@ -594,7 +594,7 @@ if __name__ == "__main__":
     Log.info(f"[GPU]: {torch.cuda.get_device_properties('cuda')}")
 
     # ===== Preprocess and save to disk ===== #
-    run_preprocess(cfg)
+    run_preprocess(cfg, orig_fps)
     data = load_data_dict(cfg)
 
     # ===== HMR4D ===== #
