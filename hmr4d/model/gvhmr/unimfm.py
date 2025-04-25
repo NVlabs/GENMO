@@ -882,6 +882,7 @@ class UNIMFM(pl.LightningModule):
                 batch_["scales"] = batch["scales"]
                 batch_["mean_scale"] = batch["mean_scale"]
 
+            do_postproc = False
         # batch_['gt'] = self.endecoder.encode(batch)
         # batch_['static_gt'] = self.endecoder.get_static_gt(batch, self.pipeline.args.static_conf.vel_thr)
 
@@ -899,8 +900,11 @@ class UNIMFM(pl.LightningModule):
                 .transpose(1, 2)
                 .contiguous()
             )
-            has_audio = batch["has_audio"]
-            encoded_audio[~has_audio] = 0
+            if "has_audio" in batch:
+                has_audio = batch["has_audio"]
+                encoded_audio[~has_audio] = 0
+            else:
+                encoded_audio[:] = 0
             batch_["encoded_audio"] = encoded_audio
         else:
             batch_["encoded_audio"] = torch.zeros(B, L, 128, device="cuda")
@@ -1023,8 +1027,11 @@ class UNIMFM(pl.LightningModule):
                     .transpose(1, 2)
                     .contiguous()
                 )
-                has_audio = batch["has_audio"]
-                encoded_audio[~has_audio] = 0
+                if "has_audio" in batch:
+                    has_audio = batch["has_audio"]
+                    encoded_audio[~has_audio] = 0
+                else:
+                    encoded_audio[:] = 0
                 batch_["encoded_audio"] = encoded_audio
             else:
                 batch_["encoded_audio"] = torch.zeros(B, L, 128, device="cuda")

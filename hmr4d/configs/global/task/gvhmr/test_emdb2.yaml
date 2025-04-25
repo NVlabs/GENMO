@@ -9,7 +9,7 @@ defaults:
   - _self_
 
 task: test
-remote_results_path: /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jiefengl/gvhmr
+remote_results_path: /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/yey/gvhmr
 ckpt_path: ??? # will not override previous setting if already set
 
 # lightning utilities

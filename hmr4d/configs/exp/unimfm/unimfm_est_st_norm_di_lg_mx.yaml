@@ -136,7 +136,7 @@ network:
     denoiser:
       _target_: hmr4d.network.unimfm.unimfm_denoiser.NetworkEncoderRoPE
       output_dim: 151
-      xt_dim: ${.output_dim}
+      xt_dim: 157
       njoints: ${.xt_dim}
       text_mask_prob: 0.1
       use_text_pos_enc: true

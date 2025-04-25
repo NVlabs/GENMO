@@ -253,7 +253,7 @@ class UNIMFMDiffusion(nn.Module):
         )
         return
 
-    def generate_motion_rep(self, inputs, target_x, first_k_frames=None):
+    def generate_motion_rep(self, inputs, target_x, static_gt, first_k_frames=None):
         f_condition = inputs["f_condition"]
         f_condition_exists = inputs["f_condition_exists"]
         length = inputs["length"]
@@ -499,7 +499,9 @@ class UNIMFMDiffusion(nn.Module):
             f_uncond = self.cond_merger(f_uncond)
         vis_mask = length_to_mask(length, f_cond.shape[1])[:, :end_fr]  # (B, L)
 
-        motion = target_x * vis_mask[..., None]
+        motion = torch.cat([static_gt, target_x], dim=-1)
+
+        motion = motion * vis_mask[..., None]
         motion = motion[:, :end_fr]
         return f_cond, f_uncond, motion
 
@@ -510,8 +512,9 @@ class UNIMFMDiffusion(nn.Module):
         diffusion = self.train_diffusion if self.training else self.test_diffusion
         length = inputs["length"]
         target_x = inputs["target_x"]
+        static_gt = inputs["static_gt"]
 
-        f_cond, f_uncond, motion = self.generate_motion_rep(inputs, target_x)
+        f_cond, f_uncond, motion = self.generate_motion_rep(inputs, target_x, static_gt)
         B, L, _ = motion.shape
         vis_mask = length_to_mask(length, L)  # (B, L)
         valid_mask = inputs["mask"]["valid"]
@@ -601,8 +604,9 @@ class UNIMFMDiffusion(nn.Module):
 
         mdim = self.endecoder.get_motion_dim()
         target_x = torch.zeros(B, L, mdim).to(obs)
+        static_gt = torch.zeros(B, L, 6).to(obs)
 
-        f_cond, f_uncond, motion = self.generate_motion_rep(inputs, target_x)
+        f_cond, f_uncond, motion = self.generate_motion_rep(inputs, target_x, static_gt)
         # Setup length and make padding mask
         vis_mask = length_to_mask(length, L)  # (B, L)
 
@@ -720,8 +724,9 @@ class UNIMFMDiffusion(nn.Module):
 
         mdim = self.endecoder.get_motion_dim()
         target_x = torch.zeros(B, L, mdim).to(obs)
+        static_gt = torch.zeros(B, L, 6).to(obs)
 
-        f_cond, f_uncond, motion = self.generate_motion_rep(inputs, target_x)
+        f_cond, f_uncond, motion = self.generate_motion_rep(inputs, target_x, static_gt)
 
         vis_mask = length_to_mask(length, L)  # (B, L)
 
