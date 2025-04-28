@@ -126,6 +126,7 @@ network:
       mlp_ratio: 4
 
 ckpt_path: outputs/mocap_mixed_v1/genmo/genmo_lg_bs256_vis3_vitposeocc/version_0/checkpoints/last.ckpt
+remote_results_path: /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jiefengl/gvhmr
 
 # ================================ #
 #          global setting          #
