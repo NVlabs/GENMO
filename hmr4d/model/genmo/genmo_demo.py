@@ -44,7 +44,8 @@ class GENMO_demo(pl.LightningModule):
         self.timing = os.environ.get("DEBUG_TIMING", "FALSE") == "TRUE"
 
         # SMPLX
-        self.smplx = make_smplx("supermotion_v437coco17")
+        self.smplxcoco17 = make_smplx("supermotion_v437coco17")
+        self.smplxsmpl24 = make_smplx("supermotion_smpl24")
 
         if "text_encoder" in model_cfg:
             self.use_text_encoder = True
@@ -658,8 +659,10 @@ class GENMO_demo(pl.LightningModule):
             test_mode=test_mode,
         )
 
-        _, pred_smpl_joints_global = self.smplx(**outputs["pred_smpl_params_global"])
-        _, pred_smpl_joints_incam = self.smplx(**outputs["pred_smpl_params_incam"])
+        _, pred_coco17_joints_global = self.smplxcoco17(**outputs["pred_smpl_params_global"])
+        _, pred_coco17_joints_incam = self.smplxcoco17(**outputs["pred_smpl_params_incam"])
+        pred_smpl24_joints_global = self.smplxsmpl24(**outputs["pred_smpl_params_global"])
+        pred_smpl24_joints_incam, _ = self.smplxsmpl24(**outputs["pred_smpl_params_incam"])
         pred = {
             "smpl_params_global": {
                 k: v[0] for k, v in outputs["pred_smpl_params_global"].items()
@@ -668,8 +671,10 @@ class GENMO_demo(pl.LightningModule):
                 k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()
             },
             "K_fullimg": data["K_fullimg"],
-            "smpl_joints_global": pred_smpl_joints_global,
-            "smpl_joints_incam": pred_smpl_joints_incam,
+            "coco17_joints_global": pred_coco17_joints_global[0],
+            "coco17_joints_incam": pred_coco17_joints_incam[0],
+            "smpl24_joints_global": pred_smpl24_joints_global[0],
+            "smpl24_joints_incam": pred_smpl24_joints_incam[0],
             "net_outputs": outputs,  # intermediate outputs
         }
         return pred
