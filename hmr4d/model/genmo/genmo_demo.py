@@ -658,6 +658,8 @@ class GENMO_demo(pl.LightningModule):
             test_mode=test_mode,
         )
 
+        _, pred_smpl_joints_global = self.smplx(**outputs["pred_smpl_params_global"])
+        _, pred_smpl_joints_incam = self.smplx(**outputs["pred_smpl_params_incam"])
         pred = {
             "smpl_params_global": {
                 k: v[0] for k, v in outputs["pred_smpl_params_global"].items()
@@ -666,6 +668,8 @@ class GENMO_demo(pl.LightningModule):
                 k: v[0] for k, v in outputs["pred_smpl_params_incam"].items()
             },
             "K_fullimg": data["K_fullimg"],
+            "smpl_joints_global": pred_smpl_joints_global,
+            "smpl_joints_incam": pred_smpl_joints_incam,
             "net_outputs": outputs,  # intermediate outputs
         }
         return pred
