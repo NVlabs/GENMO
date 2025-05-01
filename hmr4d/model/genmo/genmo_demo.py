@@ -662,7 +662,7 @@ class GENMO_demo(pl.LightningModule):
         _, pred_coco17_joints_global = self.smplxcoco17(**outputs["pred_smpl_params_global"])
         _, pred_coco17_joints_incam = self.smplxcoco17(**outputs["pred_smpl_params_incam"])
         pred_smpl24_joints_global = self.smplxsmpl24(**outputs["pred_smpl_params_global"])
-        pred_smpl24_joints_incam, _ = self.smplxsmpl24(**outputs["pred_smpl_params_incam"])
+        pred_smpl24_joints_incam = self.smplxsmpl24(**outputs["pred_smpl_params_incam"])
         pred = {
             "smpl_params_global": {
                 k: v[0] for k, v in outputs["pred_smpl_params_global"].items()
