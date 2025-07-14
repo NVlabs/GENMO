@@ -229,6 +229,17 @@ def run_preprocess(cfg, orig_fps):
 
         else:
             Log.info(f"[Preprocess] slam results from {paths.slam}")
+    else:
+        length, width, height = get_video_lwh(cfg.video_path)
+        K_fullimg = estimate_K(width, height)
+        cam_int = [
+            K_fullimg[0, 0],
+            K_fullimg[1, 1],
+            K_fullimg[0, 2],
+            K_fullimg[1, 2],
+        ]
+        out_dir = os.path.dirname(paths.slam)
+        np.save(f"{out_dir}/cam_int.npy", cam_int)
 
     # Get vit features
     if not Path(paths.vit_features).exists():
