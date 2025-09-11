@@ -47,6 +47,7 @@ Github [Insert MM/DD/YYYY] via [URL] <br>
 
 ## References(s):
 Project Page: https://research.nvidia.com/labs/dair/genmo/ 
+
 Paper: https://arxiv.org/pdf/2505.01425
 
 ## Model Architecture:
@@ -54,7 +55,6 @@ Paper: https://arxiv.org/pdf/2505.01425
 
 **Network Architecture:** Name Other Not Listed <br>
 
-**This model was developed based on [insert base model name (if applicable)] <br> 
 ** Number of model parameters [(Recorded with at least two significant figures e.g. 7.3*10^10)] <br>
 
 (Internal Only for GPAI Models: Not To Be Published) <br> 
@@ -66,30 +66,22 @@ Paper: https://arxiv.org/pdf/2505.01425
 
 
 ## Input: <br>
-**Input Type(s):** [Audio, Image, Text, Tabular, etcetera (etc.)] <br>
-**Input Format:** [Red, Green, Blue (RGB), Infrared (IR), Lidar, or String] <br>
+**Input Type(s):** Audio, Video, Text, Person Bounding Box, 2D Pose, 3D Keyframes <br>
+**Input Format:** Red, Green, Blue (RGB), String, Audio <br>
 **Input Parameters:** [(1D, 2D, 3D, etc.) Please write out in first mention of instance] <br>
 **Other Properties Related to Input:** [Specific Resolution/Minimum or Maximum Resolution or Characters (Including Restrictions), Image Range Needed (W x Y x Z), Pre-Processing Needed, Alpha Channel, Bit, Please State Explicity;] 
 (FOR GPAI Models Only): State size and length limits for each input modality.] <br>
 
 ## Output: <br>
-**Output Type(s):** [Audio, Image, Text, Tabular, etc.] <br>
-**Output Format:** [Red, Green, Blue (RGB), Infrared (IR), Lidar, or String] <br>
-**Output Parameters:** [(1D, 2D, 3D, etc.)] <br>
-**Other Properties Related to Output:** [Specific Resolution/Minimum or Maximum Resolution or Characters (Including Restrictions), Image Range (W x Y x Z), Post-Processing Needed, Alpha Channel, Bit] <br>
+**Output Type(s):** Human body motion in SMPL or NVHuman format. <br>
+**Output Format:** array of floats <br>
+**Output Parameters:**  1D <br>
+**Other Properties Related to Output:** NA <br>
 
-Our AI models are designed and/or optimized to run on NVIDIA GPU-accelerated systems **[or name equivalent hardware preference]**. By leveraging NVIDIA’s hardware (e.g. GPU cores) and software frameworks (e.g., CUDA libraries), the model achieves faster training and inference times compared to CPU-only solutions. <br> 
+Our AI models are designed and/or optimized to run on NVIDIA GPU-accelerated systems. By leveraging NVIDIA’s hardware (e.g. GPU cores) and software frameworks (e.g., CUDA libraries), the model achieves faster training and inference times compared to CPU-only solutions. <br> 
 
 ## Software Integration:
 **Runtime Engine(s):** 
-* [BioNeMo- Name Minimally Compatible Version] <br>
-* [DeepStream- Name Minimally Compatible Version] <br>
-* [DXIS- Name Minimally Compatible Version] <br>
-* [Maxine- Name Minimally Compatible Version] <br>
-* [Morpheus- Name Minimally Compatible Version] <br>
-* [NeMo- Name Minimally Compatible Version] <br>
-* [Riva- Name Minimally Compatible Version] <br>
-* [TAO- Name Minimally Compatible Version] <br>
 * [Not Applicable (N/A)- Name Platform If Multiple] <br> 
 
 **Supported Hardware Microarchitecture Compatibility [List in Alphabetic Order]:** <br>
@@ -101,23 +93,17 @@ Our AI models are designed and/or optimized to run on NVIDIA GPU-accelerated sys
 * [NVIDIA Pascal or specific models] <br>
 * [NVIDIA Turing or specific models] <br>
 * [NVIDIA Volta or specific models] <br>
-* [Insert Microarchitecture Name Not Listed Above] <br>
 
 **Preferred/Supported Operating System(s):**
 * [Linux] <br>
-* [Linux 4 Tegra] <br>
-* [QNX]  <br>
-* [Windows] <br>
-* [Name Other Not Listed Above] <br>
 
 The integration of foundation and fine-tuned models into AI systems requires additional testing using use-case-specific data to ensure safe and effective deployment. Following the V-model methodology, iterative testing and validation at both unit and system levels are essential to mitigate risks, meet technical and functional requirements, and ensure compliance with safety and ethical standards before deployment. <br>
 
-(Optional) This AI model can be embedded as an Application Programming Interface (API) call into the software environment described above. <br>
-
 ## Model Version(s):
-[Use unique identifier for identifying the model in the future- this may be part of our internal naming, specifying variation like "pruned," "unpruned," "trained," or "deployable" or "quantized" where necessary and including a versioning number like vX.X along with short description differentiating if multiple versions are available]  <br>
+GENMO v1.0  <br>
 
-(Optional) Describe how the model can be integrated into an AI system. <br> 
+GENMO can be integrated into an AI system as a specialized module within a larger pipeline, serving as the core engine for all human motion-related tasks. Since it is designed to handle multiple modalities and tasks, it can serve as a central hub for motion generation and estimation.
+
 
 ## Training, Testing, and Evaluation Datasets:
 
@@ -145,22 +131,10 @@ The integration of foundation and fine-tuned models into AI systems requires add
 *List of 'main/large' private datasets acquired from other third parties (above 3% of the overall data in this category), unique identifiers and links (if available) and narrative description + period of collection <br> 
 
 # Data Crawling and Scraping
-[Applicable if using]  
-
-* Overall size per modality and period of scraping <br> 
-* Identification of crawlers along with their purpose and behavior; <br>  
-* Period of data collection and name of organization(s) operating the crawler for each web crawler used <br>  
-* A general description of how the crawler respects preferences indicated in robots.txt for each web crawler used <br>  
-* Explanation of what content has been targeted; <br>  
-* List of top 10 % of all internet domain names per type of data modality (e.g., text, image). <br>  
-
-* Measures implemented to respect reservations of rights from the text and data-mining exception during data collection including specification of the opt-out protocols and solutions honored by the provider. <br>  
+N/A 
 
 # User-Sourced Data (Collected by Provider including Prompts)
-[Applicable if using]  
-
-* Overall size per modality <br> 
-* List of providers' services/products <br> 
+N/A 
 
 # Self-Sourced Synthetic Data
 [Applicable if using] 
