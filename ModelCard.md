@@ -1,18 +1,12 @@
 # Model Overview
 
 ## Model NSpect ID
-Please provide the NSpect ID for the model for internal purposes only; do not publish. <br>
-
-### API EndPoint
-Please link API endpoint here for internal purposes only; do not publish.  <br>
-
+NSPECT-LEW5-UKZO
+ 
 ### Description:
 GENMO is a generalist model that unifies human motion estimation and generation into a single framework. Developed by NVIDIA, GENMO was created to bridge the gap between motion estimation and generation tasks, which were traditionally handled by separate, specialized models. This unified framework allows GENMO to effectively leverage shared representations, leading to synergistic benefits, and enabling motion generation or estimation from multiple modalities. 
 
-This model is ready for commercial/non-commercial use.  <br>
-
-### Third-Party Community Consideration (Insert Only for Third-Party Community Models)
-N/A
+This model is ready for non-commercial research use.  <br>
 
 ### License/Terms of Use
 
@@ -21,6 +15,7 @@ N/A
 -If you are releasing under an open source license (such as Apache 2.0, MIT), contact the [Open Source Review Board](https://confluence.nvidia.com/pages/viewpage.action?pageId=800720661) (formerly SWIPAT) by filing a contribution bug request [here](https://nvbugspro.nvidia.com/bug/2885991). <br> 
 
 -If your release is for non-commercial or research purposes only, file a new bug [here](https://nvbugspro.nvidia.com/bug/3508089). <br> 
+https://nvbugspro.nvidia.com/bug/5524776
 
 -If your release allows for commercial purposes, submit [Product Legal Support Form](https://forms.office.com/pages/responsepage.aspx?id=FT0IQ3NywUC32znv2czBejILt4CYhTJKv0O6I4gccylUMVlMSE4xSFhYMUYyT1VMNVNCREk4RlE1NS4u&route=shorturl). <br> 
 
