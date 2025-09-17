@@ -56,6 +56,7 @@ Paper: https://arxiv.org/pdf/2505.01425
 **Network Architecture:** Name Other Not Listed <br>
 
 ** Number of model parameters [(Recorded with at least two significant figures e.g. 7.3*10^10)] <br>
+5.2*10^8
 
 (Internal Only for GPAI Models: Not To Be Published) <br> 
 ** Describe design choices related to initialization techniques, hyperparameter tuning, regularization techniques, model optimization, damping, and training parameters. [CAN BE EXTRACTED FROM MODEL CARD GENERATOR- 100 Words or Less]  <br> 
@@ -108,41 +109,33 @@ GENMO can be integrated into an AI system as a specialized module within a large
 ## Training, Testing, and Evaluation Datasets:
 
 ### Dataset Overview [Beginning of GPAI Model Specific Section:]
-** Total Size: [in number of data points to at least two significant figures] <br>
-** Total Number of Datasets: [insert] <br>   
+** Total Size: 2.1*10^9 <br>
+** Total Number of Datasets: 10 <br>   
 
-** Dataset partition: Training [%], Testing [%], Validation [%] <br> 
-** Time period for training data collection [Insert Period] <br> 
-** Time period for testing data collection [Insert Period] <br> 
-** Time period for validation data collection [Insert Period] <br>
+** Dataset partition: Training 99.94%, Validation 0.06% <br> 
+** Time period for training data collection: N/A - public datasets <br> 
+** Time period for testing data collection: N/A - public datasets <br> 
+** Time period for validation data collection: N/A - public <br>
 
 ** A general description of the data processing involved in transforming the acquired data into the training data for the model (recommended 200 words) <br>
-
-** A description of any methods implemented in data acquisition or processing, if any, to address other types of potentially harmful (including, but not limited to weapons, criminal planning, sexual minor, harassment, hate, profanity, threats, violence, or suicide) data in the training, testing, or evaluation data (recommended 300 words) <br>
+We used a collection of public datasets for training. All datasets are handled through separate data readers that bring them to a unified structure. 
 
 # Public Datasets
-[Applicable if using] <br>
+1. AMASS - https://amass.is.tue.mpg.de/
+1. BEDLAM - https://bedlam.is.tue.mpg.de/ 
+1. Human3.6M - http://vision.imar.ro/human3.6m/description.php 
+1. 3DPW - https://virtualhumans.mpi-inf.mpg.de/3DPW/ 
+1. AIST++ - https://google.github.io/aistplusplus_dataset/factsfigures.html 
+1. HumanML3D - https://github.com/EricGuo5513/HumanML3D 
+1. Motion-X - https://github.com/IDEA-Research/Motion-X 
+1. RICH - https://rich.is.tue.mpg.de/ 
+1. EMDB - https://eth-ait.github.io/emdb/ 
+1. Beat2 - https://is.mpg.de/ps/en/projects/beat2-dataset-for-holistic-co-speech-gesture-generation 
+
+
 
 *List of 'main/large' datasets (above 3% of the overall data in this category) with unique identification, links + period of collection <br> 
  
-# Private Datasets
-[Applicable if using] <br>
-
-*List of 'main/large' private datasets acquired from other third parties (above 3% of the overall data in this category), unique identifiers and links (if available) and narrative description + period of collection <br> 
-
-# Data Crawling and Scraping
-N/A 
-
-# User-Sourced Data (Collected by Provider including Prompts)
-N/A 
-
-# Self-Sourced Synthetic Data
-[Applicable if using] 
-
-* Overall Size per Modality <br> 
-* A description of the methods, if any, used to synthetically generate training data.  <br> 
-* The name(s) of any AI model(s) or system(s) used to synthetically generate training data including a general description of the synthetic data generation model's training data.  <br>
-
 ### [End of GPAI Model Specific Section] <br>
 
 ## Training Dataset [The dataset the model was trained on]:
@@ -180,22 +173,10 @@ N/A
 *  Specify the approximate size and unit of measurement <br> 
 
 ** Data Collection Method by dataset <br>
-* [Automated] - [Think "Scraper"]  <br>
-* [Automatic/Sensors] - [Machine-derived] <br>
-* [Human] <br>
-* [Synthetic] <br>
-* [Undisclosed] - [Only note Undisclosed if the data collection methods have not been disclosed. If we are able to ascertain the data collection method, please describe using one of the other methods noted above. For 3PP models, please review the 3PP publisher's documentation to determine whether we can characterize the data collection method.]<br>
-* [Hybrid: _______, _______] - [If you have multiple datasets, instead of listing a Data Collection Method for each dataset, you may use "Hybrid" and list the applicable data collection methods encompassing all datasets.] <br>
-* [Not Applicable] <br>
+* [Hybrid: Human, Automatic] <br>
 
 ** Labeling Method by dataset <br>
-* [Automated] - [Think "Scraper"] <br>
-* [Automatic/Sensors] - [Machine-derived]  <br>
-* [Human] <br>
-* [Synthetic] <br>
-* [Undisclosed] - [Only note Undisclosed if the labeling methods have not been disclosed. If we are able to ascertain the Labeling Method, please describe using one of the other methods noted above. For 3PP models, please review the 3PP publisher's documentation to determine whether we can characterize the labeling method.] <br>
-* [Hybrid: _______, _______] - [If you have multiple datasets, instead of listing a Labeling Method for each dataset, you may use "Hybrid" and list the applicable labeling methods encompassing all datasets.] <br>
-* [Not Applicable] <br>
+* [Hybrid: Human, Automated] <br>
 
 **Properties (Quantity, Dataset Descriptions, Sensor(s)):** [Number of data items in training set, descriptive information about the data indicating (i) the modalities (e.g,, text, images), (ii) nature of the content (e.g., personal data, copyright protected content, machine generated data such as Internet of Things or synthetic data) and (iii) its linguistic characteristics. If applicable, what specific sensor type was used for Data Collection] <br>
 **Dataset License(s):** [Name, Link applicable to dataset license or applicable Jira ticket or NVBug. Write none if not applicable (N/A). This is an internal-only field.] <br>
@@ -205,21 +186,10 @@ N/A
 **Link:** [Link or name to dataset used for evaluating the model.  Share Nspect IDs.  Nspect IDs will be internal-only.]  <br>
 
 Data Collection Method by dataset:  <br>
-* [Automated] <br>
-* [Automatic/Sensors] <br>
-* [Human] <br>
-* [Synthetic] <br>
-* [Unknown] <br>
-* [Hybrid: _______, _______] <br>
-* [Not Applicable] <br>
+* [Hybrid: Human, Automatic] <br>
 
 Labeling Method by dataset:  <br>
-* [Automated] <br>
-* [Automatic/Sensors] <br>
-* [Human] <br>
-* [Synthetic] <br>
-* [Unknown] <br>
-* [Hybrid: _______, _______] <br>
+* [Hybrid: Human, Automatic] <br>
 
 **Properties (Quantity, Dataset Descriptions, Sensor(s)):** [Number of data items in training set, descriptive information about the data indicating (i) the modalities (e.g,, text, images), (ii) nature of the content (e.g., personal data, copyright protected content, machine generated data such as Internet of Things or synthetic data) and (iii) its linguistic characteristics. If applicable, what specific sensor type was used for Data Collection] <br>
 
@@ -233,21 +203,10 @@ Labeling Method by dataset:  <br>
 **Benchmark Score <br>
 
 Data Collection Method by dataset:  <br>
-* [Automated] <br>
-* [Automatic/Sensors] <br>
-* [Human] <br>
-* [Synthetic] <br>
-* [Unknown] <br>
-* [Hybrid: _______, _______] <br>
-* [Not Applicable] <br>
+* [Hybrid: Human, Automatic] <br>
 
 Labeling Method by dataset:  <br>
-* [Automated] <br>
-* [Automatic/Sensors] <br>
-* [Human] <br>
-* [Synthetic] <br>
-* [Unknown] <br>
-* [Hybrid: _______, _______] <br>
+* [Hybrid: Human, Automatic] <br>
 
 **Properties (Quantity, Dataset Descriptions, Sensor(s)):** [Number of data items in training set, descriptive information about the data indicating (i) the modalities (e.g,, text, images), (ii) nature of the content (e.g., personal data, copyright protected content, machine generated data such as Internet of Things or synthetic data) and (iii) its linguistic characteristics. If applicable, what specific sensor type was used for Data Collection] <br>
 
@@ -256,30 +215,15 @@ Labeling Method by dataset:  <br>
 *Insert Quantitative Evaluation Benchmarks Here (Language Model Reference https://docs.google.com/spreadsheets/d/1SwyHhBTFQJTLZ4tuc-JdDcjA7wy68DyWdTehGNUgJ6M/edit?gid=721511647#gid=721511647 for large language models) <br>
 
 # Inference:
-**Acceleration Engine:** [Tensor(RT), Tensor(RT)-LLM, Triton, Or List Other Here (Embed Link)] <br>
 **Test Hardware:** <br>  
-* [Jetson XXNN] <br>
-* [Drive X.X] <br>
-* [List Other Here X.X or Minimum Hardware Requirements]  <br>
+* NVIDA A100 or newer.  <br>
 
 ## Ethical Considerations:
 NVIDIA believes Trustworthy AI is a shared responsibility and we have established policies and practices to enable development for a wide array of AI applications.  When downloaded or used in accordance with our terms of service, developers should work with their internal model team to ensure this model meets requirements for the relevant industry and use case and addresses unforeseen product misuse. <br> 
 
-(Required for models with input images and video) <br> 
 Please make sure you have proper rights and permissions for all input image and video content; if image or video includes people, personal health information, or intellectual property, the image or video generated will not blur or maintain proportions of image subjects included. <br>
 
-(Required for NVIDIA Commercial Models) <br> 
-For more detailed information on ethical considerations for this model, please see the [Model Card++ Bias, Explainability, Safety & Security, and Privacy Subcards](Insert Link Here). <br> 
-
-(Recommended for NVIDIA BioNeMo Models) <br> 
-Users are responsible for ensuring the physical properties of model-generated molecules are appropriately evaluated and comply with applicable safety regulations and ethical standards. <br>
-
-(Recommended for Cosmos NIMs) <br> 
 Users are responsible for model inputs and outputs. Users are responsible for ensuring safe integration of this model, including implementing guardrails as well as other safety mechanisms, prior to deployment. <br> 
 
-(For Release on NVIDIA Platforms Only) <br> 
 Please report model quality, risk, security vulnerabilities or NVIDIA AI Concerns [here](https://www.nvidia.com/en-us/support/submit-security-vulnerability/).  <br>
 
-**For internal-only responses (including this statement), please alert the Trustworthy AI Product Manager or designee before publishing.
-
-***You may remove "[]s" before publishing. 
