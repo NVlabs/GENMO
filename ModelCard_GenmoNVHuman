@@ -5,7 +5,7 @@ NSPECT-LEW5-UKZO
 
 Description:
 GENMO is a generalist model that unifies human motion estimation and generation into a single framework. Developed by NVIDIA, GENMO was created to bridge the gap between motion estimation and generation tasks, which were traditionally handled by separate, specialized models. This unified framework allows GENMO to effectively leverage shared representations, leading to synergistic benefits, and enabling motion generation or estimation from multiple modalities.
-This model is ready for non-commercial research use.  
+This model is ready for commercial research use. All training datasets and parametric model (NVHuman) used are ownned by NVIDIA. 
 
 License/Terms of Use
 Visit the NVIDIA Legal Release Process for instructions on getting legal support for a license selection: 
@@ -57,7 +57,7 @@ Other Properties Related to Input: [Specific Resolution/Minimum or Maximum Resol
 
 Output: 
 
-Output Type(s): Human body motion NVHuman format. 
+Output Type(s): Human body motion in NVHuman format (body pose and shape parameters). 
 Output Format: array of floats 
 Output Parameters:  1D 
 Other Properties Related to Output: NA 
@@ -113,15 +113,17 @@ We used a collection of public datasets for training. All datasets are handled t
 
 Public Datasets
 
-Bones Dataset 
-Render People 
-
 *List of 'main/large' datasets (above 3% of the overall data in this category) with unique identification, links + period of collection 
 
 [End of GPAI Model Specific Section] 
 
 
 Training Dataset [The dataset the model was trained on]:
+
+Bones RigPlay-1 Dataset - a collection 350k animations owned by NVIDIA  
+Render People Dataset  - a collection 500 synthetic characters ownned by NVIDIA. 
+HDRI Images - a collection of HDRI images free for commercial use. 
+
 Link: [Link or name to dataset used for training the model.  Share nSpect IDs.  nSpect IDs will be internal-only]  
 ** Data Modality 
 
