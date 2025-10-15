@@ -57,7 +57,7 @@ Other Properties Related to Input: [Specific Resolution/Minimum or Maximum Resol
 
 Output: 
 
-Output Type(s): Human body motion in SMPL or NVHuman format. 
+Output Type(s): Human body motion NVHuman format. 
 Output Format: array of floats 
 Output Parameters:  1D 
 Other Properties Related to Output: NA 
