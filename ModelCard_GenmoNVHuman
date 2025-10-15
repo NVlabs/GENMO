@@ -1,0 +1,236 @@
+Model Overview
+
+Model NSpect ID
+NSPECT-LEW5-UKZO
+
+Description:
+GENMO is a generalist model that unifies human motion estimation and generation into a single framework. Developed by NVIDIA, GENMO was created to bridge the gap between motion estimation and generation tasks, which were traditionally handled by separate, specialized models. This unified framework allows GENMO to effectively leverage shared representations, leading to synergistic benefits, and enabling motion generation or estimation from multiple modalities.
+This model is ready for non-commercial research use.  
+
+License/Terms of Use
+Visit the NVIDIA Legal Release Process for instructions on getting legal support for a license selection: 
+-If you are releasing under an open source license (such as Apache 2.0, MIT), contact the Open Source Review Board (formerly SWIPAT) by filing a contribution bug request here. 
+-If your release is for non-commercial or research purposes only, file a new bug here. 
+https://nvbugspro.nvidia.com/bug/5524776
+-If your release allows for commercial purposes, submit Product Legal Support Form. 
+
+Deployment Geography:
+Global 
+
+Use Case: 
+
+GENMO would be used by individuals and professionals in fields such as machine learning and computer vision research, gaming, animation, and 3D content creation. These users require a system that provides precise and intuitive control over motion sequences.
+The model's capabilities allow users to:
+Generate complex motion sequences by integrating multiple modalities. For example, a user could start a motion from a video clip, transition to a movement described by text, synchronize it with audio cues, and even align it with another video.
+Create realistic human animations for creative applications like gaming and film. This includes generating lifelike character animations for game designers and creating immersive experiences for virtual reality developers.
+Reconstruct accurate motion trajectories from a variety of observations, such as videos and 2D keypoints. This is useful for tasks like recovering global human motion from videos with dynamic cameras.
+Perform motion in-betweening, where the model generates the motion between specified keyframes, which is a valuable tool for animators.
+Conduct biomechanical analyses to study human movement, which has applications in sports, rehabilitation, and medicine. For instance, a sports coach could use the model to analyze an athlete's movements, or a physical therapist could use it to evaluate a patient's progress after an injury. 
+
+Release Date:  
+
+Github [Insert MM/DD/YYYY] via [URL] 
+
+References(s):
+Project Page: https://research.nvidia.com/labs/dair/genmo/
+Paper: https://arxiv.org/pdf/2505.01425
+
+Model Architecture:
+Architecture Type: Transformer 
+Network Architecture: Name Other Not Listed 
+** Number of model parameters [(Recorded with at least two significant figures e.g. 7.310^10)] 
+5.210^8
+(Internal Only for GPAI Models: Not To Be Published) 
+** Describe design choices related to initialization techniques, hyperparameter tuning, regularization techniques, model optimization, damping, and training parameters. [CAN BE EXTRACTED FROM MODEL CARD GENERATOR- 100 Words or Less]  
+
+Computational Load (Internal Only: For NVIDIA Models Only)
+Cumulative Compute: Follow Instructions 
+Estimated Energy and Emissions for Model Training:  Follow Instructions 
+
+Input: 
+
+Input Type(s): Audio, Video, Text, Person Bounding Box, 2D Pose, 3D Keyframes 
+Input Format: Red, Green, Blue (RGB), String, Audio 
+Input Parameters: [(1D, 2D, 3D, etc.) Please write out in first mention of instance] 
+Other Properties Related to Input: [Specific Resolution/Minimum or Maximum Resolution or Characters (Including Restrictions), Image Range Needed (W x Y x Z), Pre-Processing Needed, Alpha Channel, Bit, Please State Explicity;]
+(FOR GPAI Models Only): State size and length limits for each input modality.] 
+
+Output: 
+
+Output Type(s): Human body motion in SMPL or NVHuman format. 
+Output Format: array of floats 
+Output Parameters:  1D 
+Other Properties Related to Output: NA 
+Our AI models are designed and/or optimized to run on NVIDIA GPU-accelerated systems. By leveraging NVIDIA’s hardware (e.g. GPU cores) and software frameworks (e.g., CUDA libraries), the model achieves faster training and inference times compared to CPU-only solutions. 
+
+Software Integration:
+Runtime Engine(s):
+
+[Not Applicable (N/A)- Name Platform If Multiple] 
+
+
+Supported Hardware Microarchitecture Compatibility [List in Alphabetic Order]: 
+
+[NVIDIA Ampere or specific models] 
+
+[NVIDIA Blackwell or specific models] 
+
+[NVIDIA Jetson or specific models]  
+
+[NVIDIA Hopper or specific models] 
+
+[NVIDIA Lovelace or specific models] 
+
+[NVIDIA Pascal or specific models] 
+
+[NVIDIA Turing or specific models] 
+
+[NVIDIA Volta or specific models] 
+
+
+Preferred/Supported Operating System(s):
+
+[Linux] 
+
+
+The integration of foundation and fine-tuned models into AI systems requires additional testing using use-case-specific data to ensure safe and effective deployment. Following the V-model methodology, iterative testing and validation at both unit and system levels are essential to mitigate risks, meet technical and functional requirements, and ensure compliance with safety and ethical standards before deployment. 
+
+Model Version(s):
+GENMO v1.0  
+GENMO can be integrated into an AI system as a specialized module within a larger pipeline, serving as the core engine for all human motion-related tasks. Since it is designed to handle multiple modalities and tasks, it can serve as a central hub for motion generation and estimation.
+
+Training, Testing, and Evaluation Datasets:
+
+Dataset Overview [Beginning of GPAI Model Specific Section:]
+** Total Size: 2.1*10^9 
+** Total Number of Datasets: 10 
+** Dataset partition: Training 99.94%, Validation 0.06% 
+** Time period for training data collection: N/A - public datasets 
+** Time period for testing data collection: N/A - public datasets 
+** Time period for validation data collection: N/A - public 
+** A general description of the data processing involved in transforming the acquired data into the training data for the model (recommended 200 words) 
+We used a collection of public datasets for training. All datasets are handled through separate data readers that bring them to a unified structure.
+
+Public Datasets
+
+Bones Dataset 
+Render People 
+
+*List of 'main/large' datasets (above 3% of the overall data in this category) with unique identification, links + period of collection 
+
+[End of GPAI Model Specific Section] 
+
+
+Training Dataset [The dataset the model was trained on]:
+Link: [Link or name to dataset used for training the model.  Share nSpect IDs.  nSpect IDs will be internal-only]  
+** Data Modality 
+
+[Audio] 
+
+[Image] 
+
+[Text] 
+
+[Video] 
+
+[Other: Specify] 
+
+
+** Audio Training Data Size (If Applicable) 
+
+[Less than 10,000 Hours] 
+
+[10,000 to 1 Million Hours] 
+
+[More than 1 Million Hours] 
+
+
+** Image Training Data Size (If Applicable) 
+
+[Less than a Million Images] 
+
+[1 Million to 1 Billion Images] 
+
+[More than 1 Billion Images] 
+
+
+** Text Training Data Size (If Applicable) 
+
+[Less than a Billion Tokens] 
+
+[1 Billion to 10 Trillion Tokens] 
+
+[More than 10 Trillion Tokens] 
+
+
+** Video Training Data Size (If Applicable) 
+
+[Less than 10,000 Hours] 
+
+[10,000 to 1 Million Hours] 
+
+[More than 1 Million Hours] 
+
+
+** Non-Audio, Image, Text Training Data Size (If Applicable) 
+
+Specify the approximate size and unit of measurement 
+
+
+** Data Collection Method by dataset 
+
+[Hybrid: Human, Automatic] 
+
+
+** Labeling Method by dataset 
+
+[Hybrid: Human, Automated] 
+
+
+Properties (Quantity, Dataset Descriptions, Sensor(s)): [Number of data items in training set, descriptive information about the data indicating (i) the modalities (e.g,, text, images), (ii) nature of the content (e.g., personal data, copyright protected content, machine generated data such as Internet of Things or synthetic data) and (iii) its linguistic characteristics. If applicable, what specific sensor type was used for Data Collection] 
+Dataset License(s): [Name, Link applicable to dataset license or applicable Jira ticket or NVBug. Write none if not applicable (N/A). This is an internal-only field.] 
+
+Testing Dataset:
+Link: [Link or name to dataset used for evaluating the model.  Share Nspect IDs.  Nspect IDs will be internal-only.]  
+Data Collection Method by dataset:  
+
+[Hybrid: Human, Automatic] 
+
+
+Labeling Method by dataset:  
+
+[Hybrid: Human, Automatic] 
+
+
+Properties (Quantity, Dataset Descriptions, Sensor(s)): [Number of data items in training set, descriptive information about the data indicating (i) the modalities (e.g,, text, images), (ii) nature of the content (e.g., personal data, copyright protected content, machine generated data such as Internet of Things or synthetic data) and (iii) its linguistic characteristics. If applicable, what specific sensor type was used for Data Collection] 
+Dataset License(s): [Name, Link applicable to dataset license or applicable Jira ticket or NVBug. Write none if not applicable (N/A).  Jira tikets are not required if Creating a Synthetic Dataset with No Third-Party Tools/Dependencies OR Creating a Real Dataset with No Personal Data and No Confidential/Third-Party Data. This is an internal-only field.] This is an internal-only field.] 
+
+Evaluation Dataset:
+Link: [Link or name to dataset used for evaluating the model.  Share Nspect IDs.  Nspect IDs will be internal-only.]  
+**Benchmark Score 
+Data Collection Method by dataset:  
+
+[Hybrid: Human, Automatic] 
+
+
+Labeling Method by dataset:  
+
+[Hybrid: Human, Automatic] 
+
+
+Properties (Quantity, Dataset Descriptions, Sensor(s)): [Number of data items in training set, descriptive information about the data indicating (i) the modalities (e.g,, text, images), (ii) nature of the content (e.g., personal data, copyright protected content, machine generated data such as Internet of Things or synthetic data) and (iii) its linguistic characteristics. If applicable, what specific sensor type was used for Data Collection] 
+Dataset License(s): [Name, Link applicable to dataset license or applicable Jira ticket or NVBug. Write none if not applicable (N/A).  Jira tikets are not required if Creating a Synthetic Dataset with No Third-Party Tools/Dependencies OR Creating a Real Dataset with No Personal Data and No Confidential/Third-Party Data. This is an internal-only field.] 
+*Insert Quantitative Evaluation Benchmarks Here (Language Model Reference https://docs.google.com/spreadsheets/d/1SwyHhBTFQJTLZ4tuc-JdDcjA7wy68DyWdTehGNUgJ6M/edit?gid=721511647#gid=721511647 for large language models) 
+
+Inference:
+Test Hardware: 
+
+NVIDA A100 or newer.  
+
+
+
+Ethical Considerations:
+NVIDIA believes Trustworthy AI is a shared responsibility and we have established policies and practices to enable development for a wide array of AI applications.  When downloaded or used in accordance with our terms of service, developers should work with their internal model team to ensure this model meets requirements for the relevant industry and use case and addresses unforeseen product misuse. 
+Please make sure you have proper rights and permissions for all input image and video content; if image or video includes people, personal health information, or intellectual property, the image or video generated will not blur or maintain proportions of image subjects included. 
+Users are responsible for model inputs and outputs. Users are responsible for ensuring safe integration of this model, including implementing guardrails as well as other safety mechanisms, prior to deployment. 
+Please report model quality, risk, security vulnerabilities or NVIDIA AI Concerns here.
