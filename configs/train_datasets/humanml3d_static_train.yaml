@@ -1,0 +1,6 @@
+humanml3d_static_train:
+  _target_: genmo.datasets.pure_motion.humanml3d.Humanml3dDataset
+
+  motion_frames: 120
+  cam_augmentation: static
+  split: train

@@ -1,0 +1,2 @@
+3dpw_occ_v1:
+  _target_: genmo.datasets.threedpw.threedpw_occ_motion_train.ThreedpwOccSmplDataset

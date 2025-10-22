@@ -1,0 +1,3 @@
+3dpw_occ_fliptest:
+  _target_: genmo.datasets.threedpw.threedpw_occ_motion_test.ThreedpwOccSmplFullSeqDataset
+  flip_test: true

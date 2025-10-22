@@ -1,0 +1,37 @@
+_target_: genmo.pipeline.genmo_pipeline.Pipeline
+args_denoiser3d: ${network}
+args:
+  endecoder_opt: ${endecoder}
+  use_regression_outputs_prob: 0.
+  use_cfg_sampler_for_gen: true
+  inpaint_x_start_gt: false
+  regression_only: true
+  encoded_music_dim: 35
+  multicond_args: ${multicond_args}
+  infer_version: 2
+  weights:
+    cr_j3d: 500.
+    transl_c: 1.
+    cr_verts: 500.
+    j2d: 1000.
+    j2d_17: 1000.
+    verts2d: 1000.
+
+    proj_gt_j2d_to_bi01: true
+
+    transl_w: 1.
+    static_conf_bce: 1.
+
+  static_conf:
+    vel_thr: 0.15
+
+  in_attr:
+    - obs
+    - f_cliffcam
+    - f_imgseq
+    - f_cam_angvel
+    - encoded_music
+    - encoded_audio
+  mask_out_attr: [] # ${.in_attr}
+  out_attr:
+    pred_cam: 3

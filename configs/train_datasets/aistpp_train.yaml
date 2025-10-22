@@ -1,0 +1,7 @@
+aistpp_train:
+  _target_: genmo.datasets.aistplusplus.aistplusplus.AISTPlusPlusSmplDataset
+  split: train
+  motion_frames: 120
+  lazy_load: false
+  eval_gen_only: true
+  feat_version: v2

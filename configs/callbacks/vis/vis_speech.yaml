@@ -1,0 +1,2 @@
+vis_speech:
+  _target_: genmo.callbacks.vis.vis_speech.VisSpeech

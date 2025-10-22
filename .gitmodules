@@ -1,0 +1,6 @@
+[submodule "third-party/DROID-SLAM/thirdparty/eigen"]
+	path = third-party/DROID-SLAM/thirdparty/eigen
+	url = https://gitlab.com/libeigen/eigen.git
+[submodule "third_party/GVHMR"]
+	path = third_party/GVHMR
+	url = git@github.com:zju3dv/GVHMR.git

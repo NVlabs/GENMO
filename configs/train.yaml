@@ -1,0 +1,64 @@
+defaults:
+  - _self_
+  # pytorch-lightning
+  - data: ???
+  - model: ???
+  - callbacks: null
+
+  # system
+  - hydra: default
+
+  # utility groups that changes a lot
+  - pipeline: null
+  - network: null
+  - optimizer: null
+  - scheduler: null
+  - train_datasets: null
+  - test_datasets: null
+  - endecoder: null # normalize/unnormalize data
+  - refiner: null
+
+  # global-override
+  - exp: mixed # set "data, model and callbacks" in yaml
+  - global/task: null # dump/test
+  - global/hsearch: null # hyper-param search
+  - global/debug: null # debug mode
+
+# ================================ #
+#          global setting          #
+# ================================ #
+# expirement information
+task: fit # [fit, predict]
+exp_name_base: ???
+exp_name_var: ""
+exp_name: ${exp_name_base}_${exp_name_var}
+data_name: ???
+num_test_data: 32
+
+# utilities in the entry file
+output_dir: "outputs/${data_name}/${exp_name}"
+ckpt_path: null
+resume_mode: null
+seed: 42
+
+# lightning default settings
+pl_trainer:
+  devices: 1
+  num_sanity_val_steps: 0 # disable sanity check
+  precision: 32
+  inference_mode: False
+
+logger:
+  _target_: pytorch_lightning.loggers.WandbLogger
+  project: "genmo"
+  entity: "nvr-lpr"
+  save_dir: "/tmp" # /save_dir/name/version/sub_dir
+  name: ""
+  version: ""
+  resume: "allow"
+  dir: "/tmp"
+  id: null
+  config:
+  allow_val_change: true
+
+use_wandb: true

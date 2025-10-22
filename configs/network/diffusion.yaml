@@ -1,0 +1,25 @@
+_target_: genmo.network.genmo_diffusion.GENMODiffusion
+args: ${pipeline.args}
+latent_dim: ${.model_cfg.denoiser.latent_dim}
+cond_merge_strategy: "add"
+music_mask_prob: ${.model_cfg.denoiser.music_mask_prob}
+speech_mask_prob: ${.model_cfg.denoiser.speech_mask_prob}
+encoded_music_dim: ${pipeline.args.encoded_music_dim}
+model_cfg:
+  diffusion: ${model_cfg.diffusion}
+  denoiser:
+    _target_: genmo.network.genmo_denoiser.NetworkEncoderRoPE
+    output_dim: 151
+    xt_dim: ${.output_dim}
+    njoints: ${.xt_dim}
+    text_mask_prob: 0.1
+    music_mask_prob: 0.1
+    speech_mask_prob: 0.1
+    use_text_pos_enc: true
+    text_encoder_cfg:
+      mode: all
+      cross_attn_type: mha
+    latent_dim: 1024
+    num_layers: 16
+    num_heads: 8
+    mlp_ratio: 4

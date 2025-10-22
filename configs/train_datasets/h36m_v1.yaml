@@ -1,0 +1,7 @@
+h36m_v1:
+  _target_: genmo.datasets.h36m.h36m.H36mSmplDataset
+
+  root: inputs/H36M/hmr4d_support
+  original_coord: az
+  motion_frames: 120
+  lazy_load: false

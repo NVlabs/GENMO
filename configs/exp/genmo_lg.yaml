@@ -1,0 +1,71 @@
+# @package _global_
+defaults:
+  - /diffusion@model_cfg.diffusion: ddim
+  - override /data: mocap/trainX_testY
+  - override /model: genmo
+  - override /network: diffusion
+  - override /pipeline: dual_mode
+  - override /endecoder: v1_amass_local_bedlam_cam
+  - override /optimizer: adamw_2e-4
+  - override /scheduler: epoch_half_200_350
+  - override /train_datasets:
+      - amass_train_v11
+      - humanml3d_static_train
+      - bedlam_v2
+      - h36m_v1
+      - 3dpw_v1
+      - 3dpw_occ_v1
+      - aistpp_train
+      - beat2_static_train
+  - override /test_datasets:
+      # - aistpp_test
+      - humanml3d_eval
+      - emdb1_fliptest
+      - emdb2_fliptest
+      - rich_test
+      - 3dpw_fliptest
+      - 3dpw_occ_fliptest
+  - override /callbacks:
+      - ckpt_saver/every10000s_top100
+      - prog_bar/prog_reporter_ed1
+      - train_speed_timer/base
+      - lr_monitor/pl
+      - vis/vis_text
+      - metric/metric_emdb1
+      - metric/metric_emdb2
+      - metric/metric_rich
+      - metric/metric_3dpw
+      - metric/metric_3dpw_occ
+      # - metric_aistpp
+  - _self_
+
+exp_name_base: ${hydra:runtime.choices.exp}
+exp_name_var: ""
+exp_name: ${exp_name_base}_${exp_name_var}
+data_name: genmo_mixed
+
+multicond_args: null
+
+pl_trainer:
+  precision: 16-mixed
+  log_every_n_steps: 10
+  gradient_clip_val: 0.5
+  max_epochs: null
+  check_val_every_n_epoch: null
+  val_check_interval: 3000
+  max_steps: 200000
+  devices: 1
+  strategy: ddp_find_unused_parameters_true
+
+logger:
+  _target_: pytorch_lightning.loggers.WandbLogger
+  project: "genmo"
+  entity: "nvr-lpr"
+  save_dir: "/tmp" # /save_dir/name/version/sub_dir
+  name: ""
+  version: ""
+  resume: "allow"
+  dir: "/tmp"
+  id: null
+
+use_wandb: true

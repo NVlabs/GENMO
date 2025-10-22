@@ -1,0 +1,45 @@
+_target_: genmo.genmo.GENMO
+
+pipeline: ${pipeline}
+optimizer: ${optimizer}
+scheduler: ${scheduler}
+
+model_cfg:
+  train_modes: ["regression", "diffusion"]
+  noisy_2d_obs: true
+  kp2d_noise_scale: 0.5
+  perframe_condition_exists: true
+  train2d_mask_invis_obs: true
+  mask_occluded_imgfeats: true
+  cond_merge_strategy: "add"
+  use_cond_exists_as_input: true
+  normalize_cam_angvel: true
+
+  diffusion:
+    test_timestep_respacing: "50"
+    guidance_param: 2.5
+
+  text_encoder:
+    load_llm: false
+    llm_version: "t5-3b"
+    max_text_len: 50
+
+  condition_mask:
+    mask_img_prob: 0.5
+    mask_cam_prob: 1.0
+    reuse_regression_mask: false
+    regression_no_img_mask: true
+
+  mask_cfg:
+    drop_prob: 0.75
+    max_num_drops: 3
+    min_drop_nframes: 1
+    max_drop_nframes: 30
+  body_mask_cfg:
+    drop_prob: 0.75
+    joint_drop_prob: 0.25
+    max_num_drops: 3
+    min_drop_nframes: 1
+    max_drop_nframes: 30
+  music_mask_prob: 0.1
+  audio_mask_prob: 0.1

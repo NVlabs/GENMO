@@ -1,0 +1,2 @@
+metric_aistpp:
+  _target_: genmo.callbacks.metric.metric_aistpp.MetricMusic

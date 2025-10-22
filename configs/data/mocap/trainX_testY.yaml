@@ -1,0 +1,21 @@
+defaults:
+  - collate_cfg: default
+
+# definition of lightning datamodule (dataset + dataloader)
+_target_: genmo.datamodule.mocap_trainX_testY.DataModule
+
+dataset_opts:
+  train: ${train_datasets}
+  val: ${test_datasets}
+  max_motion_frames: 120
+
+loader_opts:
+  train:
+    batch_size: 128
+    num_workers: 8
+  val:
+    batch_size: 1
+    num_workers: 1
+  encoded_music_dim: ${pipeline.args.encoded_music_dim}
+
+limit_each_trainset: null

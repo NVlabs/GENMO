@@ -1,0 +1,3 @@
+base:
+  _target_: genmo.callbacks.train_speed_timer.TrainSpeedTimer
+  N_avg: 5

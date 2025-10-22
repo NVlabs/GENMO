@@ -1,0 +1,3 @@
+metric_rich:
+  _target_: genmo.callbacks.metric.metric_rich.MetricMocap
+  occ: false

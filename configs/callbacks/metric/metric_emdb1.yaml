@@ -1,0 +1,4 @@
+metric_emdb1:
+  _target_: genmo.callbacks.metric.metric_emdb.MetricMocap
+  emdb_split: 1
+  occ: false

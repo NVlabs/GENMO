@@ -1,0 +1,5 @@
+prog_reporter_ed1:
+  _target_: genmo.callbacks.prog_bar.ProgressReporter
+  log_every_percent: 0.1
+  exp_name: ${exp_name}
+  data_name: ${data_name}

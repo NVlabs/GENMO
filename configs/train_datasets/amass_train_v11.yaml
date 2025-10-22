@@ -1,0 +1,9 @@
+amass_train_v11:
+  _target_: genmo.datasets.pure_motion.amass.AmassDataset
+
+  motion_frames: 120
+  l_factor: 1.5
+  skip_moyo: True
+  cam_augmentation: v11
+  random1024: False
+  limit_size: null

@@ -1,0 +1,4 @@
+emdb2_fliptest:
+  _target_: genmo.datasets.emdb.emdb_motion_test.EmdbSmplFullSeqDataset
+  split: 2
+  flip_test: true

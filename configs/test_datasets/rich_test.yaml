@@ -1,0 +1,2 @@
+rich_test:
+  _target_: genmo.datasets.rich.rich_motion_test.RichSmplFullSeqDataset

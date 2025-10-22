@@ -1,0 +1,6 @@
+beat2_static_train:
+  _target_: genmo.datasets.beat2.beat2.BEAT2SmplDataset
+  split: train
+  cam_augmentation: static
+  motion_frames: 120
+  lazy_load: false
