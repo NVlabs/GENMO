@@ -57,14 +57,14 @@ For more details, visit the **[GENMO project page →](https://research.nvidia.c
 ## 📖 Paper & Citation
 
 **Paper:**  
-[GENMO: Generative Models for Human Motion Synthesis](https://arxiv.org/abs/2505.01425)  
+[GENMO: A GENeralist Model for Human MOtion](https://arxiv.org/abs/2505.01425)  
 *Jiefeng Li, Jinkun Cao, Haotian Zhang, Davis Rempe, Jan Kautz, Umar Iqbal, Ye Yuan*  
 ICCV, 2025
 
 **BibTeX:**
 ```bibtex
 @inproceedings{genmo2025,
-  title     = {GENMO: Generative Models for Human Motion Synthesis},
+  title     = {GENMO: A GENeralist Model for Human MOtion},
   author    = {Li, Jiefeng and Cao, Jinkun and Zhang, Haotian and Rempe, Davis and Kautz, Jan and Iqbal, Umar and Yuan, Ye},
   booktitle = {Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV)},
   year      = {2025}
