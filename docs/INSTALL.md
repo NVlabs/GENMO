@@ -42,20 +42,6 @@ mkdir inputs
 rsync -avzP -m cs-oci-ord-dc-03:/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR/smpl_data ./inputs/
 rsync -avzP -m cs-oci-ord-dc-03:/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/datasets/GVHMR/checkpoints ./inputs/
 ```
-<!-- 
-**Weights**
-
-```bash
-inputs/checkpoints/
-├── gvhmr/
-│   └── gvhmr_siga24_release.ckpt
-├── hmr2/
-│   └── epoch=10-step=25000.ckpt
-├── vitpose/
-│   └── vitpose-h-multi-coco.pth
-└── yolo/
-    └── yolov8x.pt
-``` -->
 
 **Training Data**
 

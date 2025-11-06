@@ -140,6 +140,82 @@ class EncoderRoPEBlock(nn.Module):
         return x
 
 
+class DecoderRoPECABlock(nn.Module):
+    def __init__(
+        self,
+        hidden_size,
+        num_heads,
+        mlp_ratio=4.0,
+        dropout=0.1,
+        use_self_attn=True,
+        **block_kwargs,
+    ):
+        super().__init__()
+        self.use_self_attn = use_self_attn
+        if self.use_self_attn:
+            self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6)
+            self.self_attn = RoPEAttention(hidden_size, num_heads, dropout)
+            self.gate_msa = nn.Parameter(torch.zeros(1, 1, hidden_size))
+            nn.init.constant_(self.gate_msa, 0)
+        self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6)
+        self.cross_attn = RoPEAttention(hidden_size, num_heads, dropout)
+        self.norm3 = nn.LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6)
+        mlp_hidden_dim = int(hidden_size * mlp_ratio)
+        approx_gelu = lambda: nn.GELU(approximate="tanh")
+        self.mlp = Mlp(
+            in_features=hidden_size,
+            hidden_features=mlp_hidden_dim,
+            act_layer=approx_gelu,
+            drop=dropout,
+        )
+
+        self.gate_cross_attn = nn.Parameter(torch.zeros(1, 1, hidden_size))
+        self.gate_mlp = nn.Parameter(torch.zeros(1, 1, hidden_size))
+
+        # self.motion_pos_encoder = PositionalEncoding(hidden_size, pos_enc_dropout)
+
+        # Zero-out adaLN modulation layers
+        nn.init.constant_(self.gate_cross_attn, 0)
+        nn.init.constant_(self.gate_mlp, 0)
+
+    def forward(
+        self,
+        x,
+        context,
+        attn_mask=None,
+        tgt_key_padding_mask=None,
+        memory_key_padding_mask=None,
+    ):
+        if self.use_self_attn:
+            x = x + self.gate_msa * self._sa_block(
+                self.norm1(x),
+                attn_mask=attn_mask,
+                key_padding_mask=tgt_key_padding_mask,
+            )
+        x = x + self.gate_cross_attn * self._ca_block(
+            self.norm2(x),
+            context=context,
+            key_padding_mask=memory_key_padding_mask,
+        )
+        x = x + self.gate_mlp * self.mlp(self.norm3(x))
+        return x
+
+    def _sa_block(self, x, attn_mask=None, key_padding_mask=None):
+        # x: (B, L, C)
+        x = self.self_attn(x, attn_mask=attn_mask, key_padding_mask=key_padding_mask)
+        return x
+
+    def _ca_block(
+        self,
+        x,
+        context,
+        key_padding_mask=None,
+    ):
+        # x: (B, L, C)
+        x = self.cross_attn(x, context=context, key_padding_mask=key_padding_mask)
+        return x
+
+
 class DecoderRoPEBlock(nn.Module):
     def __init__(
         self,

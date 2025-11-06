@@ -20,6 +20,7 @@ from tqdm import tqdm
 from hmr4d.configs import register_store_gvhmr
 from hmr4d.model.gvhmr.gvhmr_pl_demo import DemoPL
 from hmr4d.model.gvhmr.unimfm_demo import UNIMFM_demo
+from hmr4d.model.genmo.genmo_demo import GENMO_demo
 from hmr4d.utils.geo.hmr_cam import (
     convert_K_to_K4,
     create_camera_sensor,
@@ -162,12 +163,8 @@ def create_text_video(
 def parse_args_to_cfg():
     # Put all args to cfg
     parser = argparse.ArgumentParser()
-    parser.add_argument("--video1", type=str, default=None)
-    parser.add_argument("--img_dir1", type=str, default=None)
-    parser.add_argument("--video2", type=str, default=None)
-    parser.add_argument("--img_dir2", type=str, default=None)
-    parser.add_argument("--text1", type=str, default=None)
-    parser.add_argument("--text1_file", type=str, default=None)
+    parser.add_argument("--text", type=str, default=None)
+    parser.add_argument("--text_file", type=str, default=None)
     parser.add_argument(
         "--output_root",
         type=str,
@@ -175,92 +172,22 @@ def parse_args_to_cfg():
         help="by default to outputs/demo",
     )
     parser.add_argument(
-        "-s1", "--static_cam1", action="store_true", help="If true, skip DPVO"
-    )
-    parser.add_argument(
-        "-s2", "--static_cam2", action="store_true", help="If true, skip DPVO"
-    )
-    parser.add_argument(
         "--verbose", action="store_true", help="If true, draw intermediate results"
     )
     args = parser.parse_args()
-    if args.text1_file is not None:
-        text_file = open(args.text1_file, "r")
-        args.text1 = text_file.read().strip()
+    if args.text_file is not None:
+        text_file = open(args.text_file, "r")
+        args.text = text_file.read().strip()
 
-    if args.img_dir1 is not None:
-        Log.info(f"[Input]: {args.img_dir1}")
-        video_path = os.path.join(args.output_root, "demo1.mp4")
-        assert args.video1 is None
-        if Path(video_path).exists():
-            args.video1 = video_path
-        else:
-            os.makedirs(os.path.dirname(video_path), exist_ok=True)
-            # merge images to video
-            all_imgfiles = []
-            exts = ["jpg", "jpeg", "png"]
-            for ext in exts:
-                all_imgfiles.extend(glob(os.path.join(args.img_dir1, f"*.{ext}")))
-            all_imgfiles = sorted(all_imgfiles)
-            frames = []
-            for imgfile in all_imgfiles:
-                frames.append(cv2.imread(imgfile))
-            height, width, _ = frames[0].shape
-            writer = cv2.VideoWriter(
-                video_path, cv2.VideoWriter_fourcc(*"mp4v"), 30, (width, height)
-            )
-            for frame in tqdm(frames[:300], desc="Merge Images"):
-                writer.write(frame)
-            writer.release()
-            args.video1 = video_path
-
-    video1_path = Path(args.video1)
-    orig_fps1 = cv2.VideoCapture(video1_path).get(cv2.CAP_PROP_FPS)
-    assert video1_path.exists(), f"Video not found at {video1_path}"
-    length, width, height = get_video_lwh(video1_path)
-
-    if args.img_dir2 is not None:
-        Log.info(f"[Input]: {args.img_dir2}")
-        video_path = os.path.join(args.output_root, "demo2.mp4")
-        assert args.video2 is None
-        if Path(video_path).exists():
-            args.video2 = video_path
-        else:
-            os.makedirs(os.path.dirname(video_path), exist_ok=True)
-            # merge images to video
-            all_imgfiles = []
-            exts = ["jpg", "jpeg", "png"]
-            for ext in exts:
-                all_imgfiles.extend(glob(os.path.join(args.img_dir2, f"*.{ext}")))
-            all_imgfiles = sorted(all_imgfiles)
-            frames = []
-            for imgfile in all_imgfiles:
-                frames.append(cv2.imread(imgfile))
-            height, width, _ = frames[0].shape
-            writer = cv2.VideoWriter(
-                video_path, cv2.VideoWriter_fourcc(*"mp4v"), 30, (width, height)
-            )
-            for frame in tqdm(frames[:300], desc="Merge Images"):
-                writer.write(frame)
-            writer.release()
-            args.video2 = video_path
-
-    video2_path = Path(args.video2)
-    assert video2_path.exists(), f"Video not found at {video2_path}"
-    orig_fps2 = cv2.VideoCapture(video2_path).get(cv2.CAP_PROP_FPS)
-    Log.info(f"[Input]: {video1_path}")
-    Log.info(f"(L, W, H) = ({length}, {width}, {height})")
+    video_name = args.text.replace(" ", "_")[:100]
+    # Log.info(f"(L, W, H) = ({length}, {width}, {height})")
     # Cfg
-    with initialize_config_module(version_base="1.3", config_module=f"hmr4d.configs"):
+    with initialize_config_module(version_base="1.3", config_module="hmr4d.configs"):
         overrides = [
-            f"video1_name={video1_path.stem}",
-            f"video2_name={video2_path.stem}",
-            f"static_cam1={args.static_cam1}",
-            f"static_cam2={args.static_cam2}",
+            f"video_name={video_name}",
             f"verbose={args.verbose}",
-            f"text1={args.text1}",
-            f"orig_fps1={orig_fps1}",
-            f"orig_fps2={orig_fps2}",
+            f"text={args.text}",
+            f"orig_fps={30}",
         ]
 
         # Allow to change output root
@@ -268,40 +195,13 @@ def parse_args_to_cfg():
             overrides.append(f"output_root={args.output_root}")
         register_store_gvhmr()
         # cfg = compose(config_name="demo", overrides=overrides)
-        cfg = compose(config_name="demo_unimfm_vtv", overrides=overrides)
+        cfg = compose(config_name="demo_genmo_text", overrides=overrides)
+        # cfg = compose(config_name="demo_unimfm_text", overrides=overrides)
 
     # Output
     Log.info(f"[Output Dir]: {cfg.output_dir}")
     Path(cfg.output_dir).mkdir(parents=True, exist_ok=True)
-    Path(cfg.preprocess_dir + "_1").mkdir(parents=True, exist_ok=True)
-    Path(cfg.preprocess_dir + "_2").mkdir(parents=True, exist_ok=True)
 
-    # Copy raw-input-video to video_path
-    Log.info(f"[Copy Video1] {video1_path} -> {cfg.video1_path}")
-    if (
-        not Path(cfg.video1_path).exists()
-        or get_video_lwh(video1_path)[0] != get_video_lwh(cfg.video1_path)[0]
-    ):
-        if not os.path.exists(cfg.video1_path):
-            reader = get_video_reader(video1_path)
-            writer = get_writer(cfg.video1_path, fps=30, crf=CRF)
-            for img in tqdm(reader, total=get_video_lwh(video1_path)[0], desc=f"Copy"):
-                writer.write_frame(img)
-            writer.close()
-            reader.close()
-
-    Log.info(f"[Copy Video2] {video2_path} -> {cfg.video2_path}")
-    if (
-        not Path(cfg.video2_path).exists()
-        or get_video_lwh(video2_path)[0] != get_video_lwh(cfg.video2_path)[0]
-    ):
-        if not os.path.exists(cfg.video2_path):
-            reader = get_video_reader(video2_path)
-            writer = get_writer(cfg.video2_path, fps=30, crf=CRF)
-            for img in tqdm(reader, total=get_video_lwh(video2_path)[0], desc=f"Copy"):
-                writer.write_frame(img)
-            writer.close()
-            reader.close()
 
     return cfg
 
@@ -311,13 +211,13 @@ def run_preprocess_text(cfg):
     Log.info("[Preprocess] Start text!")
     tic = Log.time()
 
-    text_1 = cfg.text1
+    text = cfg.text
 
-    text_length = cfg.text_length
+    text_length = 300
     return_data = {
         "meta": {
             "vid": "text",
-            "caption": [text_1],
+            "caption": [text],
         },
         "length": torch.tensor(text_length),
         "bbx_xys": torch.zeros(text_length, 3),
@@ -332,10 +232,16 @@ def run_preprocess_text(cfg):
         "T_w2c": torch.eye(4).reshape(1, 4, 4).repeat(text_length, 1, 1),
         "gt_T_w2c": torch.eye(4).reshape(1, 4, 4).repeat(text_length, 1, 1),
         "gender": "neutral",
-        "caption": text_1,
+        "caption": text,
         "has_text": True,
+        "eval_gen_only_mask": torch.ones(text_length),
         "mask": {
             "valid": torch.ones(text_length),
+            "has_img_mask": torch.zeros(text_length).bool(),
+            "has_2d_mask": torch.zeros(text_length).bool(),
+            "has_cam_mask": torch.zeros(text_length).bool(),
+            "has_audio_mask": torch.zeros(text_length).bool(),
+            "has_music_mask": torch.zeros(text_length).bool(),
             "vitpose": False,
             "bbx_xys": False,
             "f_imgseq": False,
@@ -582,9 +488,7 @@ def load_data_dict(cfg, vid=1):
 
 
 def render_incam(cfg, vid_slice, vid=1):
-    incam_video_path = (
-        Path(cfg.paths.incam_video1) if vid == 1 else Path(cfg.paths.incam_video2)
-    )
+    incam_video_path = Path(cfg.paths.incam_video)
     if incam_video_path.exists():
         Log.info(f"[Render Incam] Video already exists at {incam_video_path}")
         return
@@ -613,11 +517,11 @@ def render_incam(cfg, vid_slice, vid=1):
     )
 
     # -- rendering code -- #
-    video_path = cfg.video1_path if vid == 1 else cfg.video2_path
+    video_path = cfg.text_video_path
     video_30fps_path = str(video_path).replace(".mp4", "_30fps.mp4")
 
     # convert to 30 fps
-    fps = cfg.orig_fps1 if vid == 1 else cfg.orig_fps2
+    fps = cfg.orig_fps
     if fps != 30:
         stream = ffmpeg.input(video_path).filter("setpts", f"{30.0 / fps}*PTS")
         output = ffmpeg.output(stream, video_30fps_path)
@@ -707,7 +611,7 @@ def render_global_o3d(cfg, orig_fps):
     length = verts_glob_list.shape[0]
 
     # -- rendering code -- #
-    video_path = cfg.video1_path
+    video_path = cfg.text_video_path
     # orig_fps = cv2.VideoCapture(video_path).get(cv2.CAP_PROP_FPS)
     length, width, height = get_video_lwh(video_path)
     _, _, K = create_camera_sensor(width, height, 24)  # render as 24mm lens
@@ -888,20 +792,16 @@ if __name__ == "__main__":
     Log.info(f"[GPU]: {torch.cuda.get_device_properties('cuda')}")
 
     # ===== Preprocess and save to disk ===== #
-    run_preprocess(cfg, vid=1)
-    run_preprocess(cfg, vid=2)
     data_text = run_preprocess_text(cfg)
-    data_1 = load_data_dict(cfg, vid=1)
-    data_2 = load_data_dict(cfg, vid=2)
 
     # generate text video
-    text_video_path = Path(cfg.text1_video_path)
+    text_video_path = Path(cfg.text_video_path)
     if not text_video_path.exists() or True:
         Log.info("[Generate Text Video]")
-        length, width, height = get_video_lwh(cfg.video1_path)
+        length, width, height = cfg.text_length, 1280, 720
         create_text_video(
             text_video_path,
-            cfg.text1,
+            cfg.text,
             fps=30,
             num_frames=cfg.text_length,
             width=width,
@@ -910,72 +810,37 @@ if __name__ == "__main__":
         )
 
     # merge data
-    data = dict()
-    data_text["K_fullimg"] = data_1["K_fullimg"][:1].repeat(data_text["length"], 1, 1)
-    tot_length = data_1["length"] + data_2["length"] + data_text["length"]
     multi_text_data = {
-        "vid": ["text1"],
-        "caption": [cfg.text1],
+        "vid": ["text"],
+        "caption": [cfg.text],
         "text_ind": [0],
-        "window_start": [data_1["length"] / tot_length],
-        "window_end": [(data_1["length"] + data_text["length"]) / tot_length],
+        "window_start": [0],
+        "window_end": [1],
     }
     multi_text_data["window_start"] = torch.tensor(multi_text_data["window_start"])
     multi_text_data["window_end"] = torch.tensor(multi_text_data["window_end"])
-    data["meta"] = [
+    data_text["meta"] = [
         {
-            "vid1": cfg.video1_name,
-            "caption": cfg.text1,
-            "multi_text_data": multi_text_data,
+            "vid": cfg.video_name,
+            "caption": cfg.text,
+            # "multi_text_data": multi_text_data,
         }
     ]
-    data["length"] = tot_length
-    data["caption"] = cfg.text1
-    data["bbx_xys"] = torch.cat(
-        [data_1["bbx_xys"], data_text["bbx_xys"], data_2["bbx_xys"]], dim=0
-    )
-    data["kp2d"] = torch.cat([data_1["kp2d"], data_text["kp2d"], data_2["kp2d"]], dim=0)
-    data["K_fullimg"] = torch.cat(
-        [data_1["K_fullimg"], data_text["K_fullimg"], data_2["K_fullimg"]], dim=0
-    )
-    data["cam_angvel"] = torch.cat(
-        [data_1["cam_angvel"], data_text["cam_angvel"], data_2["cam_angvel"]], dim=0
-    )
-    data["cam_tvel"] = torch.cat(
-        [data_1["cam_tvel"], data_text["cam_tvel"], data_2["cam_tvel"]], dim=0
-    )
-    data["f_imgseq"] = torch.cat(
-        [data_1["f_imgseq"], data_text["f_imgseq"], data_2["f_imgseq"]], dim=0
-    )
-    data["R_w2c"] = torch.cat(
-        [data_1["R_w2c"], data_text["R_w2c"], data_2["R_w2c"]], dim=0
-    )
-    data["T_w2c"] = torch.cat(
-        [data_1["T_w2c"], data_text["T_w2c"], data_2["T_w2c"]], dim=0
-    )
-    data["eval_gen_only_mask"] = torch.zeros(
-        tot_length, device=data["cam_angvel"].device
-    )
-    data["eval_gen_only_mask"][
-        data_1["length"] : data_1["length"] + data_text["length"]
-    ] = 1
+    data_text["caption"] = cfg.text
 
-    debug = True
+    data = data_text
+    debug = False
     if debug:
-        data = data_text
         data["meta"] = [
             {
-                "vid1": cfg.video1_name,
-                "caption": cfg.text1,
+                "vid": cfg.video_name,
+                "caption": cfg.text,
                 "eval_gen_only": True,
                 # "multi_text_data": multi_text_data,
             }
         ]
-    vid_slice = {
-        1: (0, data_1["length"]),
-        2: (data_1["length"] + data_text["length"], tot_length),
-    }
-    static_cam = cfg.static_cam1 and cfg.static_cam2
+
+    static_cam = True
     # ===== HMR4D ===== #
     if not Path(paths.hmr4d_results).exists():
         Log.info("[HMR4D] Predicting")
@@ -992,11 +857,9 @@ if __name__ == "__main__":
         torch.save(pred, paths.hmr4d_results)
 
     # ===== Render ===== #
-    orig_fps = int(cfg.orig_fps1 + 0.5)
-    render_incam(cfg, vid_slice, vid=1)
-    render_incam(cfg, vid_slice, vid=2)
+    orig_fps = int(cfg.orig_fps + 0.5)
     render_global_o3d(cfg, 30)
-    concat_videos(cfg, paths.incam_video)
+    # concat_videos(cfg, paths.incam_video)
     if not Path(paths.incam_global_horiz_video).exists():
         Log.info("[Merge Videos]")
         merge_videos_horizontal(

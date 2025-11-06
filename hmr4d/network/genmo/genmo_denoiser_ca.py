@@ -7,6 +7,7 @@ from timm.models.vision_transformer import Mlp
 from hmr4d.configs import MainStore, builds
 from hmr4d.network.base_arch.transformer.encoder_rope import (
     DecoderRoPEBlock,
+    DecoderRoPECABlock,
     EncoderRoPEBlock,
 )
 from hmr4d.network.base_arch.transformer.layer import zero_module
@@ -63,7 +64,7 @@ class NetworkEncoderRoPE(nn.Module):
         input_remove_global=False,
         input_remove_condition=False,
         allow_autoregressive=True,
-        out_attr={"pred_cam": 3},
+        encode_ctx=False,
         **kwargs,
     ):
         super().__init__()
@@ -90,6 +91,7 @@ class NetworkEncoderRoPE(nn.Module):
         self.input_remove_global = input_remove_global
         self.input_remove_condition = input_remove_condition
         self.allow_autoregressive = allow_autoregressive
+        self.encode_ctx = encode_ctx
 
         # ===== build model ===== #
         # Input (Kp2d)
@@ -113,8 +115,20 @@ class NetworkEncoderRoPE(nn.Module):
                     self.num_heads,
                     mlp_ratio=mlp_ratio,
                     dropout=dropout,
+                    encode_ctx=self.encode_ctx,
                 )
                 for _ in range(self.num_layers)
+            ]
+        )
+        self.fcond_blocks = nn.ModuleList(
+            [
+                DecoderRoPECABlock(
+                    self.latent_dim,
+                    self.num_heads,
+                    use_self_attn=False,
+                    mlp_ratio=mlp_ratio,
+                    dropout=dropout,
+                )
             ]
         )
         self.sequence_pos_encoder = PositionalEncoding(self.latent_dim, dropout=0)
@@ -122,6 +136,7 @@ class NetworkEncoderRoPE(nn.Module):
             self.latent_dim, self.sequence_pos_encoder
         )
         self.embed_text = nn.Linear(self.encoded_text_dim, self.latent_dim)
+        self.embed_fcond = nn.Linear(self.latent_dim, self.latent_dim)
         self.text_encoder_cfg = text_encoder_cfg
         text_encode_mode = text_encoder_cfg.get("mode", "first")
         if text_encode_mode == "first":
@@ -159,25 +174,24 @@ class NetworkEncoderRoPE(nn.Module):
         self.motion_text_pos_enc = motion_text_pos_enc
 
         # Output heads
-        self.final_layer = Mlp(self.latent_dim, out_features=self.output_dim)
-        self.pred_cam_head = out_attr.get("pred_cam", None)
+        self.final_layer = Mlp(self.latent_dim * 2, out_features=self.output_dim)
+        self.pred_cam_head = (
+            pred_cam_dim > 0
+        )  # keep extra_output for easy-loading old ckpt
         if self.pred_cam_head:
-            self.pred_cam_head = Mlp(self.latent_dim, out_features=pred_cam_dim)
+            self.pred_cam_head = Mlp(self.latent_dim * 2, out_features=pred_cam_dim)
             self.register_buffer(
                 "pred_cam_mean", torch.tensor([1.0606, -0.0027, 0.2702]), False
             )
             self.register_buffer(
                 "pred_cam_std", torch.tensor([0.1784, 0.0956, 0.0764]), False
             )
-        self.pred_transl_head = out_attr.get("pred_transl", None)
-        if self.pred_transl_head:
-            self.pred_transl_head = Mlp(self.latent_dim, out_features=3)
 
         self.static_conf_head = static_conf_dim > 0
         if self.static_conf_head:
             self.static_conf_head = Mlp(self.latent_dim, out_features=static_conf_dim)
 
-        self.add_cond_linear = nn.Linear(xt_dim + self.latent_dim, self.latent_dim)
+        self.add_cond_linear = nn.Linear(xt_dim, self.latent_dim)
 
         self.avgbeta = avgbeta
 
@@ -212,7 +226,6 @@ class NetworkEncoderRoPE(nn.Module):
         observed_motion_3d=None,
         motion_mask_3d=None,
         rm_text_flag=None,
-        sample_indices_dict=None,
         **kwargs,
     ):
         """
@@ -225,14 +238,14 @@ class NetworkEncoderRoPE(nn.Module):
             f_noisyobs: (B, L, C), nosiy pose observation
             f_cam_angvel: (B, L, 6), Camera angular velocity
         """
-        x = y["f_cond"]
+        f_cond = y["f_cond"]
         length = y["length"]
         multi_text_data = y.get("multi_text_data", None)
         L = xt.size(1)
         B = xt.size(0)
 
         if self.input_remove_condition:
-            x = torch.zeros_like(x)
+            f_cond = torch.zeros_like(f_cond)
 
         if self.input_remove_global:
             xt[..., -15:] = 0
@@ -240,10 +253,13 @@ class NetworkEncoderRoPE(nn.Module):
         if motion_mask_3d is not None:
             xt = xt * (1 - motion_mask_3d) + observed_motion_3d * motion_mask_3d
 
-        emb = self.embed_timestep(timesteps)  # [1, bs, d]
-        x = x + emb
+        emb = self.embed_timestep(timesteps)  # [bs, 1, d]
+        # f_cond = f_cond + emb
 
-        x = self.add_cond_linear(torch.cat([x, xt], dim=-1))
+        # x = self.add_cond_linear(torch.cat([x, xt], dim=-1))
+        f_cond = self.embed_fcond(f_cond) + emb
+        xt = self.add_cond_linear(xt) + emb
+        x = xt
 
         if "encoded_text" in y and len(self.text_encode_layer_idx) > 0:
             enc_text = y["encoded_text"].clone()
@@ -306,7 +322,7 @@ class NetworkEncoderRoPE(nn.Module):
             attnmask = attnmask | (causal_mask.unsqueeze(0) & autoregressive_mask)
 
         # Transformer
-        for i, block in enumerate(self.blocks):
+        for i, (block, fcond_block) in enumerate(zip(self.blocks, self.fcond_blocks)):
             if i in self.text_encode_layer_idx:
                 text_block = self.text_encoder_layers[f"{i}"]
                 x = text_block(
@@ -317,32 +333,27 @@ class NetworkEncoderRoPE(nn.Module):
                     multi_text_data=multi_text_data,
                     motion_text_pos_enc=self.motion_text_pos_enc,
                 )
-            x = block(x, attn_mask=attnmask, tgt_key_padding_mask=pmask)
+            x = fcond_block(x, context=f_cond, attn_mask=attnmask, tgt_key_padding_mask=pmask)
+            x= block(x, attn_mask=attnmask, tgt_key_padding_mask=pmask)
 
         # Output
-        sample = self.final_layer(x)  # (B, L, C)
+        sample = self.final_layer(torch.cat([x, f_cond], dim=-1))  # (B, L, C)
         if self.avgbeta:  # TODO: fix based on beta dims
-            betas_slice = sample_indices_dict["betas"]
-            s_idx, e_idx = betas_slice[0], betas_slice[-1]
-            betas = (sample[..., s_idx:e_idx] * (~pmask[..., None])).sum(1) / length[
+            betas = (sample[..., 126:136] * (~pmask[..., None])).sum(1) / length[
                 :, None
             ]  # (B, C)
             betas = repeat(betas, "b c -> b l c", l=L)
-            sample = torch.cat(
-                [sample[..., :s_idx], betas, sample[..., e_idx:]], dim=-1
-            )
+            sample = torch.cat([sample[..., :126], betas, sample[..., 136:]], dim=-1)
 
+        # Output (extra)
         pred_cam = None
         if self.pred_cam_head:
-            pred_cam = self.pred_cam_head(x)
+            # pred_cam = self.pred_cam_head(x)
+            pred_cam = self.pred_cam_head(torch.cat([x, f_cond], dim=-1))
             pred_cam = pred_cam * self.pred_cam_std + self.pred_cam_mean
             torch.clamp_min_(
                 pred_cam[..., 0], 0.25
             )  # min_clamp s to 0.25 (prevent negative prediction)
-
-        pred_transl = None
-        if self.pred_transl_head:
-            pred_transl = self.pred_transl_head(x)
 
         static_conf_logits = None
         if self.static_conf_head:
@@ -352,12 +363,9 @@ class NetworkEncoderRoPE(nn.Module):
             "pred_context": x,
             "pred_x": sample,
             "pred_x_start": sample,
+            "pred_cam": pred_cam,
             "static_conf_logits": static_conf_logits,
         }
-        if pred_cam is not None:
-            output["pred_cam"] = pred_cam
-        if pred_transl is not None:
-            output["pred_transl"] = pred_transl
         return output
 
 

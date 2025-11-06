@@ -13,7 +13,7 @@ defaults:
       - imgfeat_bedlam/v2
       - imgfeat_h36m/v1
       - imgfeat_3dpw/v1
-      - imgfeat_3dpw_occ/v1
+      # - imgfeat_3dpw_occ/v1
       - aistpp_train
       - beat2_static_train
   # - override /train_2d_datasets:
@@ -49,10 +49,10 @@ data_name: mocap_mixed_v1
 
 train_datasets:
   aistpp_train:
-    feat_version: vjukebox
+    feat_version: v2
 # test_datasets:
 #   aistpp_test:
-#       feat_version: vjukebox
+#       feat_version: v2
 
 multicond_args: null
 
@@ -105,7 +105,7 @@ pipeline:
     use_cfg_sampler_for_gen: true
     inpaint_x_start_gt: false
     regression_only: true
-    encoded_music_dim: 4800
+    encoded_music_dim: 35
     multicond_args: ${multicond_args}
     weights:
       cr_j3d: 500.
@@ -145,7 +145,7 @@ network:
   model_cfg:
     diffusion: ${model_cfg.diffusion}
     denoiser:
-      _target_: hmr4d.network.genmo.genmo_denoiser.NetworkEncoderRoPE
+      _target_: hmr4d.network.genmo.genmo_denoiser_ca.NetworkEncoderRoPE
       output_dim: 151
       xt_dim: ${.output_dim}
       njoints: ${.xt_dim}
@@ -160,15 +160,12 @@ network:
       num_layers: 16
       num_heads: 8
       mlp_ratio: 4
+      encode_ctx: false
 
 data:
-  collate_cfg:
-    default_frame_feature_dim:
-      music_embed:
-      - ${pipeline.args.encoded_music_dim}
   loader_opts:
     train:
-      batch_size: 128
+      batch_size: 64
       num_workers: 6
     encoded_music_dim: ${pipeline.args.encoded_music_dim}
   # train_2d_only: true

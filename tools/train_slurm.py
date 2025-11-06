@@ -64,7 +64,7 @@ parser.add_argument(
 )
 parser.add_argument("-gm", "--git_message", default=None, help="git commit message")
 parser.add_argument(
-    "-slack", "--slack_mode", default="never", help="slack mode for ADLR script"
+    "-slack", "--slack_mode", default="fail", help="slack mode for ADLR script"
 )
 parser.add_argument(
     "-test_ar", "--test_autoresume_timer", help="in minutes", type=int, default=-1

@@ -190,3 +190,5 @@ logger:
   resume: "allow"
   dir: "/tmp"
   id: null
+
+no_wandb: false

@@ -499,7 +499,8 @@ class UNIMFMDiffusion(nn.Module):
             f_uncond = self.cond_merger(f_uncond)
         vis_mask = length_to_mask(length, f_cond.shape[1])[:, :end_fr]  # (B, L)
 
-        motion = torch.cat([static_gt, target_x], dim=-1)
+        # motion = torch.cat([static_gt, target_x], dim=-1)
+        motion = target_x
 
         motion = motion * vis_mask[..., None]
         motion = motion[:, :end_fr]

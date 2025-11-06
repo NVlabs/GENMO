@@ -219,6 +219,12 @@ def train(cfg: DictConfig) -> None:
         callbacks.append(AutoResumeCallback(version))
 
     cfg.logger.config = wandb_cfg
+    if cfg.no_wandb:
+        logger = tb_logger
+    else:
+        logger = hydra.utils.instantiate(
+            cfg.logger, _recursive_=False, _convert_="partial"
+        )
     logger = hydra.utils.instantiate(cfg.logger, _recursive_=False, _convert_="partial")
     if cfg.task == "fit" and global_rank == 0:
         # wandb.config.update({"cfg": OmegaConf.to_container(cfg)}, allow_val_change=True)

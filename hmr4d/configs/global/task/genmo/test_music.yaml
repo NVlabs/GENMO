@@ -2,7 +2,7 @@
 defaults:
   - override /data: mocap/testY
   - override /test_datasets:
-      - aistpp_test
+      - aistpp_jukebox_test
   - override /callbacks:
       # - metric_aistpp
       - vis_music

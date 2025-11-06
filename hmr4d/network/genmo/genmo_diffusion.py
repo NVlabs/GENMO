@@ -93,6 +93,7 @@ class GENMODiffusion(nn.Module):
                 "length": length,
             },
             "inputs": inputs,
+            "sample_indices_dict": inputs["sample_indices_dict"],
         }
         if "encoded_text" in inputs:
             denoiser_kwargs["y"]["encoded_text"] = inputs["encoded_text"]
@@ -176,6 +177,7 @@ class GENMODiffusion(nn.Module):
                 "length": length,
             },
             "inputs": inputs,
+            "sample_indices_dict": inputs["sample_indices_dict"],
         }
         if "encoded_text" in inputs:
             denoiser_kwargs["y"]["encoded_text"] = inputs["encoded_text"]

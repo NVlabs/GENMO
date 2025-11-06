@@ -402,6 +402,8 @@ class GENMO(pl.LightningModule):
 
     def prepare_batch(self, batch, mode):
         target_x = self.endecoder.encode(batch)  # (B, L, C)
+        sample_indices_dict = self.endecoder.obs_indices_dict
+        batch["sample_indices_dict"] = sample_indices_dict
         if mode == "diffusion":
             target_x[batch["mask"]["2d_only"]] = batch["regression_outputs"][
                 "model_output"
@@ -877,6 +879,7 @@ class GENMO(pl.LightningModule):
             [x.get("has_humanoid_data", False) for x in batch["meta"]]
         ).to(obs.device)
         test_mode = batch["meta"][0].get("mode", "default")
+        infer_version = self.pipeline.args.get("infer_version", 2)
         batch_ = {
             "length": batch["length"],
             "obs": obs,
@@ -899,7 +902,17 @@ class GENMO(pl.LightningModule):
                 obs.device
             ),
             "mask": batch["mask"],
+            "sample_indices_dict": self.endecoder.obs_indices_dict,
         }
+        if infer_version == 3:
+            batch_["R_w2c"] = batch["R_w2c"]
+            batch_["cam_tvel"] = batch["cam_tvel"]
+            if "vimo_smpl_params" in batch:
+                batch_["vimo_smpl_params"] = batch["vimo_smpl_params"]
+                batch_["scales"] = batch["scales"]
+                batch_["mean_scale"] = batch["mean_scale"]
+        if infer_version == 3:
+            do_postproc = False
         if "music_embed" in batch:
             batch_["music_embed"] = batch["music_embed"]
         if "audio_array" in batch:
@@ -1050,7 +1063,15 @@ class GENMO(pl.LightningModule):
                     obs.device
                 ),
                 "mask": batch["mask"],
+                "sample_indices_dict": self.endecoder.obs_indices_dict,
             }
+            if infer_version == 3:
+                batch_["R_w2c"] = flip_test["R_w2c"]
+                batch_["cam_tvel"] = flip_test["cam_tvel"]
+                if "vimo_smpl_params" in flip_test:
+                    batch_["vimo_smpl_params"] = flip_test["vimo_smpl_params"]
+                    batch_["scales"] = flip_test["scales"]
+                    batch_["mean_scale"] = flip_test["mean_scale"]
 
             det_kp2d = flip_test["kp2d"]
             det_kp2d_conf = det_kp2d[..., 2]

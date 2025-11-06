@@ -52,7 +52,7 @@ train_datasets:
     feat_version: vjukebox
 # test_datasets:
 #   aistpp_test:
-#       feat_version: vjukebox
+#       feat_version: v2
 
 multicond_args: null
 
@@ -109,7 +109,8 @@ pipeline:
     multicond_args: ${multicond_args}
     weights:
       cr_j3d: 500.
-      transl_c: 1.
+      transl_c: 0.
+      abs_transl_c: 1.
       cr_verts: 500.
       j2d: 1000.
       j2d_17: 1000.
@@ -132,7 +133,7 @@ pipeline:
       - encoded_audio
     mask_out_attr: [] # ${.in_attr}
     out_attr:
-      pred_cam: 3
+      pred_transl: 3
 
 network:
   _target_: hmr4d.network.genmo.genmo_diffusion.GENMODiffusion
@@ -160,6 +161,7 @@ network:
       num_layers: 16
       num_heads: 8
       mlp_ratio: 4
+      out_attr: ${pipeline.args.out_attr}
 
 data:
   collate_cfg:

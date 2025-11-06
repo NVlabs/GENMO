@@ -85,13 +85,99 @@ class EnDecoder(nn.Module):
         # option
         self.noise_pose_k = noise_pose_k
         self.encode_type = encode_type
-        self.obs_indices_dict = None
+        self.build_obs_indices_dict()
 
         # smpl
         self.smplx_model = make_smplx("supermotion_v437coco17")
         parents = self.smplx_model.parents[:22]
         self.register_buffer("parents_tensor", parents, False)
         self.parents = parents.tolist()
+
+    def build_obs_indices_dict(self):
+        for feature in self.feature_arr:
+            if feature == "gvhmr":
+                self.obs_indices_dict = {
+                    "body_pose": torch.arange(126),
+                    "betas": torch.arange(126, 136),
+                    "global_orient": torch.arange(136, 142),
+                    "global_orient_gv": torch.arange(142, 148),
+                    "local_transl_vel": torch.arange(148, 151),
+                }
+                self.motion_dim = 151
+            elif feature == "local_gravity":
+                self.obs_indices_dict = {
+                    "body_pose": torch.arange(126),
+                    "betas": torch.arange(126, 136),
+                    "global_orient": torch.arange(136, 142),
+                    "global_orient_vel": torch.arange(142, 148),
+                    "local_gravity": torch.arange(148, 151),
+                    "local_transl_vel": torch.arange(151, 154),
+                }
+                self.motion_dim = 154
+            elif feature == "local_gravity_h":
+                self.obs_indices_dict = {
+                    "body_pose": torch.arange(126),
+                    "betas": torch.arange(126, 136),
+                    "global_orient": torch.arange(136, 142),
+                    "global_orient_vel": torch.arange(142, 148),
+                    "local_gravity": torch.arange(148, 151),
+                    "local_transl_vel": torch.arange(151, 154),
+                    "height_vel": torch.arange(154, 155),
+                }
+                self.motion_dim = 155
+            elif feature == "gv":
+                self.obs_indices_dict = {
+                    "body_pose": torch.arange(126),
+                    "betas": torch.arange(126, 136),
+                    "global_orient_gv": torch.arange(136, 142),
+                    "local_transl_vel": torch.arange(142, 145),
+                }
+                self.motion_dim = 145
+            elif feature == "localpose":
+                self.obs_indices_dict = {
+                    "body_pose": torch.arange(126),
+                    "betas": torch.arange(126, 136),
+                    "global_orient": torch.arange(136, 142),
+                }
+                self.motion_dim = 142
+            elif feature == "local_jpos":
+                self.obs_indices_dict = {
+                    "body_pose": torch.arange(126),
+                    "betas": torch.arange(126, 136),
+                    "global_orient": torch.arange(136, 142),
+                    "local_jpos": torch.arange(142, 142 + 21 * 3),
+                }
+                self.motion_dim = 142 + 21 * 3
+            elif feature == "wholebody":
+                self.obs_indices_dict = {
+                    "body_pose": torch.arange(126 + 180),
+                    "betas": torch.arange(306, 316),
+                    "global_orient": torch.arange(316, 322),
+                    "global_orient_gv": torch.arange(322, 328),
+                    "local_transl_vel": torch.arange(328, 331),
+                }
+                self.motion_dim = 331
+            elif feature == "humanml3d":
+                self.obs_indices_dict = {
+                    "body_pose": torch.arange(126),
+                    "betas": torch.arange(126, 136),
+                    "root_data": torch.arange(136, 143),
+                }
+                self.motion_dim = 143
+            elif feature == "humanoid":
+                self.obs_indices_dict = {
+                    "clean_action": torch.arange(151),
+                }
+                self.motion_dim = 151
+            elif feature == "nvhuman":
+                self.obs_indices_dict = {
+                    "body_pose": torch.arange(552),
+                    "betas": torch.arange(552, 562),
+                    "global_orient": torch.arange(562, 568),
+                    "global_orient_gv": torch.arange(568, 574),
+                    "local_transl_vel": torch.arange(574, 577),
+                }
+                self.motion_dim = 577
 
     def normalize(self, x, feature_type):
         """Normalize input using stats for specific feature type"""
