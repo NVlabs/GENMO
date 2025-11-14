@@ -39,6 +39,7 @@
 
 ---
 
+
 ## 🚀 Highlights
 
 GENMO introduces a **unified generative framework** that connects motion estimation and generation through shared objectives.
@@ -53,6 +54,9 @@ GENMO introduces a **unified generative framework** that connects motion estimat
 For more details, visit the **[GENMO project page →](https://research.nvidia.com/labs/dair/genmo/)**
 
 ---
+
+### Pretrained Models
+You can download pretrained models from [Google Drive](https://drive.google.com/file/d/1b1E84G7S0h2n5o0RmrcmKOhRKukOjgsJ/view?usp=sharing).
 
 ## 📖 Paper & Citation
 
