@@ -575,6 +575,7 @@ class GENMO_demo(pl.LightningModule):
             "target_x": torch.zeros(
                 1, data["f_imgseq"].shape[0], self.endecoder.get_motion_dim()
             ).cuda(),
+            "sample_indices_dict": self.endecoder.obs_indices_dict,
         }
         if "music_embed" in data:
             batch["music_embed"] = data["music_embed"][None].cuda()
