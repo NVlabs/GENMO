@@ -31,7 +31,7 @@
 ---
 
 ## 📰 News
-
+- **[December 2025]** 📢 GENMO has been renamed to **GEM**.
 - **[October 2025]** 📢 The **GEM** codebase is **released!**  
   Stay tuned for the pretrained models and evaluation scripts.  
   Follow the [project page](https://research.nvidia.com/labs/dair/gem/) for updates and announcements.
