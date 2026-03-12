@@ -1,0 +1,3 @@
+beat2_static_train:
+  _target_: gem.datasets.beat2.beat2.BEAT2SmplDataset
+  cam_augmentation: static

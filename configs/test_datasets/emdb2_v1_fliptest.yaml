@@ -1,0 +1,4 @@
+emdb2_v1_fliptest:
+  _target_: gem.datasets.emdb.emdb_motion_test.EmdbMotionTest
+  split: 2
+  flip_test: true

@@ -1,0 +1,23 @@
+max_motion_frames: ${data.dataset_opts.max_motion_frames}
+default_frame_feature_dim:
+  music_array: [1024]
+  music_embed: [35]
+  music_beats: []
+  audio_array: []
+  use_det_kp: []
+
+default_seq_feature_dim:
+  text_embed: [50, 1024]
+
+default_seq_feature_length_multiplier:
+  audio_array: 600
+
+default_feature_val:
+  caption: ""
+  music_fps: 30
+  audio_fps: 30
+  has_text: False
+  # has_audio: False
+  # has_music: False
+
+default_feature_type: {}

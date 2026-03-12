@@ -1,0 +1,2 @@
+vis_text:
+  _target_: gem.callbacks.vis.vis_text.VisText

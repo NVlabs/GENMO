@@ -1,0 +1,15 @@
+defaults:
+  - collate_cfg: default
+
+# definition of lightning datamodule (test-only, no training data)
+_target_: gem.datamodule.mocap_trainX_testY.DataModule
+
+dataset_opts:
+  test: ${test_datasets}
+  max_motion_frames: 120
+
+loader_opts:
+  test:
+    batch_size: 1
+    num_workers: 4
+  encoded_music_dim: ${pipeline.args.encoded_music_dim}

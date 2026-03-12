@@ -1,0 +1,2 @@
+metric_rich:
+  _target_: gem.callbacks.metric.metric_rich.MetricRICH

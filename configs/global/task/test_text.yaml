@@ -1,0 +1,26 @@
+# @package _global_
+# Test text-to-motion generation on HumanML3D
+defaults:
+  - override /data: mocap/testY
+  - override /test_datasets:
+      - humanml3d_eval
+  - override /callbacks:
+      - vis/vis_text
+  - _self_
+
+task: test
+num_test_data: 32
+
+# lightning utilities
+pl_trainer:
+  devices: 1
+
+logger:
+  _target_: pytorch_lightning.loggers.WandbLogger
+  project: "gem-test"
+  save_dir: "/tmp"
+  name: ""
+  version: ""
+  resume: "allow"
+  dir: "/tmp"
+  id: null

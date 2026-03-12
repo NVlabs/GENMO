@@ -1,0 +1,2 @@
+3dpw_v1:
+  _target_: gem.datasets.threedpw.threedpw_motion_train.ThreedpwSmplDataset

@@ -1,0 +1,4 @@
+humanml3d_static_train:
+  _target_: gem.datasets.pure_motion.humanml3d.Humanml3dDataset
+  cam_augmentation: static
+  split: train

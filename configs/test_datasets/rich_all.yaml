@@ -1,0 +1,2 @@
+rich_all:
+  _target_: gem.datasets.rich.rich_motion_test.RichSmplFullSeqDataset

@@ -1,0 +1,25 @@
+# @package _global_
+# Test on RICH dataset
+defaults:
+  - override /data: mocap/testY
+  - override /test_datasets:
+      - rich_all
+  - override /callbacks:
+      - metric/metric_rich
+  - _self_
+
+task: test
+
+# lightning utilities
+pl_trainer:
+  devices: 1
+
+logger:
+  _target_: pytorch_lightning.loggers.WandbLogger
+  project: "gem-test"
+  save_dir: "/tmp"
+  name: ""
+  version: ""
+  resume: "allow"
+  dir: "/tmp"
+  id: null

@@ -1,0 +1,3 @@
+amass_v11:
+  _target_: gem.datasets.pure_motion.amass.AmassDataset
+  cam_augmentation: v11

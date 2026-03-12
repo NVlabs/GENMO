@@ -1,0 +1,2 @@
+h36m_v1:
+  _target_: gem.datasets.h36m.h36m.H36MDataset

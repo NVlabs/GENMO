@@ -1,0 +1,29 @@
+# @package _global_
+# Test regression model on core benchmarks: EMDB1 (incam) + EMDB2 (global) + 3DPW
+defaults:
+  - override /data: mocap/testY
+  - override /test_datasets:
+      - emdb1_v1_fliptest
+      - emdb2_v1_fliptest
+      - 3dpw_fliptest
+  - override /callbacks:
+      - metric/metric_emdb1
+      - metric/metric_emdb2
+      - metric/metric_3dpw
+  - _self_
+
+task: test
+
+# lightning utilities
+pl_trainer:
+  devices: 1
+
+logger:
+  _target_: pytorch_lightning.loggers.WandbLogger
+  project: "gem-test"
+  save_dir: "/tmp"
+  name: ""
+  version: ""
+  resume: "allow"
+  dir: "/tmp"
+  id: null
