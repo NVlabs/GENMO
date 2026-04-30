@@ -1,0 +1,10 @@
+humanml3d_eval:
+  _target_: hmr4d.dataset.pure_motion.humanml3d.Humanml3dDataset
+  eval_gen_only: true
+  cam_augmentation: static
+  use_random_subset: true
+  random_subset_size: ${num_test_data}
+  random_subset_seed: 7
+  humanoid_data_dir: inputs/humanoid/data/traj_v1
+  humanoid_noise_seq: ["noise_0", "noise_0.07"]
+  discard_last_frame: true

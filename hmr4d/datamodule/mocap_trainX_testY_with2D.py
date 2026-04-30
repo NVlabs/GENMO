@@ -1,0 +1,193 @@
+import resource
+from functools import partial
+
+import pytorch_lightning as pl
+import torch
+from hydra.utils import instantiate
+from numpy.random import choice
+from omegaconf import DictConfig, ListConfig
+from pytorch_lightning.utilities.combined_loader import CombinedLoader
+from torch.utils.data import ConcatDataset, DataLoader, Subset, default_collate
+
+from hmr4d.utils.pylogger import Log
+
+from .mocap_trainX_testY import collate_fn
+
+rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
+resource.setrlimit(resource.RLIMIT_NOFILE, (4096, rlimit[1]))
+
+
+class DataModule(pl.LightningDataModule):
+    def __init__(
+        self,
+        dataset_opts: DictConfig,
+        loader_opts: DictConfig,
+        limit_each_trainset=None,
+        train_subset_ratio=None,
+        train_2d_only=False,
+        collate_cfg: DictConfig = None,
+    ):
+        """This is a general datamodule that can be used for any dataset.
+        Train uses ConcatDataset
+        Val and Test use CombinedLoader, sequential, completely consumes ecah iterable sequentially, and returns a triplet (data, idx, iterable_idx)
+
+        Args:
+            dataset_opts: the target of the dataset. e.g. dataset_opts.train = {_target_: ..., limit_size: None}
+            loader_opts: the options for the dataset
+            limit_each_trainset: limit the size of each dataset, None means no limit, useful for debugging
+        """
+        super().__init__()
+        self.loader_opts = loader_opts
+        self.limit_each_trainset = limit_each_trainset
+        self.train_subset_ratio = train_subset_ratio
+        self.train_2d_only = train_2d_only
+        self.collate_cfg = collate_cfg
+        # Train uses concat dataset
+        if "train" in dataset_opts:
+            assert "train" in self.loader_opts, "train not in loader_opts"
+            split_opts = dataset_opts.get("train")
+            assert isinstance(split_opts, DictConfig), (
+                "split_opts should be a dict for each dataset"
+            )
+            dataset = []
+            dataset_num = len(split_opts)
+            for idx, (k, v) in enumerate(split_opts.items()):
+                dataset_i = instantiate(v)
+                if self.limit_each_trainset:
+                    dataset_i = Subset(
+                        dataset_i, choice(len(dataset_i), self.limit_each_trainset)
+                    )
+                if self.train_subset_ratio is not None:
+                    dataset_i = Subset(
+                        dataset_i,
+                        choice(
+                            len(dataset_i),
+                            int(len(dataset_i) * self.train_subset_ratio),
+                        ),
+                    )
+                dataset.append(dataset_i)
+                Log.info(
+                    f"[Train Dataset][{idx + 1}/{dataset_num}]: name={k}, size={len(dataset[-1])}, {v._target_}"
+                )
+            dataset = ConcatDataset(dataset)
+            self.trainset = dataset
+            Log.info(f"[Train Dataset][All]: ConcatDataset size={len(dataset)}")
+            Log.info(f"")
+
+        # Train uses concat dataset
+        if "train_2d" in dataset_opts:
+            split_opts = dataset_opts.get("train_2d")
+            assert isinstance(split_opts, DictConfig), (
+                "split_opts should be a dict for each dataset"
+            )
+            dataset = []
+            dataset_num = len(split_opts)
+            for idx, (k, v) in enumerate(split_opts.items()):
+                dataset_i = instantiate(v)
+                if self.limit_each_trainset:
+                    dataset_i = Subset(
+                        dataset_i, choice(len(dataset_i), self.limit_each_trainset)
+                    )
+                dataset.append(dataset_i)
+                Log.info(
+                    f"[Train 2D Dataset][{idx + 1}/{dataset_num}]: name={k}, size={len(dataset[-1])}, {v._target_}"
+                )
+            dataset = ConcatDataset(dataset)
+            self.train_2d_dataset = dataset
+            Log.info(f"[Train 2D Dataset][All]: ConcatDataset size={len(dataset)}")
+            Log.info(f"")
+
+        # Val and Test use sequential dataset
+        for split in ("val", "test"):
+            if split not in dataset_opts:
+                continue
+            assert split in self.loader_opts, f"split={split} not in loader_opts"
+            split_opts = dataset_opts.get(split)
+            assert isinstance(split_opts, DictConfig), (
+                "split_opts should be a dict for each dataset"
+            )
+            dataset = []
+            dataset_num = len(split_opts)
+            for idx, (k, v) in enumerate(split_opts.items()):
+                dataset.append(instantiate(v))
+                dataset_type = "Val Dataset" if split == "val" else "Test Dataset"
+                Log.info(
+                    f"[{dataset_type}][{idx + 1}/{dataset_num}]: name={k}, size={len(dataset[-1])}, {v._target_}"
+                )
+            setattr(self, f"{split}sets", dataset)
+            Log.info(f"")
+
+    def train_dataloader(self):
+        if hasattr(self, "trainset"):
+            loader_2d = DataLoader(
+                self.train_2d_dataset,
+                shuffle=True,
+                num_workers=self.loader_opts.train_2d.num_workers,
+                persistent_workers=True and self.loader_opts.train_2d.num_workers > 0,
+                batch_size=self.loader_opts.train_2d.batch_size,
+                drop_last=True,
+                collate_fn=partial(
+                    collate_fn, mode="train", collate_cfg=self.collate_cfg
+                ),
+            )
+            if self.train_2d_only:
+                return loader_2d
+
+            loader_3d = DataLoader(
+                self.trainset,
+                shuffle=True,
+                num_workers=self.loader_opts.train.num_workers,
+                persistent_workers=True and self.loader_opts.train.num_workers > 0,
+                batch_size=self.loader_opts.train.batch_size,
+                drop_last=True,
+                collate_fn=partial(
+                    collate_fn, mode="train", collate_cfg=self.collate_cfg
+                ),
+            )
+            all_train_dataloaders = CombinedLoader(
+                {"3d": loader_3d, "2d": loader_2d}, mode="min_size"
+            )
+            return all_train_dataloaders
+        else:
+            return super().train_dataloader()
+
+    def val_dataloader(self):
+        if hasattr(self, "valsets"):
+            loaders = []
+            for valset in self.valsets:
+                loaders.append(
+                    DataLoader(
+                        valset,
+                        shuffle=False,
+                        num_workers=self.loader_opts.val.num_workers,
+                        persistent_workers=True
+                        and self.loader_opts.val.num_workers > 0,
+                        batch_size=self.loader_opts.val.batch_size,
+                        collate_fn=partial(
+                            collate_fn, mode="val", collate_cfg=self.collate_cfg
+                        ),
+                    )
+                )
+            return CombinedLoader(loaders, mode="sequential")
+        else:
+            return None
+
+    def test_dataloader(self):
+        if hasattr(self, "testsets"):
+            loaders = []
+            for testset in self.testsets:
+                loaders.append(
+                    DataLoader(
+                        testset,
+                        shuffle=False,
+                        num_workers=self.loader_opts.test.num_workers,
+                        persistent_workers=False,
+                        batch_size=self.loader_opts.test.batch_size,
+                        collate_fn=partial(
+                            collate_fn, mode="test", collate_cfg=self.collate_cfg
+                        ),
+                    )
+                )
+            return CombinedLoader(loaders, mode="sequential")
+        else:
+            return super().test_dataloader()

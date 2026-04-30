@@ -1,0 +1,5 @@
+humanml3d_test:
+  _target_: hmr4d.dataset.pure_motion.humanml3d.Humanml3dDataset
+  eval_gen_only: true
+  cam_augmentation: static
+  split: test

@@ -1,0 +1,27 @@
+defaults:
+  - config
+  - override /env@env: env_dais_vis_lift_z
+  - override /robot@robot: smplx_humanoid
+  - override /learning@learning: ppo_omnigrasp_z_rnn_vis
+  - override /sim@sim: inter_sim
+  - override /control@control: inter_control
+  - _self_
+
+exp_name: "dais_kitchen_rightonly_nolook_2_cf_0220"
+
+# Environment settings
+env:
+  num_envs: 512
+  motion:
+    motion_file: phc/data/amass_x/grab/grab_train_rightonly_standing_25_bps.pkl
+
+  z_config:
+    models:
+      - phc/output/HumanoidIm/1207_pulsex_devdex_noauto/Humanoid_00035000.pth
+
+  pregrasp_reward_type: pregrasp_approach_reward
+  look_at_marker: False
+  confound_object: True
+  num_confound_objects: 5
+  simple_text_label: True
+  multi_text_label: False

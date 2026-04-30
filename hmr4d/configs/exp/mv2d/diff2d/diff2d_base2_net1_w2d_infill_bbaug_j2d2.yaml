@@ -1,0 +1,172 @@
+# @package _global_
+defaults:
+  - /diffusion@model_cfg.diffusion: ddim
+  - override /data: mocap/trainX_testY_with2D
+  - override /model: gvhmr/mv2d
+  - override /endecoder: gvhmr/v1_amass_local_bedlam_cam
+  - override /optimizer: adamw_2e-4
+  - override /scheduler_cfg: epoch_half_200_350
+  - override /train_datasets:
+      - pure_motion_amass/v11
+      - imgfeat_bedlam/v2
+      - imgfeat_h36m/v1
+      - imgfeat_3dpw/v1
+      - imgfeat_3dpw_occ/v1
+  - override /train_2d_datasets:
+      - bones_2d
+  - override /test_datasets:
+      - emdb1/v1_fliptest
+      - emdb2/v1_fliptest
+      - rich/all
+      - 3dpw/fliptest
+      - 3dpw_occ/fliptest
+      #   - bones_2d_test
+  - override /callbacks:
+      - simple_ckpt_saver/every100e_top100
+      - prog_bar/prog_reporter_every0.1
+      - train_speed_timer/base
+      - lr_monitor/pl
+      - metric_emdb1
+      - metric_emdb2
+      - metric_rich
+      - metric_3dpw
+      - metric_3dpw_occ
+  - _self_
+exp_name_base: ${hydra:runtime.choices.exp}
+exp_name_var: ""
+exp_name: ${exp_name_base}_${exp_name_var}
+data_name: mocap_mixed_v1
+# pretrain_2d_ckpt: "/lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/yey/gvhmr/mocap_mixed_v1/mv2d/diff2d/diff2d_base_tt/version_0/checkpoints/last.ckpt"
+
+model_cfg:
+  # train_2d_modes: ["sv-diffusion"]
+  # infer_mode: "diffusion"
+  train_3d_modes: ["regression", "diffusion"]
+  # train_3d_modes: ["regression"]
+  train_2d_modes: ["regression", "diffusion"]
+  infer_mode: "regression"
+  num_views: 4
+  start_2d_training_steps: 0
+  noisy_2d_obs: true
+  kp2d_noise_scale: 0.5
+  train_2d_aug_bbox: true
+  diffusion:
+    test_timestep_respacing: "5"
+    guidance_param: 2.5
+
+  mask_cfg:
+    drop_prob: 0.75
+    max_num_drops: 3
+    min_drop_nframes: 1
+    max_drop_nframes: 30
+  body_mask_cfg:
+    drop_prob: 0.75
+    joint_drop_prob: 0.25
+    max_num_drops: 3
+    min_drop_nframes: 1
+    max_drop_nframes: 30
+
+pipeline:
+  _target_: hmr4d.model.gvhmr.pipeline.mv2d_pipeline2.Pipeline
+  args_denoiser3d: ${network}
+  args:
+    endecoder_opt: ${endecoder}
+    normalize_cam_angvel: True
+    num_views: ${model_cfg.num_views}
+    diffusion_all_regression_outputs: true
+    old_f_condition_masking: true
+    vis_masking_f_cond: false
+    weights:
+      cr_j3d: 500.
+      transl_c: 1.
+      cr_verts: 500.
+      j2d: 1000.
+      verts2d: 1000.
+
+      j2d_train2d: 1000.
+      proj_gt_j2d_to_bi01: true
+      # norm_j2d: 1000.
+      train2d_skip_regression: false
+
+      transl_w: 1.
+      static_conf_bce: 1.
+
+    static_conf:
+      vel_thr: 0.15
+
+    infer_version: 2
+    in_attr:
+      - obs
+      - bbx
+      - imgfeat
+      - cam_angvel
+      # - cam_t_vel
+    uncond_prob:
+      obs: 0.1
+      f_cliffcam: 0.1
+      f_imgseq: 0.5
+      f_cam_angvel: 0.5
+      # f_cam_t_vel: 0.1
+    out_attr:
+      pred_cam: 3
+      # cam_t_vel: 3
+      # - cam_angvel
+      # - cam_scale
+
+network:
+  _target_: hmr4d.network.mdm.mdm_2step_rope3_ye.MDM2Step
+  args: ${pipeline.args}
+  model_cfg:
+    # pretrained_checkpoint:
+    #     path:  /lustre/fsw/portfolios/nvr/projects/nvr_torontoai_humanmotionfm/workspaces/motiondiff/motiondiff_results/jiefengl/jiefengl/mdm_egosmpl_v12_contact_b64_gpu8_node1/version_3/checkpoints/model-step=0100000.ckpt
+    #     strict: false
+    #     try_load: true
+    diffusion: ${model_cfg.diffusion}
+    denoiser:
+      type: hmr4d.network.mv2d.relative_transformer_diff.NetworkEncoderRoPE
+      njoints: ${pipeline.args_denoiser3d.motion_rep_dim}
+
+  motion_rep_dim: 157
+  max_len: 120
+  cliffcam_dim: 3
+  cam_angvel_dim: 6
+  cam_t_vel_dim: 3
+  imgseq_dim: 1024
+  latent_dim: 512
+  num_layers: 12
+  num_heads: 8
+  mlp_ratio: 4.0
+  pred_cam_dim: 3
+  static_conf_dim: 6
+  preload_checkpoint: true
+
+data:
+  loader_opts:
+    train:
+      batch_size: 256
+      num_workers: 6
+    train_2d:
+      batch_size: 128
+      num_workers: 6
+  # train_2d_only: true
+
+pl_trainer:
+  precision: 16-mixed
+  log_every_n_steps: 10
+  gradient_clip_val: 0.5
+  max_epochs: 1000
+  check_val_every_n_epoch: 10
+  # val_check_interval: 1
+  devices: 1
+  strategy: ddp_find_unused_parameters_true
+
+logger:
+  _target_: pytorch_lightning.loggers.WandbLogger
+  project: "mfm-hmr"
+  entity: "nvr-lpr"
+  save_dir: "/tmp" # /save_dir/name/version/sub_dir
+  name: ""
+  version: ""
+  resume: "allow"
+  dir: "/tmp"
+  id: null

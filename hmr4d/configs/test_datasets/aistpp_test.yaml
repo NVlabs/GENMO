@@ -1,0 +1,7 @@
+aistpp_test:
+  _target_: hmr4d.dataset.aistplusplus.aistplusplus.AISTPlusPlusSmplDataset
+  split: test
+  motion_frames: 120
+  lazy_load: false
+  eval_gen_only: true
+  feat_version: v2

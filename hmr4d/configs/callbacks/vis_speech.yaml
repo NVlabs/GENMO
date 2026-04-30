@@ -1,0 +1,2 @@
+vis_speech:
+  _target_: hmr4d.model.gvhmr.callbacks.vis_speech.VisSpeech

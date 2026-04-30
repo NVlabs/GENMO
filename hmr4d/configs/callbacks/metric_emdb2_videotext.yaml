@@ -1,0 +1,7 @@
+metric_emdb2_videotext:
+  _target_: hmr4d.model.gvhmr.callbacks.metric_emdb_vtv.MetricMocap
+  emdb_split: 2
+  multicond_args: ${multicond_args}
+  # start_ind: ${start_ind}
+  # end_ind: ${end_ind}
+  # type: ${type}

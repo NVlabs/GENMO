@@ -1,0 +1,10 @@
+humanml3d_eval_infilling:
+  _target_: hmr4d.dataset.pure_motion.humanml3d.Humanml3dDataset
+  eval_gen_only: true
+  cam_augmentation: static
+  split: test
+  use_random_subset: true
+  random_subset_size: ${num_test_data}
+  random_subset_seed: 7
+  mode: infilling
+  eval_seed: 77

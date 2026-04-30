@@ -1,0 +1,8 @@
+sampler: ddim
+train_timestep_respacing: ""
+test_timestep_respacing: "50"
+schedule_sampler_type: uniform
+noise_schedule: cosine
+sigma_small: true
+guidance_param: 1.0
+ddim_eta: 0.0

@@ -1,0 +1,8 @@
+{
+    "exclude": [
+        "./inputs",
+        "./outputs",
+        "./out"
+    ],
+    "typeCheckingMode": "off",
+}

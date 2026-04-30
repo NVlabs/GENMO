@@ -1,0 +1,9 @@
+emdb2_videotext:
+  _target_: hmr4d.dataset.emdb.emdb_v2v_motion_test.EmdbSmplFullSeqVTVDataset
+  split: 2
+  flip_test: false
+  multicond_args: ${multicond_args}
+  music_feat_version: ???
+  # start_ind: ${start_ind}
+  # end_ind: ${end_ind}
+  # type: ${type}
