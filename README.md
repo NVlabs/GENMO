@@ -122,6 +122,32 @@ python scripts/demo/demo_smpl_hpe.py \
   --ckpt_path inputs/pretrained/gem_smpl.ckpt
 ```
 
+### Real-time webcam demo
+
+`demo_webcam.py` runs the whole pipeline (YOLOX → ViTPose-H → HMR2 → GEM denoiser) frame-by-frame via ONNX Runtime, with a sliding window and streaming global rollout. See [docs/INSTALL.md](docs/INSTALL.md) Steps 8–10 for ONNX Runtime setup and ONNX export commands (one-time).
+
+```bash
+# Video file, OpenCV in-camera mesh overlay, no image features (fastest)
+python scripts/demo/demo_webcam.py \
+  --video path/to/video.mp4 --no_imgfeat \
+  --render --render_mode opencv
+
+# Webcam with Viser-based 3D world viewer (open http://localhost:8012)
+python scripts/demo/demo_webcam.py \
+  --camera_id 0 --no_imgfeat \
+  --render --render_mode viser
+```
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--video` / `--camera_id` | camera 0 | input source |
+| `--context_frames` | 120 | sliding-window length (must match exported denoiser `--seq_len`) |
+| `--no_imgfeat` | off | use the no-imgfeat denoiser variant; skips HMR2 entirely |
+| `--render_mode {opencv,viser}` | `viser` | mesh-overlay window vs web 3D viewer |
+| `--no_async_pipeline` | off | force synchronous mode (lower throughput, zero pipeline lag) |
+
+For per-module latency profiling: `python tools/benchmark/benchmark_modules.py`.
+
 ---
 
 ## 🏋️ Training

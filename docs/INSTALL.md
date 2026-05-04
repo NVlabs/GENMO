@@ -55,8 +55,74 @@ The demo uses [ViTPose-H](https://github.com/ViTAE-Transformer/ViTPose) for 2D k
 inputs/checkpoints/vitpose/vitpose-h-multi-coco.pth
 ```
 
-## Step 8 — Verify installation
+## Prerequisites for Real-Time Webcam Demo
+
+The following steps are only required for `scripts/demo/demo_webcam.py` (real-time inference via ONNX). The offline video demos (`demo_smpl.py`, `demo_smpl_hpe.py`) do not need them.
+
+### Step 8 — Install ONNX Runtime
+
+For CUDA GPU:
+
+```bash
+uv pip install onnxruntime-gpu nvidia-cudnn-cu12
+```
+
+For CPU only:
+
+```bash
+uv pip install onnxruntime
+```
+
+Verify the CUDA execution provider is available:
+
+```bash
+python -c "import onnxruntime as ort; print(ort.get_available_providers())"
+# Should include 'CUDAExecutionProvider'
+```
+
+### Step 9 — (Optional) Install Viser for global 3D rendering
+
+Required only for `--render_mode viser` (web-based 3D world view). The OpenCV mesh-overlay mode (`--render_mode opencv`) does not need this.
+
+```bash
+uv pip install viser
+```
+
+### Step 10 — Export ONNX models
+
+The webcam demo runs detection, 2D pose, image features, and the GEM denoiser via ONNX Runtime. Three of the four ONNX files are exported from local checkpoints; YOLOX is auto-downloaded from the OpenMMLab CDN on first use.
+
+```bash
+# GEM-SMPL denoiser — both with-imgfeat and no-imgfeat variants
+python tools/export/export_denoiser_onnx.py --ckpt <path/to/gem_smpl.ckpt> --exp gem_smpl
+python tools/export/export_denoiser_onnx.py --ckpt <path/to/gem_smpl.ckpt> --exp gem_smpl --no-imgfeat
+
+# ViTPose-H COCO-17
+python tools/export/export_vitpose_onnx.py
+
+# HMR2 ViT (skip if you only ever use --no_imgfeat)
+python tools/export/export_hmr2_onnx.py
+```
+
+Outputs land in `inputs/onnx/`:
+
+| File | Size | Used when |
+|---|---|---|
+| `gem_smpl_denoiser.onnx` (+ `.data`) | ~1.7 GB | default mode |
+| `gem_smpl_denoiser_no_imgfeat.onnx` (+ `.data`) | ~1.7 GB | `--no_imgfeat` |
+| `vitpose_coco17.onnx` | ~2.4 GB | always |
+| `hmr2.onnx` | ~2.4 GB | default mode |
+
+**Note**: each denoiser ONNX bakes in `seq_len=120` from the export trace; `demo_webcam.py --context_frames` must match this value. Re-export with `--seq_len <N>` to change.
+
+## Step 11 — Verify installation
 
 ```bash
 python -c "import gem; print('Installation successful')"
+```
+
+Optional: benchmark per-module latency to confirm GPU EP is active and tune expectations:
+
+```bash
+python tools/benchmark/benchmark_modules.py --no_imgfeat
 ```
