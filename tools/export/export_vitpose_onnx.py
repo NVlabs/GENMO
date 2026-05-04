@@ -42,6 +42,8 @@ def parse_args():
 
 @torch.no_grad()
 def main():
+    import tempfile
+
     args = parse_args()
 
     if not os.path.exists(args.ckpt):
@@ -55,17 +57,33 @@ def main():
     print(f"[Export] Forward OK: heatmaps={tuple(heatmaps.shape)}")
 
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
-    torch.onnx.export(
-        model,
-        (dummy,),
-        args.output,
-        opset_version=args.opset,
-        do_constant_folding=True,
-        input_names=["imgs"],
-        output_names=["heatmaps"],
-        dynamic_axes={"imgs": {0: "B"}, "heatmaps": {0: "B"}},
-    )
-    print(f"[Export] Wrote {args.output}")
+
+    # Export to a tempdir first; ViT-H is >2GB so torch.onnx.export emits many
+    # per-tensor external-data files. We then load and re-save with a single
+    # .onnx.data sidecar so the model is clean on disk and easy to upload.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = str(Path(tmpdir) / "model.onnx")
+        torch.onnx.export(
+            model, (dummy,), tmp_path,
+            opset_version=args.opset,
+            do_constant_folding=True,
+            input_names=["imgs"],
+            output_names=["heatmaps"],
+            dynamic_axes={"imgs": {0: "B"}, "heatmaps": {0: "B"}},
+        )
+
+        import onnx
+        loaded = onnx.load(tmp_path, load_external_data=True)
+        data_filename = Path(args.output).stem + ".onnx.data"
+        onnx.save_model(
+            loaded, args.output,
+            save_as_external_data=True,
+            all_tensors_to_one_file=True,
+            location=data_filename,
+            size_threshold=1024,
+            convert_attribute=False,
+        )
+    print(f"[Export] Wrote {args.output} (+ {Path(args.output).name}.data)")
 
     try:
         import numpy as np

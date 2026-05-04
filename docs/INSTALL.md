@@ -88,9 +88,22 @@ Required only for `--render_mode viser` (web-based 3D world view). The OpenCV me
 uv pip install viser
 ```
 
-### Step 10 — Export ONNX models
+### Step 10 — ONNX models (auto-downloaded)
 
-The webcam demo runs detection, 2D pose, image features, and the GEM denoiser via ONNX Runtime. Three of the four ONNX files are exported from local checkpoints; YOLOX is auto-downloaded from the OpenMMLab CDN on first use.
+The webcam demo loads four ONNX models (denoiser ×2, ViTPose-H COCO-17, HMR2 ViT). On first run, missing models are auto-downloaded from `nvidia/GEM-X` on HuggingFace into `inputs/onnx/`. YOLOX is auto-downloaded from the OpenMMLab CDN.
+
+| File | Size | Used when |
+|---|---|---|
+| `gem_smpl_denoiser.onnx` | ~1.7 GB | default mode (with HMR2 features) |
+| `gem_smpl_denoiser_no_imgfeat.onnx` | ~1.7 GB | `--no_imgfeat` mode |
+| `vitpose_coco17.onnx` (+ `.onnx.data`) | ~2.5 GB | always |
+| `hmr2.onnx` (+ `.onnx.data`) | ~2.7 GB | default mode (skipped under `--no_imgfeat`) |
+
+Total ≈ 8.7 GB. Subsequent runs use the cached files.
+
+#### Re-exporting locally (optional)
+
+If you've fine-tuned a checkpoint or want a different `seq_len`, re-export with the scripts under `tools/export/`:
 
 ```bash
 # GEM-SMPL denoiser — both with-imgfeat and no-imgfeat variants
@@ -100,18 +113,9 @@ python tools/export/export_denoiser_onnx.py --ckpt <path/to/gem_smpl.ckpt> --exp
 # ViTPose-H COCO-17
 python tools/export/export_vitpose_onnx.py
 
-# HMR2 ViT (skip if you only ever use --no_imgfeat)
+# HMR2 ViT
 python tools/export/export_hmr2_onnx.py
 ```
-
-Outputs land in `inputs/onnx/`:
-
-| File | Size | Used when |
-|---|---|---|
-| `gem_smpl_denoiser.onnx` (+ `.data`) | ~1.7 GB | default mode |
-| `gem_smpl_denoiser_no_imgfeat.onnx` (+ `.data`) | ~1.7 GB | `--no_imgfeat` |
-| `vitpose_coco17.onnx` | ~2.4 GB | always |
-| `hmr2.onnx` | ~2.4 GB | default mode |
 
 **Note**: each denoiser ONNX bakes in `seq_len=120` from the export trace; `demo_webcam.py --context_frames` must match this value. Re-export with `--seq_len <N>` to change.
 

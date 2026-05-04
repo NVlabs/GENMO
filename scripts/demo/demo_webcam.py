@@ -106,15 +106,26 @@ else:
 # ---------------------------------------------------------------------------
 
 
-def _run_vitpose_paired(runner, backend, frame_bgr, bbx_xys):
-    """Run ViTPose and return (kp2d, bbx_xys, frame_bgr) as a paired bundle.
+def _run_preproc_paired(
+    vitpose_runner, vitpose_backend,
+    hmr2_runner, hmr2_backend,
+    frame_bgr, bbx_xys, no_imgfeat,
+):
+    """Run ViTPose + (optionally) HMR2 and return a four-tuple paired with inputs.
 
-    All three describe the same logical frame, so the main loop can append
-    them to its sliding windows together — avoiding within-window drift
-    between observation streams in the async pipeline.
+    Returns (kp2d, f_img, bbx_xys, frame_bgr) — all describing the same logical
+    frame so the sliding windows stay self-consistent under async pipelining.
+    Combining the two models into a single future trades a small amount of
+    parallelism (~10 ms on GPU when both are ONNX) for window-level alignment
+    between kp2d, image features, bbox, and the rendered image.
     """
-    kp2d = run_vitpose_single_frame(runner, backend, frame_bgr, bbx_xys)
-    return kp2d, bbx_xys, frame_bgr
+    kp2d = run_vitpose_single_frame(vitpose_runner, vitpose_backend, frame_bgr, bbx_xys)
+    if no_imgfeat or hmr2_runner is None:
+        f_img = torch.zeros(1024)
+    else:
+        frame_rgb = frame_bgr[..., ::-1].copy()
+        f_img = run_hmr2_single_frame(hmr2_runner, hmr2_backend, frame_rgb, bbx_xys)
+    return kp2d, f_img, bbx_xys, frame_bgr
 
 
 def run_denoiser(runner, _backend, batch):
@@ -345,17 +356,12 @@ class WebcamGEMSMPLDemo:
         self._denoiser_executor = ThreadPoolExecutor(max_workers=1) if self._async else None
         self._denoiser_future = None
         self._pending_result = None
-        self._vitpose_executor = ThreadPoolExecutor(max_workers=1) if self._async else None
-        self._vitpose_future = None
-        self._hmr2_executor = (
-            ThreadPoolExecutor(max_workers=1)
-            if (self._async and not self.no_imgfeat) else None
-        )
-        self._hmr2_future = None
-        # Seed so the first async dispatch never has to block on HMR2 inference.
+        # Single preproc future runs ViTPose + (optionally) HMR2 together so
+        # the resulting bundle (kp2d, f_img, bbx_xys, frame_bgr) is paired —
+        # all four describe the same logical frame.
+        self._preproc_executor = ThreadPoolExecutor(max_workers=1) if self._async else None
+        self._preproc_future = None
         self._last_f_img = torch.zeros(1024)
-        # Cached (bbx_xys, frame_bgr) paired with _last_kp2d via the vitpose
-        # future — keeps the window's last entry self-consistent in async mode.
         self._last_bbx_xys = None
         self._last_frame_bgr = None
 
@@ -633,75 +639,55 @@ class WebcamGEMSMPLDemo:
         bbx_xyxy_t[:, [1, 3]] = bbx_xyxy_t[:, [1, 3]].clamp(0, self.height - 1)
         bbx_xys = get_bbx_xys_from_xyxy(bbx_xyxy_t, base_enlarge=1.2)[0]
 
-        # --- 4. ViTPose ---
+        # --- 4. Preproc (ViTPose + HMR2 paired) ---
         t0 = time.perf_counter()
         run_vp_this_frame = (
             self.vitpose_period <= 1
             or self._last_kp2d is None
             or self.frame_index % self.vitpose_period == 0
         )
-        if self._vitpose_future is not None and self._vitpose_future.done():
-            self._last_kp2d, self._last_bbx_xys, self._last_frame_bgr = (
-                self._vitpose_future.result()
-            )
-            self._vitpose_future = None
+        if self._preproc_future is not None and self._preproc_future.done():
+            (self._last_kp2d, self._last_f_img,
+             self._last_bbx_xys, self._last_frame_bgr) = self._preproc_future.result()
+            self._preproc_future = None
 
         if run_vp_this_frame:
-            if self._vitpose_executor is not None and self._last_kp2d is not None:
-                # Async: submit (frame, bbx) for the next logical frame; reuse
-                # the cached bundle for this iteration so window entries stay
-                # paired (kp2d / bbx_xys / frame_bgr all from the same frame).
-                if self._vitpose_future is None:
-                    self._vitpose_future = self._vitpose_executor.submit(
-                        _run_vitpose_paired,
+            if self._preproc_executor is not None and self._last_kp2d is not None:
+                # Async: submit (frame, bbx) for the next logical frame and
+                # reuse the cached bundle for this iteration. All four cached
+                # values come from the same logical frame.
+                if self._preproc_future is None:
+                    self._preproc_future = self._preproc_executor.submit(
+                        _run_preproc_paired,
                         self.vitpose_runner, self.vitpose_backend,
-                        frame_bgr.copy(), bbx_xys.clone(),
+                        self.hmr2_runner, self.hmr2_backend,
+                        frame_bgr.copy(), bbx_xys.clone(), self.no_imgfeat,
                     )
                 kp2d = self._last_kp2d
+                f_img = self._last_f_img
             else:
-                # Sync (or first-frame seed): pair current inputs with output.
-                kp2d = run_vitpose_single_frame(
-                    self.vitpose_runner, self.vitpose_backend, frame_bgr, bbx_xys,
+                # Sync (or first-frame seed): pair current inputs with outputs.
+                kp2d, f_img, _, _ = _run_preproc_paired(
+                    self.vitpose_runner, self.vitpose_backend,
+                    self.hmr2_runner, self.hmr2_backend,
+                    frame_bgr, bbx_xys, self.no_imgfeat,
                 )
                 self._last_kp2d = kp2d
+                self._last_f_img = f_img
                 self._last_bbx_xys = bbx_xys.clone()
                 self._last_frame_bgr = frame_bgr.copy()
         else:
             kp2d = self._last_kp2d
-        timings["vitpose"] = time.perf_counter() - t0
+            f_img = self._last_f_img
+        timings["preproc"] = time.perf_counter() - t0
 
-        # In async mode, replace the "current frame" bbx_xys with the bundle's
-        # bbx so the window's last (kp2d, bbx) entries are from the same frame.
+        # In async mode, replace the "current frame" bbx_xys/frame_bgr with the
+        # bundle's so window entries (kp2d, f_img, bbx) are all from the same frame.
         if self._async and self._last_bbx_xys is not None:
             bbx_xys = self._last_bbx_xys
             frame_bgr_for_render = self._last_frame_bgr
         else:
             frame_bgr_for_render = frame_bgr
-
-        # --- 5. HMR2 (skip when no_imgfeat) ---
-        if self.no_imgfeat:
-            f_img = torch.zeros(1024)
-            timings["hmr2"] = 0.0
-        else:
-            t0 = time.perf_counter()
-            frame_rgb = frame_bgr[..., ::-1].copy()
-            if self._hmr2_executor is not None:
-                # Async path: poll → submit. Reuse cached feature so the main
-                # loop never blocks on HMR2 inference (seeded with zeros at __init__).
-                if self._hmr2_future is not None and self._hmr2_future.done():
-                    self._last_f_img = self._hmr2_future.result()
-                    self._hmr2_future = None
-                if self._hmr2_future is None:
-                    self._hmr2_future = self._hmr2_executor.submit(
-                        run_hmr2_single_frame,
-                        self.hmr2_runner, self.hmr2_backend, frame_rgb, bbx_xys,
-                    )
-                f_img = self._last_f_img
-            else:
-                f_img = run_hmr2_single_frame(
-                    self.hmr2_runner, self.hmr2_backend, frame_rgb, bbx_xys,
-                )
-            timings["hmr2"] = time.perf_counter() - t0
 
         # --- 6. Append windows ---
         self.bbx_xys_window.append(bbx_xys.cpu())
@@ -818,8 +804,7 @@ class WebcamGEMSMPLDemo:
                     print(
                         f"\rWarmup {result['warmup']} | "
                         f"det={t.get('detect', 0)*1000:.0f}ms "
-                        f"vp={t.get('vitpose', 0)*1000:.0f}ms "
-                        f"hm={t.get('hmr2', 0)*1000:.0f}ms "
+                        f"pp={t.get('preproc', 0)*1000:.0f}ms "
                         f"tot={t['total']*1000:.0f}ms",
                         end="",
                     )
@@ -840,8 +825,7 @@ class WebcamGEMSMPLDemo:
                     f"\rFrame {self.frame_index:5d} | "
                     f"FPS {fps:5.1f} (avg {avg_fps:5.1f}) | "
                     f"det={t.get('detect', 0)*1000:4.0f} "
-                    f"vp={t.get('vitpose', 0)*1000:4.0f} "
-                    f"hm={t.get('hmr2', 0)*1000:4.0f} "
+                    f"pp={t.get('preproc', 0)*1000:4.0f} "
                     f"den={t.get('denoiser', 0)*1000:4.0f} "
                     f"dec={t.get('decode', 0)*1000:3.0f} "
                     f"rol={t.get('rollout', 0)*1000:3.0f} "
@@ -856,10 +840,8 @@ class WebcamGEMSMPLDemo:
             self.cap.release()
             if self._denoiser_executor is not None:
                 self._denoiser_executor.shutdown(wait=True, cancel_futures=True)
-            if self._vitpose_executor is not None:
-                self._vitpose_executor.shutdown(wait=True, cancel_futures=True)
-            if self._hmr2_executor is not None:
-                self._hmr2_executor.shutdown(wait=True, cancel_futures=True)
+            if self._preproc_executor is not None:
+                self._preproc_executor.shutdown(wait=True, cancel_futures=True)
             if self._render_queue is not None:
                 self._render_queue.put(None)
             if self._render_proc is not None:

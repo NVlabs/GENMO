@@ -178,12 +178,23 @@ class TRTRunner:
 # ──────────────────────────────────────────────────────────────────────
 
 
+def _try_hf_download(name: str) -> Optional[str]:
+    """Download an ONNX from HuggingFace. Returns local path on success, else None."""
+    try:
+        from gem.utils.hf_utils import download_onnx_model
+        Log.info(f"[HF] Downloading ONNX model '{name}' from HuggingFace ...")
+        return download_onnx_model(name)
+    except Exception as e:
+        Log.warn(f"[HF] Download failed for '{name}': {e}")
+        return None
+
+
 def load_vitpose(
     onnx_path: str = "inputs/onnx/vitpose_coco17.onnx",
     trt_path: str = "outputs/trt/vitpose_coco17.engine",
     ckpt_path: str = "inputs/checkpoints/vitpose/vitpose-h-multi-coco.pth",
 ):
-    """Load 2D pose model (COCO-17). Prefer TRT > ONNX > PyTorch CocoPoseExtractor."""
+    """Load 2D pose model (COCO-17). Prefer TRT > ONNX (auto-DL) > PyTorch fallback."""
     if os.path.exists(trt_path):
         try:
             return TRTRunner(
@@ -193,6 +204,9 @@ def load_vitpose(
             ), "trt"
         except Exception as e:
             Log.warn(f"[TRT] VitPose load failed: {e}")
+
+    if not os.path.exists(onnx_path):
+        _try_hf_download(Path(onnx_path).stem)
 
     if os.path.exists(onnx_path):
         try:
@@ -211,12 +225,16 @@ def load_denoiser(
     trt_path: str = "outputs/trt/gem_smpl_denoiser.engine",
     no_imgfeat: bool = False,
 ):
-    """Load GEM-SMPL denoiser. Prefer TRT > ONNX > None.
+    """Load GEM-SMPL denoiser. Prefer TRT > ONNX (auto-DL) > None.
 
-    When *no_imgfeat* is True, look for the patched no-imgfeat model first.
+    When *no_imgfeat* is True, the patched no-imgfeat variant is loaded.
     """
     if no_imgfeat:
-        nif_onnx = onnx_path.replace("gem_smpl_denoiser.onnx", "gem_smpl_denoiser_no_imgfeat.onnx")
+        nif_onnx = onnx_path.replace(
+            "gem_smpl_denoiser.onnx", "gem_smpl_denoiser_no_imgfeat.onnx"
+        )
+        if not os.path.exists(nif_onnx):
+            _try_hf_download(Path(nif_onnx).stem)
         if os.path.exists(nif_onnx):
             try:
                 return OnnxRunner(nif_onnx), "onnx"
@@ -236,6 +254,9 @@ def load_denoiser(
         except Exception as e:
             Log.warn(f"[TRT] Denoiser load failed: {e}")
 
+    if not os.path.exists(onnx_path):
+        _try_hf_download(Path(onnx_path).stem)
+
     if os.path.exists(onnx_path):
         try:
             return OnnxRunner(onnx_path), "onnx"
@@ -250,7 +271,7 @@ def load_hmr2(
     trt_path: str = "outputs/trt/hmr2.engine",
     ckpt_path: str = "inputs/checkpoints/hmr2/epoch=10-step=25000.ckpt",
 ):
-    """Load HMR2 ViT feature extractor. Prefer TRT > ONNX > PyTorch."""
+    """Load HMR2 ViT feature extractor. Prefer TRT > ONNX (auto-DL) > PyTorch."""
     if os.path.exists(trt_path):
         try:
             return TRTRunner(
@@ -260,6 +281,9 @@ def load_hmr2(
             ), "trt"
         except Exception as e:
             Log.warn(f"[TRT] HMR2 load failed: {e}")
+
+    if not os.path.exists(onnx_path):
+        _try_hf_download(Path(onnx_path).stem)
 
     if os.path.exists(onnx_path):
         try:
