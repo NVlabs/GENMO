@@ -41,7 +41,7 @@ Download them from the GEM-X HuggingFace repository and merge the included
 `inputs/` directory into the repository root:
 
 ```bash
-hf download nvidia/GEM-X \
+huggingface-cli download nvidia/GEM-X \
   --include "gem_smpl/missing_hmr4d_support/**" \
   --local-dir .
 
